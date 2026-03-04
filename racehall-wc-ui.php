@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.0.2
+ * Version: 1.0.3
  * Author: Webkonsulenterne ApS
  */
 
@@ -16,7 +16,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.0.2' );
+define( 'RACEHALL_WC_UI_VERSION', '1.0.3' );
 
 function wk_rh_get_settings_defaults() {
     return [
@@ -673,7 +673,7 @@ add_action('template_redirect', function() {
         if ( file_exists( $template ) ) {
             include $template;
         } else {
-            echo '<p>Custom single product template not found.</p>';
+            echo '<p>' . esc_html__( 'Custom single product template not found.', 'racehall-wc-ui' ) . '</p>';
         }
 
         // Stop further rendering
@@ -764,7 +764,7 @@ function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
 add_filter( 'woocommerce_add_to_cart_validation', 'wk_rh_block_addon_without_parent', 20, 3 );
 function wk_rh_block_addon_without_parent( $passed, $product_id, $quantity ) {
     if ( isset( $_POST['is_addon'] ) && WC()->cart->is_empty() ) {
-        wc_add_notice( __( 'Du skal vælge et race før du kan tilføje add-ons.', 'racehall' ), 'error' );
+        wc_add_notice( __( 'Du skal vælge et race før du kan tilføje add-ons.', 'racehall-wc-ui' ), 'error' );
         return false;
     }
 
@@ -774,7 +774,7 @@ function wk_rh_block_addon_without_parent( $passed, $product_id, $quantity ) {
             : get_post_meta( $product_id, 'bmileisure_id', true );
 
         if ( empty( $mapped_upstream_id ) ) {
-            wc_add_notice( __( 'Dette add-on produkt mangler upstream mapping (bmileisure_id).', 'racehall' ), 'error' );
+            wc_add_notice( __( 'Dette add-on produkt mangler upstream mapping (bmileisure_id).', 'racehall-wc-ui' ), 'error' );
             return false;
         }
     }
@@ -785,8 +785,8 @@ function wk_rh_block_addon_without_parent( $passed, $product_id, $quantity ) {
 add_filter( 'woocommerce_get_item_data', function( $data, $cart_item ) {
     if ( isset( $cart_item['is_addon'] ) ) {
         $data[] = [
-            'name'  => __( 'Type', 'racehall' ),
-            'value' => __( 'Add-on', 'racehall' ),
+            'name'  => __( 'Type', 'racehall-wc-ui' ),
+            'value' => __( 'Add-on', 'racehall-wc-ui' ),
         ];
     }
     return $data;

@@ -24,6 +24,15 @@ if ( ! WC()->cart->is_empty() ) {
 }
 ?>
 
+<script>
+window.RH_CHECKOUT_I18N = {
+    requiredNotice: <?php echo wp_json_encode( __( 'Udfyld venligst alle påkrævede felter og accepter handelsbetingelserne.', 'racehall-wc-ui' ) ); ?>,
+    processing: <?php echo wp_json_encode( __( 'Behandler...', 'racehall-wc-ui' ) ); ?>,
+    codMissing: <?php echo wp_json_encode( __( 'Betal ved ankomst kræver betalingsmetoden COD er aktiv i WooCommerce.', 'racehall-wc-ui' ) ); ?>,
+    payLater: <?php echo wp_json_encode( __( 'Betal ved ankomst', 'racehall-wc-ui' ) ); ?>
+};
+</script>
+
 <div class="container">
 
 <?php if ( ! WC()->cart->is_empty() ) : ?>
@@ -38,7 +47,7 @@ if ( ! WC()->cart->is_empty() ) {
 
 <div class="hero-image">
     <img src="<?php echo esc_url( plugins_url( 'assets/image/3UAKSNLdD3.png', dirname( __FILE__, 2 ) . '/racehall-wc-ui.php' ) ); ?>"
-         alt="Racing Track"
+         alt="<?php echo esc_attr__( 'Racing Track', 'racehall-wc-ui' ); ?>"
          class="hero-img">
 </div>
 
@@ -54,7 +63,7 @@ if ( ! WC()->cart->is_empty() ) {
     <input type="text"
            name="billing_first_name"
            class="form-input"
-           placeholder="Fornavn"
+           placeholder="<?php echo esc_attr__( 'Fornavn', 'racehall-wc-ui' ); ?>"
            value="<?php echo esc_attr( $checkout->get_value('billing_first_name') ); ?>"
            required>
 </div>
@@ -64,7 +73,7 @@ if ( ! WC()->cart->is_empty() ) {
     <input type="text"
            name="billing_last_name"
            class="form-input"
-           placeholder="Efternavn"
+           placeholder="<?php echo esc_attr__( 'Efternavn', 'racehall-wc-ui' ); ?>"
            value="<?php echo esc_attr( $checkout->get_value('billing_last_name') ); ?>"
            required>
 </div>
@@ -74,7 +83,7 @@ if ( ! WC()->cart->is_empty() ) {
     <input type="email"
            name="billing_email"
            class="form-input"
-           placeholder="E-mail"
+           placeholder="<?php echo esc_attr__( 'E-mail', 'racehall-wc-ui' ); ?>"
            value="<?php echo esc_attr( $checkout->get_value('billing_email') ); ?>"
            required>
 </div>
@@ -84,7 +93,7 @@ if ( ! WC()->cart->is_empty() ) {
     <input type="tel"
            name="billing_phone"
            class="form-input"
-           placeholder="Telefon nr."
+           placeholder="<?php echo esc_attr__( 'Telefon nr.', 'racehall-wc-ui' ); ?>"
            value="<?php echo esc_attr( $checkout->get_value('billing_phone') ); ?>"
            required>
 </div>
@@ -94,7 +103,7 @@ if ( ! WC()->cart->is_empty() ) {
     <input type="text"
            name="billing_address_1"
            class="form-input"
-           placeholder="Gade og nr."
+           placeholder="<?php echo esc_attr__( 'Gade og nr.', 'racehall-wc-ui' ); ?>"
            value="<?php echo esc_attr( $checkout->get_value('billing_address_1') ); ?>"
            required>
 </div>
@@ -104,7 +113,7 @@ if ( ! WC()->cart->is_empty() ) {
     <input type="text"
            name="billing_postcode"
            class="form-input"
-           placeholder="Postnummer"
+           placeholder="<?php echo esc_attr__( 'Postnummer', 'racehall-wc-ui' ); ?>"
            value="<?php echo esc_attr( $checkout->get_value('billing_postcode') ); ?>"
            required>
 </div>
@@ -114,7 +123,7 @@ if ( ! WC()->cart->is_empty() ) {
     <input type="text"
            name="billing_city"
            class="form-input"
-           placeholder="By"
+           placeholder="<?php echo esc_attr__( 'By', 'racehall-wc-ui' ); ?>"
            value="<?php echo esc_attr( $checkout->get_value('billing_city') ); ?>"
            required>
 </div>
@@ -144,7 +153,7 @@ if ( ! WC()->cart->is_empty() ) {
 <div class="form-group">
     <textarea name="order_comments"
               class="form-textarea"
-              placeholder="Evt. noter"
+              placeholder="<?php echo esc_attr__( 'Evt. noter', 'racehall-wc-ui' ); ?>"
               rows="6"><?php echo esc_textarea( $checkout->get_value('order_comments') ); ?></textarea>
 </div>
 
@@ -153,7 +162,7 @@ if ( ! WC()->cart->is_empty() ) {
     <div class="checkbox-item">
         <input type="checkbox" name="terms" class="checkbox" required>
         <label class="checkbox-label">
-            Jeg accepterer handelsbetingelserne
+            <?php esc_html_e( 'Jeg accepterer handelsbetingelserne', 'racehall-wc-ui' ); ?>
         </label>
     </div>
 </div>
@@ -167,14 +176,14 @@ if ( ! WC()->cart->is_empty() ) {
 <div class="summary-content">
 
 <div class="summary-section">
-    <h3 class="summary-label">Bane</h3>
+    <h3 class="summary-label"><?php esc_html_e( 'Bane', 'racehall-wc-ui' ); ?></h3>
     <span class="summary-text">
         <?php echo $cart_location ? esc_html( $cart_location ) : '—'; ?>
     </span>
 </div>
 
 <div class="summary-section">
-    <h3 class="summary-label">Produkt</h3>
+    <h3 class="summary-label"><?php esc_html_e( 'Produkt', 'racehall-wc-ui' ); ?></h3>
     <?php foreach ( $cart_items as $cart_item ) :
         $product = $cart_item['data']; ?>
         <span class="summary-text">
@@ -184,7 +193,7 @@ if ( ! WC()->cart->is_empty() ) {
 </div>
 
 <div class="summary-section">
-    <h3 class="summary-label">Antal</h3>
+    <h3 class="summary-label"><?php esc_html_e( 'Antal', 'racehall-wc-ui' ); ?></h3>
     <?php foreach ( $cart_items as $cart_item ) :
         $product  = $cart_item['data'];
         $quantity = $cart_item['quantity'];
@@ -202,18 +211,18 @@ if ( ! WC()->cart->is_empty() ) {
 </div>
 
 <div class="summary-section">
-    <h3 class="summary-label">Dato</h3>
+    <h3 class="summary-label"><?php esc_html_e( 'Dato', 'racehall-wc-ui' ); ?></h3>
     <span class="summary-text"><?php echo esc_html( $date ); ?></span>
 </div>
 
 <div class="summary-section">
-    <h3 class="summary-label">Tidspunkt</h3>
+    <h3 class="summary-label"><?php esc_html_e( 'Tidspunkt', 'racehall-wc-ui' ); ?></h3>
     <span class="summary-text"><?php echo esc_html( $time ); ?></span>
 </div>
 
 <div class="summary-section total-section">
     <div class="total-row">
-        <span class="total-label">Total</span>
+        <span class="total-label"><?php esc_html_e( 'Total', 'racehall-wc-ui' ); ?></span>
         <span class="total-price">
             <?php echo WC()->cart->get_total(); ?>
         </span>
@@ -227,13 +236,13 @@ if ( ! WC()->cart->is_empty() ) {
 
 <!-- Place Order Button -->
 <div class="payment-buttons">
-     <button  type="button" class="payment-button payment-later">Betal ved ankomst</button>
+    <button  type="button" class="payment-button payment-later"><?php esc_html_e( 'Betal ved ankomst', 'racehall-wc-ui' ); ?></button>
     <button type="submit"
             class="payment-button payment-now"
             name="woocommerce_checkout_place_order"
             id="place_order"
-            value="Betal nu">
-        Betal nu
+            value="<?php echo esc_attr__( 'Betal nu', 'racehall-wc-ui' ); ?>">
+        <?php esc_html_e( 'Betal nu', 'racehall-wc-ui' ); ?>
     </button>
 </div>
 
@@ -247,7 +256,7 @@ if ( ! WC()->cart->is_empty() ) {
 </form>
 
 <?php else : ?>
-<p>Din kurv er tom.</p>
+<p><?php esc_html_e( 'Din kurv er tom.', 'racehall-wc-ui' ); ?></p>
 <?php endif; ?>
 
 </div>

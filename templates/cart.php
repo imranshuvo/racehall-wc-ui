@@ -66,20 +66,13 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
 <div class="racehall-cart cart-page">
     <!-- LEFT SECTION -->
     <section class="left">
-        <h1>FULDFØR DIN OPLEVELSE</h1>
-        <p>
-            Løft din oplevelse til næste niveau. Her får du
-            muligheden for at skræddersy dit race, finjustere
-            detaljerne og sætte dit personlige præg på dagen.
-            Uanset om jagten er fart, præcision eller bare den
-            perfekte oplevelse, er dette stedet, hvor du former
-            dit eget løb.
-        </p>
+        <h1><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h1>
+        <p><?php esc_html_e( 'Løft din oplevelse til næste niveau. Her får du muligheden for at skræddersy dit race, finjustere detaljerne og sætte dit personlige præg på dagen. Uanset om jagten er fart, præcision eller bare den perfekte oplevelse, er dette stedet, hvor du former dit eget løb.', 'racehall-wc-ui' ); ?></p>
         <!-- echo all the upsell id -->
 
 
         <div class="trophy">
-            <img src="<?php echo esc_url( plugins_url( 'assets/image/trophy.png', dirname( __FILE__, 2 ) . '/racehall-wc-ui.php' ) ); ?>" alt="Trophy illustration" />
+            <img src="<?php echo esc_url( plugins_url( 'assets/image/trophy.png', dirname( __FILE__, 2 ) . '/racehall-wc-ui.php' ) ); ?>" alt="<?php echo esc_attr__( 'Trophy illustration', 'racehall-wc-ui' ); ?>" />
         </div>
     </section>
 
@@ -87,10 +80,10 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
     <div class="center">
         <section class="addons">
 
-            <h2>ADD ONS </h2>
+            <h2><?php esc_html_e( 'ADD ONS', 'racehall-wc-ui' ); ?></h2>
 
 <div class="">
-    <h4>Add ons</h4>
+    <h4><?php esc_html_e( 'Add ons', 'racehall-wc-ui' ); ?></h4>
     <div class="summary-item">
         <?php if ( ! WC()->cart->is_empty() ) : ?>
             <?php
@@ -131,10 +124,10 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
                                 <input type="hidden" name="is_addon" value="1">
                                 <input type="hidden" name="parent_racehall_product" value="<?php echo esc_attr( $main_product_id ); ?>">
                                 <input type="hidden" name="booking_location" value="<?php echo esc_attr( $cart_location ); ?>">
-                                <button type="submit" class="btn secondary">Tilføj add-on</button>
+                                <button type="submit" class="btn secondary"><?php esc_html_e( 'Tilføj add-on', 'racehall-wc-ui' ); ?></button>
                             </form>
                         <?php else : ?>
-                            <span class="summary-label" style="display:block;margin-top:6px;">Ikke mappet til Woo produkt</span>
+                            <span class="summary-label" style="display:block;margin-top:6px;"><?php esc_html_e( 'Ikke mappet til Woo produkt', 'racehall-wc-ui' ); ?></span>
                         <?php endif; ?>
                     </div>
                 <?php }
@@ -176,7 +169,7 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
 
                             <div>
                                 <div class="counter">
-                                    <button type="button" class="qty-decrease" aria-label="Decrease">-</button>
+                                    <button type="button" class="qty-decrease" aria-label="<?php echo esc_attr__( 'Decrease', 'racehall-wc-ui' ); ?>">-</button>
 
                                     <input type="number"
                                            class="qty-input"
@@ -185,7 +178,7 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
                                            min="0"
                                            max="<?php echo esc_attr( $_product->get_max_purchase_quantity() ); ?>">
 
-                                    <button type="button" class="qty-increase" aria-label="Increase">+</button>
+                                    <button type="button" class="qty-increase" aria-label="<?php echo esc_attr__( 'Increase', 'racehall-wc-ui' ); ?>">+</button>
                                 </div>
 
                                 <a href="<?php echo esc_url( wc_get_cart_remove_url( $cart_item_key ) ); ?>" class="remove-item" aria-label="<?php esc_attr_e( 'Fjern dette produkt', 'racehall-wc-ui' ); ?>">×</a>
@@ -204,36 +197,36 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
     <aside class="summary">
         <div class="box">
             <div class="summary-section">
-                <h4>Bane</h4>
+                <h4><?php esc_html_e( 'Bane', 'racehall-wc-ui' ); ?></h4>
                 <div class="summary-item">
                     <span class="summary-label">  <?php echo $cart_location ? esc_html( $cart_location ) : '—'; ?></span>
                 </div>
             </div>
 
             <div class="summary-section">
-                <h4>Produkt</h4>
+                <h4><?php esc_html_e( 'Produkt', 'racehall-wc-ui' ); ?></h4>
                 <div class="summary-item">
                     <span class="summary-label"><?php echo esc_html( implode( ', ', array_map( function( $item ){ return $item['data']->get_name(); }, WC()->cart->get_cart() ) ) ?: '—' ); ?></span>
                 </div>
             </div>
 
             <div class="summary-section">
-                <h4>Pris</h4>
+                <h4><?php esc_html_e( 'Pris', 'racehall-wc-ui' ); ?></h4>
                 <div class="summary-item">
                     <span class="summary-label"><?php echo WC()->cart->get_cart_subtotal(); ?></span>
                 </div>
             </div>
 
             <div class="summary-section addon-section">
-                <h4>Add ons</h4>
+                <h4><?php esc_html_e( 'Add ons', 'racehall-wc-ui' ); ?></h4>
                 <div class="summary-item">
-                    <span class="summary-label">Se add-ons ovenfor</span>
+                    <span class="summary-label"><?php esc_html_e( 'Se add-ons ovenfor', 'racehall-wc-ui' ); ?></span>
                 </div>
             </div>
 
             <div class="summary-total">
                 <div class="total-item">
-                    <span class="total-label">Total</span>
+                    <span class="total-label"><?php esc_html_e( 'Total', 'racehall-wc-ui' ); ?></span>
                     <span class="total-price"><?php echo wc_price( WC()->cart->get_total( 'edit' ) ); ?></span>
                 </div>
             </div>
@@ -242,7 +235,7 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
                 <button type="submit" name="update_cart" form="racehall-cart-form" class="btn primary update-cart-button"><?php esc_html_e( 'Opdater kurv', 'racehall-wc-ui' ); ?></button>
             </div>
 
-            <a href="<?php echo esc_url( wc_get_checkout_url() ); ?>" class="btn secondary">Fortsæt til betaling</a>
+            <a href="<?php echo esc_url( wc_get_checkout_url() ); ?>" class="btn secondary"><?php esc_html_e( 'Fortsæt til betaling', 'racehall-wc-ui' ); ?></a>
         </div>
     </aside>
 </div>

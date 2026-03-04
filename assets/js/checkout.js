@@ -2,6 +2,12 @@
     'use strict';
 
     document.addEventListener('DOMContentLoaded', function () {
+        const i18n = window.RH_CHECKOUT_I18N || {};
+        const requiredNotice = i18n.requiredNotice || '';
+        const processingText = i18n.processing || '';
+        const codMissingNotice = i18n.codMissing || '';
+        const payLaterText = i18n.payLater || '';
+
         const payLaterBtn = document.querySelector('.payment-button.payment-later');
         if (!payLaterBtn) return;
 
@@ -30,19 +36,19 @@
             }
 
             if (!valid) {
-                showNotice('Udfyld venligst alle påkrævede felter og accepter handelsbetingelserne.', 'error');
+                showNotice(requiredNotice, 'error');
                 return;
             }
 
             // --- Disable button & submit through Woo checkout using COD ---
             payLaterBtn.disabled = true;
-            payLaterBtn.textContent = 'Behandler...';
+            payLaterBtn.textContent = processingText;
 
             const codInput = form.querySelector('input[name="payment_method"][value="cod"]');
             if (!codInput) {
-                showNotice('Betal ved ankomst kræver betalingsmetoden COD er aktiv i WooCommerce.', 'error');
+                showNotice(codMissingNotice, 'error');
                 payLaterBtn.disabled = false;
-                payLaterBtn.textContent = 'Betal ved ankomst';
+                payLaterBtn.textContent = payLaterText;
                 return;
             }
 

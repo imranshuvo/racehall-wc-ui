@@ -289,13 +289,19 @@ function updateSummaryPeople() {
     const total = getTotalQuantity()
 
     const peopleEl = document.getElementById('summary-people')
+    const i18n = window.RH_I18N || {}
+    const adultsLabel = i18n.adultsLabel || ''
+    const childrenLabel = i18n.childrenLabel || ''
+    const adultKartLabel = i18n.adultKartLabel || ''
+    const childKartLabel = i18n.childKartLabel || ''
+
     if (peopleEl) {
-        peopleEl.innerHTML = `${counts.adults} voksne<br>${counts.children} børn`
+        peopleEl.innerHTML = `${counts.adults} ${adultsLabel}<br>${counts.children} ${childrenLabel}`
     }
 
     const kartsEl = document.getElementById('summary-karts')
     if (kartsEl) {
-        kartsEl.innerHTML = `${counts.adults} voksen karts<br>${counts.children} børne kart`
+        kartsEl.innerHTML = `${counts.adults} ${adultKartLabel}<br>${counts.children} ${childKartLabel}`
     }
 
     const adultsInput = document.getElementById('booking_adults')
@@ -312,10 +318,11 @@ function updateSummaryPeople() {
 
 // --- Calendar and Timeslot Logic ---
 
-const monthNames = [
-    "Januar", "Februar", "Mars", "April", "Mai", "Juni",
-    "Juli", "August", "September", "Oktober", "November", "Desember"
-]
+const monthNames = (window.RH_I18N && Array.isArray(window.RH_I18N.monthNames) && window.RH_I18N.monthNames.length === 12)
+    ? window.RH_I18N.monthNames
+    : Array.from({ length: 12 }, (_, monthIndex) =>
+        new Intl.DateTimeFormat(undefined, { month: 'long' }).format(new Date(2020, monthIndex, 1))
+    )
 
 let today = new Date()
 let todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate())
@@ -341,19 +348,8 @@ function formatDateShort(date) {
     return `${dd}.${mm}.${yy}`
 }
 
-function findSummaryLabelByTitle(titleText) {
-    const sections = document.querySelectorAll('.summary-section')
-    for (const sec of sections) {
-        const h4 = sec.querySelector('h4')
-        if (h4 && h4.textContent.trim().toLowerCase().includes(titleText.toLowerCase())) {
-            return sec.querySelector('.summary-label')
-        }
-    }
-    return null
-}
-
 function updateSummaryDate(date) {
-    const label = findSummaryLabelByTitle('Dato')
+    const label = document.getElementById('summary-date')
     if (!label) return
     if (date && !isPastDate(date)) {
         label.textContent = formatDateShort(date)
@@ -366,7 +362,7 @@ function updateSummaryDate(date) {
 }
 
 function updateSummaryTime(timeStr) {
-    const label = findSummaryLabelByTitle('Tidspunkt')
+    const label = document.getElementById('summary-time')
     if (!label) return
     label.textContent = timeStr || ''
 

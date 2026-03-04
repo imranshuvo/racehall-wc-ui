@@ -54,6 +54,28 @@ window.RH_PRICE_CONFIG = {
     decimalSeparator: <?php echo wp_json_encode( wc_get_price_decimal_separator() ); ?>,
     thousandSeparator: <?php echo wp_json_encode( wc_get_price_thousand_separator() ); ?>
 };
+window.RH_I18N = {
+    adultsLabel: <?php echo wp_json_encode( __( 'voksne', 'racehall-wc-ui' ) ); ?>,
+    childrenLabel: <?php echo wp_json_encode( __( 'børn', 'racehall-wc-ui' ) ); ?>,
+    adultKartLabel: <?php echo wp_json_encode( __( 'voksen karts', 'racehall-wc-ui' ) ); ?>,
+    childKartLabel: <?php echo wp_json_encode( __( 'børne kart', 'racehall-wc-ui' ) ); ?>,
+    monthNames: <?php echo wp_json_encode( [
+        __( 'Januar', 'racehall-wc-ui' ),
+        __( 'Februar', 'racehall-wc-ui' ),
+        __( 'Mars', 'racehall-wc-ui' ),
+        __( 'April', 'racehall-wc-ui' ),
+        __( 'Mai', 'racehall-wc-ui' ),
+        __( 'Juni', 'racehall-wc-ui' ),
+        __( 'Juli', 'racehall-wc-ui' ),
+        __( 'August', 'racehall-wc-ui' ),
+        __( 'September', 'racehall-wc-ui' ),
+        __( 'Oktober', 'racehall-wc-ui' ),
+        __( 'November', 'racehall-wc-ui' ),
+        __( 'Desember', 'racehall-wc-ui' ),
+    ] ); ?>,
+    summaryDateTitle: <?php echo wp_json_encode( __( 'Dato', 'racehall-wc-ui' ) ); ?>,
+    summaryTimeTitle: <?php echo wp_json_encode( __( 'Tidspunkt', 'racehall-wc-ui' ) ); ?>
+};
 </script>
 
 <!-- Main Content -->
@@ -140,9 +162,7 @@ window.RH_PRICE_CONFIG = {
                 <h1 class="product-title"><?php echo $product->get_title(); ?></h1>
 
                 <div class="product-description">
-                    <p>F1 Race er et løb af en halv times varighed, hvor banen er reserveret kun til jer. De første 10
-                        minutter udgør en kvalifikationsrunde, hvor den hurtigste omgangstid tæller. Vinderen er den
-                        deltager, der kører flest omgange og krydser målstregen først efter cirka 20 minutter.</p>
+                    <p><?php esc_html_e( 'F1 Race er et løb af en halv times varighed, hvor banen er reserveret kun til jer. De første 10 minutter udgør en kvalifikationsrunde, hvor den hurtigste omgangstid tæller. Vinderen er den deltager, der kører flest omgange og krydser målstregen først efter cirka 20 minutter.', 'racehall-wc-ui' ); ?></p>
                 </div>
 
                 <div class="product-details">
@@ -161,21 +181,21 @@ window.RH_PRICE_CONFIG = {
                         ?>
                         <?php if ( $lokation ) : ?>
                         <div class="detail-item">
-                            <span class="detail-label">Lokation:</span>
+                            <span class="detail-label"><?php esc_html_e( 'Lokation:', 'racehall-wc-ui' ); ?></span>
                             <span class="detail-value"><?php echo esc_html( $lokation ); ?></span>
                         </div>
                         <?php endif; ?>
 
                         <?php if ( $event_tid ) : ?>
                         <div class="detail-item">
-                            <span class="detail-label">Event tid:</span>
+                            <span class="detail-label"><?php esc_html_e( 'Event tid:', 'racehall-wc-ui' ); ?></span>
                             <span class="detail-value"><?php echo esc_html( $event_tid ); ?></span>
                         </div>
                         <?php endif; ?>
 
                         <?php if ( $banetid ) : ?>
                         <div class="detail-item">
-                            <span class="detail-label">Banetid:</span>
+                            <span class="detail-label"><?php esc_html_e( 'Banetid:', 'racehall-wc-ui' ); ?></span>
                             <span class="detail-value"><?php echo esc_html( $banetid ); ?></span>
                         </div>
                         <?php endif; ?>
@@ -193,14 +213,14 @@ window.RH_PRICE_CONFIG = {
                         ?>
                         <?php if ( $alder ) : ?>
                         <div class="detail-item">
-                            <span class="detail-label">Alder:</span>
+                            <span class="detail-label"><?php esc_html_e( 'Alder:', 'racehall-wc-ui' ); ?></span>
                             <span class="detail-value"><?php echo esc_html( $alder ); ?></span>
                         </div>
                         <?php endif; ?>
 
                         <?php if ( $hojde ) : ?>
                         <div class="detail-item">
-                            <span class="detail-label">Højde:</span>
+                            <span class="detail-label"><?php esc_html_e( 'Højde:', 'racehall-wc-ui' ); ?></span>
                             <span class="detail-value"><?php echo esc_html( $hojde ); ?></span>
                         </div>
                         <?php endif; ?>
@@ -218,7 +238,7 @@ window.RH_PRICE_CONFIG = {
                 <!-- DATE -->
                 <div class="accordion-item active">
                     <div class="accordion-header">
-                        <span>Dato</span>
+                        <span><?php esc_html_e( 'Dato', 'racehall-wc-ui' ); ?></span>
                         <div class="chevron">
                             <svg width="16" height="9" viewBox="0 0 16 9" fill="none"
                                  xmlns="http://www.w3.org/2000/svg">
@@ -237,13 +257,13 @@ window.RH_PRICE_CONFIG = {
                             </div>
 
                             <div class="weekdays">
-                                <span>Ma</span>
-                                <span>Ti</span>
-                                <span>On</span>
-                                <span>To</span>
-                                <span>Fe</span>
-                                <span>Lø</span>
-                                <span>Sø</span>
+                                <span><?php esc_html_e( 'Ma', 'racehall-wc-ui' ); ?></span>
+                                <span><?php esc_html_e( 'Ti', 'racehall-wc-ui' ); ?></span>
+                                <span><?php esc_html_e( 'On', 'racehall-wc-ui' ); ?></span>
+                                <span><?php esc_html_e( 'To', 'racehall-wc-ui' ); ?></span>
+                                <span><?php esc_html_e( 'Fe', 'racehall-wc-ui' ); ?></span>
+                                <span><?php esc_html_e( 'Lø', 'racehall-wc-ui' ); ?></span>
+                                <span><?php esc_html_e( 'Sø', 'racehall-wc-ui' ); ?></span>
 
                             </div>
 
@@ -256,7 +276,7 @@ window.RH_PRICE_CONFIG = {
                 <!-- PEOPLE -->
                 <div class="accordion-item active">
                     <div class="accordion-header">
-                        <span>Antal personer</span>
+                        <span><?php esc_html_e( 'Antal personer', 'racehall-wc-ui' ); ?></span>
                         <div class="chevron">
                             <svg width="16" height="9" viewBox="0 0 16 9" fill="none"
                                  xmlns="http://www.w3.org/2000/svg">
@@ -270,8 +290,8 @@ window.RH_PRICE_CONFIG = {
                         <div class="counter">
                             <div class="counter-row">
                                 <div class="counter-label">
-                                    <strong>Voksne</strong>
-                                    <small>18 år eller over.</small>
+                                    <strong><?php esc_html_e( 'Voksne', 'racehall-wc-ui' ); ?></strong>
+                                    <small><?php esc_html_e( '18 år eller over.', 'racehall-wc-ui' ); ?></small>
                                 </div>
                                 <div class="counter-controls">
                                     <button onclick="updateCount('adult-1', -1)">−</button>
@@ -282,8 +302,8 @@ window.RH_PRICE_CONFIG = {
 
                             <div class="counter-row">
                                 <div class="counter-label">
-                                    <strong>Børn</strong>
-                                    <small>5–17 år.</small>
+                                    <strong><?php esc_html_e( 'Børn', 'racehall-wc-ui' ); ?></strong>
+                                    <small><?php esc_html_e( '5–17 år.', 'racehall-wc-ui' ); ?></small>
                                 </div>
                                 <div class="counter-controls">
                                     <button onclick="updateCount('child-1', -1)">−</button>
@@ -299,7 +319,7 @@ window.RH_PRICE_CONFIG = {
                 <!-- EMPTY ACCORDIONS -->
                 <div class="accordion-item">
                     <div class="accordion-header">
-                        <span>Vælg kort</span>
+                        <span><?php esc_html_e( 'Vælg kort', 'racehall-wc-ui' ); ?></span>
                         <div class="chevron">
                             <svg width="16" height="9" viewBox="0 0 16 9" fill="none"
                                  xmlns="http://www.w3.org/2000/svg">
@@ -309,13 +329,13 @@ window.RH_PRICE_CONFIG = {
                         </div>
                     </div>
                     <div class="accordion-content">
-                        <span class="summary-label">Vælg kort kommer snart.</span>
+                        <span class="summary-label"><?php esc_html_e( 'Vælg kort kommer snart.', 'racehall-wc-ui' ); ?></span>
                     </div>
                 </div>
 
                 <div class="accordion-item">
                     <div class="accordion-header">
-                        <span>Tidspunkt</span>
+                        <span><?php esc_html_e( 'Tidspunkt', 'racehall-wc-ui' ); ?></span>
                         <div class="chevron">
                             <svg width="16" height="9" viewBox="0 0 16 9" fill="none"
                                  xmlns="http://www.w3.org/2000/svg">
@@ -334,7 +354,7 @@ window.RH_PRICE_CONFIG = {
                 </div>
                 <div class="accordion-item">
                     <div class="accordion-header">
-                        <span>Bane</span>
+                        <span><?php esc_html_e( 'Bane', 'racehall-wc-ui' ); ?></span>
                         <div class="chevron">
                             <svg width="16" height="9" viewBox="0 0 16 9" fill="none"
                                  xmlns="http://www.w3.org/2000/svg">
@@ -346,24 +366,24 @@ window.RH_PRICE_CONFIG = {
                     <div class="accordion-content">
                         <div class="booking-s">
                             <div class="summary-section">
-                                <h4>Bane</h4>
+                                <h4><?php esc_html_e( 'Bane', 'racehall-wc-ui' ); ?></h4>
                                 <div class="summary-item">
                                     <span class="summary-label"><?php echo $lokation; ?></span>
                                 </div>
                             </div>
 
                             <div class="summary-section">
-                                <h4>Produkt</h4>
+                                <h4><?php esc_html_e( 'Produkt', 'racehall-wc-ui' ); ?></h4>
                                 <div class="summary-item">
                                     <span class="summary-label"><?php echo $product->get_title(); ?></span>
                                 </div>
                             </div>
 
                             <div class="summary-section">
-                                <h4>Antal</h4>
+                                <h4><?php esc_html_e( 'Antal', 'racehall-wc-ui' ); ?></h4>
                                 <div class="summary-item">
                                     <div class="summary-details">
-                                        <span id="summary-people" class="summary-label">1 voksen<br>0 børn</span>
+                                        <span id="summary-people" class="summary-label"><?php echo wp_kses_post( __( '1 voksen<br>0 børn', 'racehall-wc-ui' ) ); ?></span>
                                         <div class="summary-prices">
                                             <span class="price">
                                             <!-- product price -->
@@ -376,30 +396,30 @@ window.RH_PRICE_CONFIG = {
                             </div>
 
                             <div class="summary-section">
-                                <h4>Karts</h4>
+                                <h4><?php esc_html_e( 'Karts', 'racehall-wc-ui' ); ?></h4>
                                 <div class="summary-item">
-                                    <span id="summary-karts" class="summary-label">1 voksen kart<br>0 børne kart</span>
+                                    <span id="summary-karts" class="summary-label"><?php echo wp_kses_post( __( '1 voksen kart<br>0 børne kart', 'racehall-wc-ui' ) ); ?></span>
                                 </div>
                             </div>
 
                             <div class="summary-section">
-                                <h4>Dato</h4>
+                                <h4><?php esc_html_e( 'Dato', 'racehall-wc-ui' ); ?></h4>
                                 <div class="summary-item">
-                                    <span class="summary-label"></span>
+                                    <span id="summary-date" class="summary-label"></span>
                                 </div>
                             </div>
 
                             <div class="summary-section">
-                                <h4>Tidspunkt</h4>
+                                <h4><?php esc_html_e( 'Tidspunkt', 'racehall-wc-ui' ); ?></h4>
                                 <div class="summary-item">
-                                    <span class="summary-label"></span>
+                                    <span id="summary-time" class="summary-label"></span>
                                 </div>
                             </div>
 
 
 
                             <div class="summary-section addon-section" id="addonSection">
-                                <h4>Add ons</h4>
+                                <h4><?php esc_html_e( 'Add ons', 'racehall-wc-ui' ); ?></h4>
                                 <div class="summary-item" id="addonSummaryItems">
                                     <span class="summary-label">—</span>
                                 </div>
@@ -407,7 +427,7 @@ window.RH_PRICE_CONFIG = {
 
                             <div class="summary-total">
                                 <div class="total-item">
-                                    <span class="total-label">Total</span>
+                                    <span class="total-label"><?php esc_html_e( 'Total', 'racehall-wc-ui' ); ?></span>
                                     <span class="total-price" id="summary-total-price">
                                         <?php echo wc_price( $product->get_price() ); ?>
                                     </span>
@@ -425,7 +445,7 @@ window.RH_PRICE_CONFIG = {
                                         <input type="hidden" name="quantity" id="cart_quantity" value="1" />
                                         <!-- Optional booking meta (populated by JS) -->
 
-                                        <button type="submit" class="single_add_to_cart_button button alt add-to-cart-button">Tilføj til kurv</button>
+                                        <button type="submit" class="single_add_to_cart_button button alt add-to-cart-button"><?php esc_html_e( 'Tilføj til kurv', 'racehall-wc-ui' ); ?></button>
                                     </form>
                             <!-- <button class="add-to-cart-button">Tilføj til kurv</button> -->
                         </div>
