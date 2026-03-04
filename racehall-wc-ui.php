@@ -14,12 +14,12 @@ define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
 
 function wk_rh_get_settings_defaults() {
     return [
-        'environment'      => 'test',
-        'test_base_url'    => 'https://testbmiapigateway.azure-api.net',
-        'live_base_url'    => 'https://api.bmileisure.com',
-        'accept_language'  => 'en',
-        'default_location' => '',
-        'locations_json'   => '[]',
+        'environment'         => 'test',
+        'test_base_url'       => 'https://testbmiapigateway.azure-api.net',
+        'live_base_url'       => 'https://api.bmileisure.com',
+        'accept_language'     => 'en',
+        'test_locations_json' => '[]',
+        'live_locations_json' => '[]',
     ];
 }
 
@@ -28,12 +28,30 @@ function wk_rh_get_settings() {
     if ( ! is_array( $saved ) ) {
         $saved = [];
     }
-    return wp_parse_args( $saved, wk_rh_get_settings_defaults() );
+
+    $settings = wp_parse_args( $saved, wk_rh_get_settings_defaults() );
+
+    $legacy_json = trim( (string) ( $settings['locations_json'] ?? '' ) );
+    if ( $legacy_json !== '' && $legacy_json !== '[]' ) {
+        $test_json = trim( (string) ( $settings['test_locations_json'] ?? '' ) );
+        $live_json = trim( (string) ( $settings['live_locations_json'] ?? '' ) );
+
+        if ( $test_json === '' || $test_json === '[]' ) {
+            $settings['test_locations_json'] = $legacy_json;
+        }
+        if ( $live_json === '' || $live_json === '[]' ) {
+            $settings['live_locations_json'] = $legacy_json;
+        }
+    }
+
+    return $settings;
 }
 
 function wk_rh_get_location_profiles() {
     $settings = wk_rh_get_settings();
-    $json     = isset( $settings['locations_json'] ) ? trim( (string) $settings['locations_json'] ) : '[]';
+    $env      = isset( $settings['environment'] ) && $settings['environment'] === 'live' ? 'live' : 'test';
+    $json_key = $env === 'live' ? 'live_locations_json' : 'test_locations_json';
+    $json     = isset( $settings[ $json_key ] ) ? trim( (string) $settings[ $json_key ] ) : '[]';
     $profiles = json_decode( $json, true );
 
     if ( ! is_array( $profiles ) ) {
@@ -71,22 +89,33 @@ function wk_rh_get_effective_location_name( $location = '' ) {
         }
     }
 
-    $settings = wk_rh_get_settings();
-    return sanitize_text_field( $settings['default_location'] ?? '' );
+    return '';
 }
 
 function wk_rh_get_location_profile( $location = '' ) {
     $profiles      = wk_rh_get_location_profiles();
     $location_name = wk_rh_get_effective_location_name( $location );
 
+    if ( $location_name === '' ) {
+        if ( function_exists( 'wk_rh_log_upstream_event' ) ) {
+            wk_rh_log_upstream_event( 'error', 'No booking location supplied for credential resolution', [
+                'operation' => 'resolve_location_profile',
+            ] );
+        }
+
+        return [
+            'location'         => '',
+            'client_key'       => '',
+            'subscription_key' => '',
+            'username'         => '',
+            'password'         => '',
+        ];
+    }
+
     foreach ( $profiles as $profile ) {
         if ( ! empty( $profile['location'] ) && strcasecmp( $profile['location'], $location_name ) === 0 ) {
             return $profile;
         }
-    }
-
-    if ( $location_name === '' && ! empty( $profiles ) ) {
-        return $profiles[0];
     }
 
     if ( $location_name !== '' && function_exists( 'wk_rh_log_upstream_event' ) ) {
@@ -134,24 +163,33 @@ function wk_rh_get_api_credentials( $location = '' ) {
     ];
 }
 
+function wk_rh_sanitize_locations_json( $raw_json, $error_key ) {
+    $json = trim( (string) $raw_json );
+    if ( $json === '' ) {
+        $json = '[]';
+    }
+
+    $parsed = json_decode( $json, true );
+    if ( ! is_array( $parsed ) ) {
+        add_settings_error( 'wk_rh_settings', $error_key, __( 'Location credentials JSON is invalid. Saved as empty list.', 'onsite-booking-system' ), 'error' );
+        return '[]';
+    }
+
+    return $json;
+}
+
 function wk_rh_sanitize_settings( $input ) {
     $defaults = wk_rh_get_settings_defaults();
     $input    = is_array( $input ) ? $input : [];
 
     $sanitized = [
-        'environment'      => in_array( $input['environment'] ?? 'test', [ 'test', 'live' ], true ) ? $input['environment'] : 'test',
-        'test_base_url'    => esc_url_raw( $input['test_base_url'] ?? $defaults['test_base_url'] ),
-        'live_base_url'    => esc_url_raw( $input['live_base_url'] ?? $defaults['live_base_url'] ),
-        'accept_language'  => sanitize_text_field( $input['accept_language'] ?? 'en' ),
-        'default_location' => sanitize_text_field( $input['default_location'] ?? '' ),
-        'locations_json'   => trim( (string) ( $input['locations_json'] ?? '[]' ) ),
+        'environment'         => in_array( $input['environment'] ?? 'test', [ 'test', 'live' ], true ) ? $input['environment'] : 'test',
+        'test_base_url'       => esc_url_raw( $input['test_base_url'] ?? $defaults['test_base_url'] ),
+        'live_base_url'       => esc_url_raw( $input['live_base_url'] ?? $defaults['live_base_url'] ),
+        'accept_language'     => sanitize_text_field( $input['accept_language'] ?? 'en' ),
+        'test_locations_json' => wk_rh_sanitize_locations_json( $input['test_locations_json'] ?? '[]', 'wk_rh_test_locations_json_invalid' ),
+        'live_locations_json' => wk_rh_sanitize_locations_json( $input['live_locations_json'] ?? '[]', 'wk_rh_live_locations_json_invalid' ),
     ];
-
-    $parsed = json_decode( $sanitized['locations_json'], true );
-    if ( ! is_array( $parsed ) ) {
-        $sanitized['locations_json'] = '[]';
-        add_settings_error( 'wk_rh_settings', 'wk_rh_locations_json_invalid', __( 'Locations JSON is invalid. Saved as empty list.', 'onsite-booking-system' ), 'error' );
-    }
 
     return $sanitized;
 }
@@ -197,13 +235,18 @@ function wk_rh_render_settings_page() {
                     <td><input class="regular-text" type="text" id="wk_rh_accept_language" name="wk_rh_settings[accept_language]" value="<?php echo esc_attr( $settings['accept_language'] ); ?>"></td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="wk_rh_default_location"><?php esc_html_e( 'Default Location', 'onsite-booking-system' ); ?></label></th>
-                    <td><input class="regular-text" type="text" id="wk_rh_default_location" name="wk_rh_settings[default_location]" value="<?php echo esc_attr( $settings['default_location'] ); ?>"></td>
+                    <th scope="row"><label for="wk_rh_test_locations_json"><?php esc_html_e( 'Test Location Credential Map (JSON)', 'onsite-booking-system' ); ?></label></th>
+                    <td>
+                        <textarea class="large-text code" rows="12" id="wk_rh_test_locations_json" name="wk_rh_settings[test_locations_json]"><?php echo esc_textarea( $settings['test_locations_json'] ?? '[]' ); ?></textarea>
+                        <p class="description">
+                            <?php esc_html_e( 'Used only when Environment = Test.', 'onsite-booking-system' ); ?>
+                        </p>
+                    </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="wk_rh_locations_json"><?php esc_html_e( 'Location Credential Map (JSON)', 'onsite-booking-system' ); ?></label></th>
+                    <th scope="row"><label for="wk_rh_live_locations_json"><?php esc_html_e( 'Live Location Credential Map (JSON)', 'onsite-booking-system' ); ?></label></th>
                     <td>
-                        <textarea class="large-text code" rows="14" id="wk_rh_locations_json" name="wk_rh_settings[locations_json]"><?php echo esc_textarea( $settings['locations_json'] ); ?></textarea>
+                        <textarea class="large-text code" rows="12" id="wk_rh_live_locations_json" name="wk_rh_settings[live_locations_json]"><?php echo esc_textarea( $settings['live_locations_json'] ?? '[]' ); ?></textarea>
                         <p class="description">
                             <?php esc_html_e( 'Format: [{"location":"Copenhagen","client_key":"...","subscription_key":"...","username":"...","password":"..."}]', 'onsite-booking-system' ); ?>
                         </p>
@@ -212,6 +255,33 @@ function wk_rh_render_settings_page() {
             </table>
             <?php submit_button(); ?>
         </form>
+        <script>
+            (function () {
+                var envSelect = document.getElementById('wk_rh_environment');
+                var testArea = document.getElementById('wk_rh_test_locations_json');
+                var liveArea = document.getElementById('wk_rh_live_locations_json');
+
+                if (!envSelect || !testArea || !liveArea) {
+                    return;
+                }
+
+                var testRow = testArea.closest('tr');
+                var liveRow = liveArea.closest('tr');
+
+                function refreshRows() {
+                    var env = envSelect.value;
+                    if (testRow) {
+                        testRow.style.opacity = env === 'test' ? '1' : '0.55';
+                    }
+                    if (liveRow) {
+                        liveRow.style.opacity = env === 'live' ? '1' : '0.55';
+                    }
+                }
+
+                envSelect.addEventListener('change', refreshRows);
+                refreshRows();
+            })();
+        </script>
     </div>
     <?php
 }
