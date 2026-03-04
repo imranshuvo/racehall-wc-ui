@@ -316,23 +316,6 @@ window.RH_I18N = {
                     </div>
                 </div>
 
-                <!-- EMPTY ACCORDIONS -->
-                <div class="accordion-item">
-                    <div class="accordion-header">
-                        <span><?php esc_html_e( 'Vælg kort', 'racehall-wc-ui' ); ?></span>
-                        <div class="chevron">
-                            <svg width="16" height="9" viewBox="0 0 16 9" fill="none"
-                                 xmlns="http://www.w3.org/2000/svg">
-                                <path d="M0.353516 0.353516L7.85352 7.85352L15.3535 0.353516" stroke="#D9D9D9"/>
-                            </svg>
-
-                        </div>
-                    </div>
-                    <div class="accordion-content">
-                        <span class="summary-label"><?php esc_html_e( 'Vælg kort kommer snart.', 'racehall-wc-ui' ); ?></span>
-                    </div>
-                </div>
-
                 <div class="accordion-item">
                     <div class="accordion-header">
                         <span><?php esc_html_e( 'Tidspunkt', 'racehall-wc-ui' ); ?></span>

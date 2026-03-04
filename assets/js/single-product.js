@@ -184,6 +184,66 @@ function applyCountsToUI(counts) {
     if (childrenEl) childrenEl.textContent = String(Math.max(0, counts.children))
 }
 
+function setNumericInputRules(input, rule, value, fallbackMin = 0) {
+    if (!input) return
+
+    const min = parseRuleNumber(rule && rule.min, fallbackMin)
+    const max = parseRuleNumber(rule && rule.max, null)
+    const step = parseRuleNumber(rule && rule.step, 1)
+
+    input.setAttribute('min', String(min))
+    input.setAttribute('step', String(step > 0 ? step : 1))
+    if (max !== null) {
+        input.setAttribute('max', String(max))
+    } else {
+        input.removeAttribute('max')
+    }
+
+    input.value = String(value)
+}
+
+function updateCounterButtonStates(counts) {
+    const adultValueEl = document.getElementById('adult-1')
+    const childValueEl = document.getElementById('child-1')
+
+    const adultControls = adultValueEl ? adultValueEl.parentElement : null
+    const childControls = childValueEl ? childValueEl.parentElement : null
+
+    const adultDecBtn = adultControls ? adultControls.querySelector('button:nth-of-type(1)') : null
+    const adultIncBtn = adultControls ? adultControls.querySelector('button:nth-of-type(2)') : null
+    const childDecBtn = childControls ? childControls.querySelector('button:nth-of-type(1)') : null
+    const childIncBtn = childControls ? childControls.querySelector('button:nth-of-type(2)') : null
+
+    const adultRule = currentQuantityRules.adults || { min: 1, max: null }
+    const childRule = currentQuantityRules.children || { min: 0, max: null }
+
+    const adultMin = parseRuleNumber(adultRule.min, 1)
+    const adultMax = parseRuleNumber(adultRule.max, null)
+    const childMin = parseRuleNumber(childRule.min, 0)
+    const childMax = parseRuleNumber(childRule.max, null)
+
+    if (adultDecBtn) adultDecBtn.disabled = counts.adults <= adultMin
+    if (adultIncBtn) adultIncBtn.disabled = adultMax !== null && counts.adults >= adultMax
+    if (childDecBtn) childDecBtn.disabled = counts.children <= childMin
+    if (childIncBtn) childIncBtn.disabled = childMax !== null && counts.children >= childMax
+}
+
+function syncQuantityConstraintsToForm(counts) {
+    const adultsInput = document.getElementById('booking_adults')
+    const childrenInput = document.getElementById('booking_children')
+    const quantityInput = document.getElementById('booking_quantity')
+    const cartQuantityInput = document.getElementById('cart_quantity')
+
+    const total = getTotalQuantity()
+
+    setNumericInputRules(adultsInput, currentQuantityRules.adults, counts.adults, 1)
+    setNumericInputRules(childrenInput, currentQuantityRules.children, counts.children, 0)
+    setNumericInputRules(quantityInput, currentQuantityRules.total, total, 1)
+    setNumericInputRules(cartQuantityInput, currentQuantityRules.total, total, 1)
+
+    updateCounterButtonStates(counts)
+}
+
 function applyProposalQuantityRules(proposal) {
     currentQuantityRules = extractRulesFromProposal(proposal)
     const initial = {
@@ -193,6 +253,7 @@ function applyProposalQuantityRules(proposal) {
     const enforced = enforceCountsByRules(initial, 'adults')
     applyCountsToUI(enforced)
     updateSummaryPeople()
+    syncQuantityConstraintsToForm(enforced)
 }
 
 function updateCount(type, delta) {
@@ -304,14 +365,7 @@ function updateSummaryPeople() {
         kartsEl.innerHTML = `${counts.adults} ${adultKartLabel}<br>${counts.children} ${childKartLabel}`
     }
 
-    const adultsInput = document.getElementById('booking_adults')
-    const childrenInput = document.getElementById('booking_children')
-    const quantityInput = document.getElementById('booking_quantity')
-    const cartQuantityInput = document.getElementById('cart_quantity')
-    if (adultsInput) adultsInput.value = String(counts.adults)
-    if (childrenInput) childrenInput.value = String(counts.children)
-    if (quantityInput) quantityInput.value = String(total)
-    if (cartQuantityInput) cartQuantityInput.value = String(total)
+    syncQuantityConstraintsToForm(counts)
 
     updateSummaryPrice(total)
 }
