@@ -8,6 +8,11 @@
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
+if ( defined( 'RACEHALL_WC_UI_BOOTSTRAPPED' ) ) {
+    return;
+}
+define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
+
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
