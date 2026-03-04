@@ -1,0 +1,322 @@
+{
+  "info": {
+    "_postman_id": "f9f25275-47f8-4204-a35e-4b6c8ea8c6a2",
+    "name": "Racehall Booking API",
+    "description": "Collection covering shared PDF + V2 HTML endpoints for Racehall booking integration.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://testbmiapigateway.azure-api.net" },
+    { "key": "clientKey", "value": "racehallsandbox" },
+    { "key": "subscriptionKey", "value": "" },
+    { "key": "username", "value": "" },
+    { "key": "password", "value": "" },
+    { "key": "acceptLanguage", "value": "en" },
+    { "key": "accessToken", "value": "" },
+    { "key": "productId", "value": "" },
+    { "key": "pageId", "value": "" },
+    { "key": "resourceId", "value": "" },
+    { "key": "quantity", "value": "1" },
+    { "key": "date", "value": "2026-03-15" },
+    { "key": "dateIso", "value": "2026-03-15T00:00:00.000Z" },
+    { "key": "dateFrom", "value": "2026-03-01" },
+    { "key": "dateTill", "value": "2026-03-31" },
+    { "key": "orderId", "value": "" },
+    { "key": "orderItemId", "value": "" },
+    { "key": "parentOrderItemId", "value": "" },
+    { "key": "memo", "value": "Customer note" },
+    { "key": "paymentId", "value": "ext-payment-id" },
+    { "key": "paymentAmount", "value": "0" },
+    { "key": "paymentTimeUtc", "value": "2026-03-05T10:30:00.000Z" }
+  ],
+  "item": [
+    {
+      "name": "01 - Auth Token",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/auth/{{clientKey}}/publicbooking",
+          "host": ["{{baseUrl}}"],
+          "path": ["auth", "{{clientKey}}", "publicbooking"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Username\": \"{{username}}\",\n  \"Password\": \"{{password}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Auth status is 200', function () {",
+              "  pm.expect(pm.response.code).to.eql(200);",
+              "});",
+              "var json = pm.response.json();",
+              "if (json && json.AccessToken) {",
+              "  pm.collectionVariables.set('accessToken', json.AccessToken);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Get Locations",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/locations",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "locations"]
+        }
+      }
+    },
+    {
+      "name": "03 - Get Pages By Date",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/page?date={{dateIso}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "page"],
+          "query": [
+            { "key": "date", "value": "{{dateIso}}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "04 - Get Products",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/products",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "products"]
+        }
+      }
+    },
+    {
+      "name": "05 - Get Product Image",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/image/product?productId={{productId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "image", "product"],
+          "query": [
+            { "key": "productId", "value": "{{productId}}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "06 - Get Availability Days",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/availability?productId={{productId}}&dateFrom={{dateFrom}}&dateTill={{dateTill}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "availability"],
+          "query": [
+            { "key": "productId", "value": "{{productId}}" },
+            { "key": "dateFrom", "value": "{{dateFrom}}" },
+            { "key": "dateTill", "value": "{{dateTill}}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "07 - Post Proposals (Timeslots)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/availability?date={{date}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "availability"],
+          "query": [
+            { "key": "date", "value": "{{date}}" }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"pageId\": \"{{pageId}}\",\n  \"quantity\": {{quantity}}\n}"
+        }
+      }
+    },
+    {
+      "name": "08 - Booking Book",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/booking/book",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "booking", "book"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"pageId\": \"{{pageId}}\",\n  \"quantity\": {{quantity}},\n  \"resourceId\": \"{{resourceId}}\",\n  \"proposal\": {\n    \"blocks\": []\n  },\n  \"contactPerson\": {\n    \"firstName\": \"John\",\n    \"lastName\": \"Doe\",\n    \"email\": \"john@example.com\",\n    \"phone\": \"00000000\"\n  },\n  \"orderId\": \"{{orderId}}\",\n  \"parentOrderItemId\": \"{{parentOrderItemId}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "09 - Booking Sell (V2)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/booking/sell",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "booking", "sell"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"quantity\": {{quantity}},\n  \"orderId\": \"{{orderId}}\",\n  \"parentOrderItemId\": \"{{parentOrderItemId}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "10 - Booking Remove Item (V2)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/booking/removeItem",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "booking", "removeItem"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"orderId\": {{orderId}},\n  \"orderItemId\": {{orderItemId}}\n}"
+        }
+      }
+    },
+    {
+      "name": "11 - Booking Memo (V2)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/booking/memo",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "booking", "memo"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"orderId\": {{orderId}},\n  \"memo\": \"{{memo}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "12 - Payment Confirm",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/payment/confirm",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "payment", "confirm"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"{{paymentId}}\",\n  \"paymentTime\": \"{{paymentTimeUtc}}\",\n  \"amount\": {{paymentAmount}},\n  \"orderId\": {{orderId}},\n  \"extraData\": {\n    \"source\": \"woocommerce\"\n  }\n}"
+        }
+      }
+    },
+    {
+      "name": "13 - Cancel Bill (PDF)",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/bill/{{orderId}}/cancel",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "bill", "{{orderId}}", "cancel"]
+        }
+      }
+    },
+    {
+      "name": "14 - Cancel Order (V2)",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+          { "key": "Bmi-Subscription-Key", "value": "{{subscriptionKey}}" },
+          { "key": "Accept-Language", "value": "{{acceptLanguage}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/public-booking/{{clientKey}}/order/{{orderId}}/cancel",
+          "host": ["{{baseUrl}}"],
+          "path": ["public-booking", "{{clientKey}}", "order", "{{orderId}}", "cancel"]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,677 @@
+:root {
+    --bg: #221F20;
+    --panel: #221F20;
+    --border: #C8102E;
+    --accent: #C8102E;
+    --text: #ffffff;
+    --muted: #b5b5b5;
+}
+
+/* ...existing code... */
+* {
+    box-sizing: border-box;
+}
+.navbar-fl {
+    background: #C8102E !important;
+}
+
+footer{
+    background: #C8102E !important;
+}
+body {
+    font-family: 'Oxanium', sans-serif;
+    font-size: 16px;
+    line-height: 20px;
+    background-color: var(--bg) !important;
+    color: var(--text) !important;
+    margin: 0;
+}
+
+.cart-page {
+    display: flex;
+    max-width: 1280px;
+    width: 100%;
+    margin: 0 auto;
+    gap: 25px;
+    padding: 60px 0;
+}
+
+/* LEFT */
+.left h1 {
+    font-size: 30px;
+    font-weight: 800;
+    margin-bottom: 20px;
+}
+
+.left p {
+    max-width: 420px;
+    line-height: 1.6;
+    opacity: 0.8;
+}
+
+.trophy img {
+    margin-top: 40px;
+    position: absolute;
+    left: 0;
+}
+
+/* ADDONS */
+
+.addons {
+    width: 100%;
+    height: 556px;
+    overflow-y: scroll;
+
+    padding: 20px;
+    position: relative;
+    background: var(--panel);
+    clip-path: polygon(0% 0%, 100% 0%, 100% calc(100% - 40px), calc(100% - 40px) 100%, 0% 100%, 0% 20px);
+}
+/* .addons::after{
+    content: "";
+    position: absolute;
+    width: 40px;
+    height: 40px;
+    top: unset;
+    right: -1px;
+    bottom: -1px;
+    left: unset;
+    z-index: 1;
+    background: var(--bg);
+    pointer-events: none;
+    clip-path: polygon(0 100%, 100% 0, 100% 100%);
+
+
+} */
+/* Custom scrollbar (WebKit browsers) */
+.addons::-webkit-scrollbar {
+    width: 8px;
+}
+.addons::-webkit-scrollbar-track {
+    background: var(--panel);
+}
+.addons::-webkit-scrollbar-thumb {
+    background-color: var(--border); /* #C8102E */
+    border-radius: 10px;
+    border: 3px solid var(--panel);
+}
+.addons::-webkit-scrollbar-thumb:hover {
+    background-color: #a70b24;
+}
+
+
+
+.center {
+    height: fit-content;
+    width: fit-content;
+    position: relative;
+    border: 1px solid var(--border);
+    clip-path: polygon(0% 0%, 100% 0%, 100% calc(100% - 40px), calc(100% - 40px) 100%, 0% 100%, 0% 20px);
+}
+
+.center::after {
+
+    content: "";
+    position: absolute;
+    bottom: -1px;
+    right: -1px;
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(to bottom right, transparent 0%, transparent 49%, var(--border) 50%, var(--border) 51%, transparent 52%, transparent 52%);
+    background: linear-gradient(135deg, transparent 0, transparent calc(50% - .75px), var(--border) calc(50% - .75px), var(--border) calc(50% + .75px), transparent calc(50% + .75px));
+
+}
+
+.addons h2 {
+    margin-bottom: 24px;
+}
+
+.addon {
+    display: flex;
+    gap: 10px;
+    padding: 18px;
+    margin-bottom: 10px;
+    max-width: 368px;
+    width: 100%;
+    justify-content: space-between;
+    background: transparent;
+}
+
+.addon-img,
+.addon-img img {
+    height: 90px;
+    width: 90px;
+    display: block;
+    object-fit: cover;
+}
+
+.info-container {
+    display: flex;
+    gap: 12px;
+
+}
+
+.addon-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.addon-info .title {
+    font-size: 14px;
+}
+
+.addon-info .price {
+    font-size: 13px;
+    opacity: 0.7;
+}
+
+.counter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.counter button,
+.qty-increase,
+.qty-decrease {
+    width: 20px;
+    height: 20px;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    padding: 0 !important;
+}
+
+.qty-input {
+    width: 24px !important;
+    text-align: center !important;
+    border-radius: 4px !important;
+    padding: 6px !important;
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    border: none !important;
+    -moz-appearance: textfield;
+}
+
+.qty-input::-webkit-outer-spin-button,
+.qty-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.remove-item {
+    display: block;
+    color: var(--text);
+    margin-top: 6px;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+/* SUMMARY */
+.summary .box {
+    border: 1px solid var(--border);
+    width: 307px;
+    padding: 24px;
+    position: relative;
+    background: var(--panel);
+     clip-path: polygon(0% 0%, 100% 0%, 100% calc(100% - 40px), calc(100% - 40px) 100%, 0% 100%, 0% 20px);
+}
+
+.summary .box::after {
+    content: "";
+    position: absolute;
+    bottom: -1px;
+    right: -1px;
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(to bottom right, transparent 0%, transparent 49%, var(--border) 50%, var(--border) 51%, transparent 52%, transparent 52%);
+    background: linear-gradient(135deg, transparent 0, transparent calc(50% - .75px), var(--border) calc(50% - .75px), var(--border) calc(50% + .75px), transparent calc(50% + .75px));
+
+}
+
+.row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+.divider {
+    height: 1px;
+    background: #333;
+    margin: 14px 0;
+}
+
+.total {
+    display: flex;
+    justify-content: space-between;
+    font-size: 16px;
+    margin: 20px 0;
+}
+
+.btn {
+    width: 100%;
+    padding: 14px;
+    margin-top: 10px;
+    cursor: pointer;
+    border: none;
+    font-weight: bold;
+    position: relative;
+    background: transparent;
+    display: block;
+    text-align: center;
+    text-decoration: none;
+}
+
+.primary {
+    background: var(--accent);
+    color: #fff;
+}
+
+.secondary {
+    background: #fff;
+    color: #000;
+}
+
+.btn::after {
+    content: '';
+    position: absolute;
+    right: -10px;
+    bottom: -10px;
+    width: 20px;
+    height: 20px;
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    transform: rotate(45deg);
+}
+
+.update-cart-button {
+    background-color: var(--accent) !important;
+    color:#fff !important;
+    margin-top: 16px;
+}
+
+.empty {
+    padding: 20px;
+    opacity: 0.8;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .cart-page {
+        flex-direction: column;
+        gap: 18px;
+        padding: 30px 0;
+        max-width: 100%;
+    }
+
+    .addons {
+        width: 100%;
+        height: auto;
+        min-height: 300px;
+        max-height: 400px;
+        padding: 14px;
+    }
+
+    .summary .box {
+        width: 100%;
+        padding: 16px;
+        margin-top: 18px;
+    }
+
+    .addon {
+        max-width: 100%;
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 12px;
+    }
+
+    .addon-img,
+    .addon-img img {
+        width: 70px;
+        height: 70px;
+    }
+
+    .trophy img {
+        max-width: 100%;
+        margin-top: 20px;
+    }
+}
+
+@media (max-width: 600px) {
+    body {
+        font-size: 14px;
+        line-height: 18px;
+        padding: 0 4px;
+    }
+
+    .cart-page {
+        padding: 12px 0;
+        gap: 10px;
+    }
+
+    .left h1 {
+        font-size: 22px;
+        margin-bottom: 12px;
+    }
+
+    .left p {
+        max-width: 100%;
+        font-size: 13px;
+    }
+
+    .addons {
+        padding: 8px;
+        min-height: 200px;
+        max-height: 250px;
+        width: 100%;
+    }
+
+    .addon {
+        padding: 8px;
+        gap: 6px;
+        flex-direction: column;
+        align-items: flex-start;
+        max-width: 100%;
+        margin-bottom: 8px;
+    }
+
+    .addon-img,
+    .addon-img img {
+        width: 48px;
+        height: 48px;
+    }
+
+    .info-container {
+        gap: 6px;
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .addon-info .title {
+        font-size: 12px;
+    }
+
+    .addon-info .price {
+        font-size: 11px;
+    }
+
+    .counter {
+        gap: 4px;
+    }
+
+    .counter button {
+        width: 18px;
+        height: 18px;
+        font-size: 12px;
+    }
+
+    .summary .box {
+        padding: 10px;
+        width: 100%;
+        margin-top: 10px;
+    }
+
+    .row, .total {
+        font-size: 12px;
+    }
+
+    .btn {
+        padding: 10px;
+        font-size: 14px;
+    }
+}
+
+@media (max-width: 1024px) {
+    .cart-page {
+        gap: 20px;
+        padding: 40px 0;
+    }
+
+    .left h1 {
+        font-size: 26px;
+    }
+
+    .left p {
+        max-width: 360px;
+    }
+
+    .addons {
+        width: 440px;
+        max-width: 60%;
+        height: 520px;
+        padding: 18px;
+    }
+
+    .addon {
+        padding: 14px;
+    }
+
+    .addon-img,
+    .addon-img img {
+        width: 80px;
+        height: 80px;
+    }
+
+    .summary .box {
+        width: 300px;
+        padding: 20px;
+    }
+
+    .btn {
+        padding: 12px;
+    }
+}
+
+/* summary details */
+.summary-section {
+    display: flex;
+    flex-direction: column;
+}
+
+.summary-section h4 {
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 400;
+}
+
+.summary-item {
+    padding-left: 20px;
+}
+
+.summary-label {
+    color: var(--text);
+    font-weight: 800;
+    font-size: 16px;
+}
+
+.summary-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.summary-prices {
+    display: flex;
+    flex-direction: column;
+    gap: -1px;
+    text-align: right;
+}
+
+.price {
+    color: var(--text);
+    font-size: 16px;
+}
+
+.addon-section {
+    border-bottom: 1px solid #D9D9D9;
+    padding-bottom: 20px;
+}
+
+.addon-section .summary-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.summary-total {
+    border-bottom: 1px solid #D9D9D9;
+    padding-bottom: 10px;
+}
+
+.total-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px 10px 0;
+}
+
+.total-label {
+    color: var(--text);
+    font-weight: 800;
+    font-size: 16px;
+}
+
+.total-price {
+    color: var(--text);
+    font-size: 16px;
+}
+
+.cart-actions-right {
+    margin: 12px 0;
+
+}
+
+/* Desktop layout: left / center / summary */
+@media (min-width: 1025px) {
+    .cart-page {
+        display: flex;
+        align-items: flex-start;
+    }
+
+    .racehall-cart .left {
+        flex: 0 0 320px;
+    }
+
+    .racehall-cart .center {
+        flex: 1 1 auto;
+        min-width: 480px;
+    }
+
+    .racehall-cart .summary {
+        flex: 0 0 320px;
+    }
+
+    /* keep summary visible while scrolling */
+    .summary .box {
+        position: sticky;
+        top: 80px;
+    }
+}
+
+/* Tweak for medium screens between 900 and 1024 */
+@media (min-width: 901px) and (max-width: 1024px) {
+    .cart-page {
+        gap: 18px;
+        padding: 40px 0;
+    }
+
+    .racehall-cart .left {
+        flex: 0 0 300px;
+    }
+
+    .racehall-cart .center {
+        flex: 1 1 auto;
+        min-width: 360px;
+    }
+
+    .addons {
+        height: 520px;
+        max-height: 60vh;
+    }
+}
+
+/* Small screens: stack and hide decorative extras */
+@media (max-width: 900px) {
+    .cart-page {
+        flex-direction: column;
+        gap: 18px;
+        padding: 30px 12px;
+    }
+
+    .addons {
+        width: 100%;
+        height: auto;
+        min-height: 260px;
+        max-height: 360px;
+        padding: 14px;
+    }
+
+    /* hide rotated corner decorations to avoid overflow */
+    .center::before,
+    .summary .box::after,
+    .btn::after {
+        display: none;
+    }
+
+    .addon {
+        flex-direction: row;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .addon .info-container {
+        width: calc(100% - 140px);
+    }
+
+    .cart-actions-right {
+        margin: 12px 0 0;
+    }
+
+    .summary .box {
+        position: relative;
+        width: 100%;
+    }
+
+    .update-cart-button {
+        width: 100%;
+    }
+}
+
+/* Very small screens */
+@media (max-width: 600px) {
+    .addons {
+        padding: 8px;
+        min-height: 200px;
+        max-height: 300px;
+    }
+
+    .addon {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .addon .info-container {
+        width: 100%;
+    }
+
+    .counter {
+        margin-top: 8px;
+    }
+}
+
+/* Ensure form buttons stay full width and readable */
+.cart-actions-right .btn {
+    display: block;
+    width: 100%;
+}
+
+/* Keep nice spacing on summary items */
+.summary-section { margin-bottom: 12px; }
+
+/* ...existing code... */
