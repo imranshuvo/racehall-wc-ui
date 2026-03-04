@@ -579,26 +579,6 @@ add_action('wp_enqueue_scripts', function() {
         );
     }
 
-    // Checkout page
-    if ( is_checkout() && ! is_order_received_page() ) {
-        wp_enqueue_style(
-            'racehall-checkout-css',
-            RACEHALL_WC_UI_URL . 'assets/css/checkout.css',
-            [],
-            '1.0'
-        );
-        wp_enqueue_script(
-            'racehall-checkout-js',
-            RACEHALL_WC_UI_URL . 'assets/js/checkout.js',
-            [],
-            time(),
-            true
-        );
-        wp_localize_script( 'racehall-checkout-js', 'rh_checkout_obj', [
-            'ajax_url' => admin_url( 'admin-ajax.php' ),
-            'nonce'    => wp_create_nonce( 'rh_checkout_nonce' ),
-        ] );
-    }
 });
 
 // Replace single product page content
@@ -636,18 +616,6 @@ add_action('template_redirect', function() {
         exit;
     }
 
-    // CHECKOUT
-    if ( is_checkout() && ! is_order_received_page() ) {
-
-        remove_all_actions( 'woocommerce_before_checkout_form' );
-        remove_all_actions( 'woocommerce_checkout_billing' );
-        remove_all_actions( 'woocommerce_checkout_shipping' );
-        remove_all_actions( 'woocommerce_checkout_order_review' );
-        remove_all_actions( 'woocommerce_after_checkout_form' );
-
-        include RACEHALL_WC_UI_PATH . 'templates/checkout.php';
-        exit;
-    }
 });
 
 
@@ -691,18 +659,27 @@ add_action( 'woocommerce_remove_cart_item', function( $cart_item_key, $cart ) {
 
 add_filter( 'woocommerce_add_cart_item_data', 'wk_rh_addon_cart_item_data', 10, 2 );
 function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
-    if ( isset( $_POST['is_addon'] ) ) $cart_item_data['is_addon'] = true;
+    $is_addon_request = isset( $_POST['is_addon'] );
+    if ( $is_addon_request ) $cart_item_data['is_addon'] = true;
     if ( ! empty( $_POST['parent_racehall_product'] ) ) $cart_item_data['parent_racehall_product'] = absint($_POST['parent_racehall_product']);
     if ( ! empty( $_POST['booking_location'] ) ) $cart_item_data['booking_location'] = sanitize_text_field($_POST['booking_location']);
 
     // BMI booking session data (stored by rh_save_proposal AJAX, retrieved here)
     $bmi_data = WC()->session ? WC()->session->get('rh_bmi_booking') : null;
-    if ( $bmi_data ) {
+    if ( $bmi_data && ! $is_addon_request ) {
         $cart_item_data['bmi_proposal']    = $bmi_data['proposal']    ?? null;
         $cart_item_data['bmi_page_id']     = $bmi_data['pageId']      ?? '';
         $cart_item_data['bmi_resource_id'] = $bmi_data['resourceId']  ?? '';
         $cart_item_data['bmi_order_id']    = $bmi_data['orderId']     ?? '';
         $cart_item_data['bmi_order_item_id'] = $bmi_data['orderItemId'] ?? '';
+    }
+
+    if ( $is_addon_request ) {
+        unset(
+            $cart_item_data['bmi_proposal'],
+            $cart_item_data['bmi_page_id'],
+            $cart_item_data['bmi_resource_id']
+        );
     }
 
     return $cart_item_data;

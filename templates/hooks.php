@@ -501,6 +501,50 @@ function wk_rh_show_booking_data_in_cart( $item_data, $cart_item ) {
     return $item_data;
 }
 
+function wk_rh_get_checkout_booking_details_text( $cart_item ) {
+    if ( ! is_array( $cart_item ) ) {
+        return '';
+    }
+
+    $parts = [];
+    if ( ! empty( $cart_item['booking_date'] ) ) {
+        $parts[] = 'Dato: ' . sanitize_text_field( $cart_item['booking_date'] );
+    }
+    if ( ! empty( $cart_item['booking_time'] ) ) {
+        $parts[] = 'Tidspunkt: ' . sanitize_text_field( $cart_item['booking_time'] );
+    }
+    if ( ! empty( $cart_item['booking_location'] ) ) {
+        $parts[] = 'Lokation: ' . sanitize_text_field( $cart_item['booking_location'] );
+    }
+
+    $has_people = isset( $cart_item['booking_adults'] ) || isset( $cart_item['booking_children'] );
+    if ( $has_people ) {
+        $adults   = isset( $cart_item['booking_adults'] ) ? (int) $cart_item['booking_adults'] : 0;
+        $children = isset( $cart_item['booking_children'] ) ? (int) $cart_item['booking_children'] : 0;
+        $parts[]  = 'Deltagere: ' . $adults . ' voksne, ' . $children . ' børn';
+    }
+
+    if ( empty( $parts ) ) {
+        return '';
+    }
+
+    return implode( ' | ', $parts );
+}
+
+add_filter( 'woocommerce_cart_item_name', 'wk_rh_checkout_cart_item_name_with_details', 10, 3 );
+function wk_rh_checkout_cart_item_name_with_details( $product_name, $cart_item, $cart_item_key ) {
+    if ( ! function_exists( 'is_checkout' ) || ! is_checkout() ) {
+        return $product_name;
+    }
+
+    $details_text = wk_rh_get_checkout_booking_details_text( $cart_item );
+    if ( $details_text === '' ) {
+        return $product_name;
+    }
+
+    return $product_name . '<br><small class="wk-rh-checkout-booking-details">' . esc_html( $details_text ) . '</small>';
+}
+
 add_action( 'woocommerce_checkout_create_order_line_item', 'wk_rh_add_booking_data_to_order_items', 10, 4 );
 function wk_rh_add_booking_data_to_order_items( $item, $cart_item_key, $values, $order ) {
     if ( isset( $values['booking_date'] ) ) {
