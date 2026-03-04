@@ -5,12 +5,217 @@ document.addEventListener('DOMContentLoaded', function () {
         })
     })
 })
+
+let currentQuantityRules = {
+    adults: { min: 1, max: null, step: 1, quantity: 1 },
+    children: { min: 0, max: null, step: 1, quantity: 0 },
+    total: { min: 1, max: null, step: 1 }
+}
+
+function toPositiveNumber(value, fallback = null) {
+    const num = Number(value)
+    if (!Number.isFinite(num)) return fallback
+    return num
+}
+
+function parseRuleNumber(value, fallback = null) {
+    const num = toPositiveNumber(value, fallback)
+    if (num === null) return fallback
+    return num
+}
+
+function normalizeTag(tagValue) {
+    return String(tagValue || '').trim().toLowerCase()
+}
+
+function pickStep(group) {
+    const candidates = [
+        group.step,
+        group.stepQuantity,
+        group.quantityStep,
+        group.stepSize,
+        group.increment
+    ]
+    for (const candidate of candidates) {
+        const value = parseRuleNumber(candidate, null)
+        if (value !== null && value > 0) {
+            return value
+        }
+    }
+    return 1
+}
+
+function extractRulesFromProposal(proposal) {
+    const rules = {
+        adults: { min: 1, max: null, step: 1, quantity: 1 },
+        children: { min: 0, max: null, step: 1, quantity: 0 },
+        total: { min: 1, max: null, step: 1 }
+    }
+
+    if (!proposal || typeof proposal !== 'object') {
+        return rules
+    }
+
+    const proposalMin = parseRuleNumber(proposal.minQuantity, null)
+    const proposalMax = parseRuleNumber(proposal.maxQuantity, null)
+    const minAmount = parseRuleNumber(proposal.minAmount, null)
+    const maxAmount = parseRuleNumber(proposal.maxAmount, null)
+
+    if (proposalMin !== null) rules.total.min = proposalMin
+    if (proposalMax !== null) rules.total.max = proposalMax
+    if (minAmount !== null && minAmount > 0) rules.total.min = Math.max(rules.total.min, minAmount)
+    if (maxAmount !== null && maxAmount > 0) rules.total.max = rules.total.max === null ? maxAmount : Math.min(rules.total.max, maxAmount)
+
+    const groups = Array.isArray(proposal.dynamicGroups) ? proposal.dynamicGroups : []
+    groups.forEach(group => {
+        if (!group || typeof group !== 'object') return
+
+        const tag = normalizeTag(group.tag)
+        const min = parseRuleNumber(group.minQuantity, null)
+        const max = parseRuleNumber(group.maxQuantity, null)
+        const step = pickStep(group)
+        const quantity = parseRuleNumber(group.quantity, null)
+
+        const target = (tag === 'adults' || tag === 'adult' || tag === 'voksne')
+            ? rules.adults
+            : (tag === 'kids' || tag === 'children' || tag === 'child' || tag === 'born' || tag === 'børn')
+                ? rules.children
+                : null
+
+        if (!target) return
+        if (min !== null) target.min = min
+        if (max !== null) target.max = max
+        if (step > 0) target.step = step
+        if (quantity !== null) target.quantity = quantity
+    })
+
+    return rules
+}
+
+function clampByRule(value, rule) {
+    let output = Math.max(0, Number(value) || 0)
+    const min = parseRuleNumber(rule.min, 0)
+    const max = parseRuleNumber(rule.max, null)
+    const step = parseRuleNumber(rule.step, 1)
+
+    output = Math.max(min, output)
+    if (max !== null) output = Math.min(max, output)
+
+    if (step > 0) {
+        const offset = output - min
+        const steps = Math.round(offset / step)
+        output = min + (steps * step)
+        output = Math.max(min, output)
+        if (max !== null) output = Math.min(max, output)
+    }
+
+    return Math.round(output)
+}
+
+function enforceCountsByRules(counts, changedKey) {
+    const next = {
+        adults: clampByRule(counts.adults, currentQuantityRules.adults),
+        children: clampByRule(counts.children, currentQuantityRules.children)
+    }
+
+    const totalRule = currentQuantityRules.total || { min: 1, max: null, step: 1 }
+    const totalMin = parseRuleNumber(totalRule.min, 1)
+    const totalMax = parseRuleNumber(totalRule.max, null)
+    const totalStep = parseRuleNumber(totalRule.step, 1)
+
+    let total = next.adults + next.children
+
+    const preferredKey = changedKey === 'children' ? 'children' : 'adults'
+    const secondaryKey = preferredKey === 'adults' ? 'children' : 'adults'
+
+    while (total < totalMin) {
+        const incRule = currentQuantityRules[preferredKey] || { step: 1 }
+        const incStep = parseRuleNumber(incRule.step, 1)
+        const before = next[preferredKey]
+        next[preferredKey] = clampByRule(next[preferredKey] + incStep, incRule)
+        if (next[preferredKey] === before) {
+            const secRule = currentQuantityRules[secondaryKey] || { step: 1 }
+            const secStep = parseRuleNumber(secRule.step, 1)
+            const secBefore = next[secondaryKey]
+            next[secondaryKey] = clampByRule(next[secondaryKey] + secStep, secRule)
+            if (next[secondaryKey] === secBefore) break
+        }
+        total = next.adults + next.children
+    }
+
+    if (totalMax !== null) {
+        while (total > totalMax) {
+            const decRule = currentQuantityRules[preferredKey] || { step: 1 }
+            const decStep = parseRuleNumber(decRule.step, 1)
+            const before = next[preferredKey]
+            next[preferredKey] = clampByRule(next[preferredKey] - decStep, decRule)
+            if (next[preferredKey] === before) {
+                const secRule = currentQuantityRules[secondaryKey] || { step: 1 }
+                const secStep = parseRuleNumber(secRule.step, 1)
+                const secBefore = next[secondaryKey]
+                next[secondaryKey] = clampByRule(next[secondaryKey] - secStep, secRule)
+                if (next[secondaryKey] === secBefore) break
+            }
+            total = next.adults + next.children
+        }
+    }
+
+    total = next.adults + next.children
+    if (totalStep > 1) {
+        let guard = 0
+        while ((total - totalMin) % totalStep !== 0 && guard < 10) {
+            const decRule = currentQuantityRules[preferredKey] || { step: 1 }
+            const decStep = parseRuleNumber(decRule.step, 1)
+            const before = next[preferredKey]
+            next[preferredKey] = clampByRule(next[preferredKey] - decStep, decRule)
+            if (next[preferredKey] === before) break
+            total = next.adults + next.children
+            guard++
+        }
+    }
+
+    return next
+}
+
+function applyCountsToUI(counts) {
+    const adultsEl = document.getElementById('adult-1')
+    const childrenEl = document.getElementById('child-1')
+    if (adultsEl) adultsEl.textContent = String(Math.max(0, counts.adults))
+    if (childrenEl) childrenEl.textContent = String(Math.max(0, counts.children))
+}
+
+function applyProposalQuantityRules(proposal) {
+    currentQuantityRules = extractRulesFromProposal(proposal)
+    const initial = {
+        adults: parseRuleNumber(currentQuantityRules.adults.quantity, currentQuantityRules.adults.min),
+        children: parseRuleNumber(currentQuantityRules.children.quantity, currentQuantityRules.children.min)
+    }
+    const enforced = enforceCountsByRules(initial, 'adults')
+    applyCountsToUI(enforced)
+    updateSummaryPeople()
+}
+
 function updateCount(type, delta) {
     const el = document.getElementById(type)
     if (!el) return
-    let value = parseInt(el.textContent, 10)
-    value = Math.max(0, value + delta)
-    el.textContent = value
+
+    const isAdult = type === 'adult-1'
+    const key = isAdult ? 'adults' : 'children'
+    const rule = isAdult ? currentQuantityRules.adults : currentQuantityRules.children
+    const step = parseRuleNumber(rule.step, 1)
+
+    const counts = getPartyCounts()
+    const currentValue = isAdult ? counts.adults : counts.children
+    const candidateValue = currentValue + (delta * step)
+
+    const candidate = {
+        adults: counts.adults,
+        children: counts.children
+    }
+    candidate[key] = candidateValue
+
+    const enforced = enforceCountsByRules(candidate, key)
+    applyCountsToUI(enforced)
     updateSummaryPeople()
 }
 
@@ -23,12 +228,64 @@ function getPartyCounts() {
 }
 
 function getTotalQuantity() {
-    const counts = getPartyCounts()
-    return Math.max(1, counts.adults + counts.children)
+    const counts = enforceCountsByRules(getPartyCounts(), 'adults')
+    const total = counts.adults + counts.children
+    const totalMin = parseRuleNumber((currentQuantityRules.total || {}).min, 1)
+    const totalMax = parseRuleNumber((currentQuantityRules.total || {}).max, null)
+    let resolved = Math.max(totalMin, total)
+    if (totalMax !== null) resolved = Math.min(totalMax, resolved)
+    return Math.max(1, resolved)
+}
+
+function formatMoney(value) {
+    const cfg = window.RH_PRICE_CONFIG || {}
+    const decimals = Number.isFinite(Number(cfg.decimals)) ? Number(cfg.decimals) : 2
+    const decimalSeparator = typeof cfg.decimalSeparator === 'string' ? cfg.decimalSeparator : ','
+    const thousandSeparator = typeof cfg.thousandSeparator === 'string' ? cfg.thousandSeparator : '.'
+    const currencySymbol = typeof cfg.currencySymbol === 'string' ? cfg.currencySymbol : ''
+    const currencyPos = typeof cfg.currencyPos === 'string' ? cfg.currencyPos : 'right'
+
+    let amount = Number(value)
+    if (!Number.isFinite(amount)) amount = 0
+
+    const fixed = amount.toFixed(decimals)
+    let [intPart, decPart] = fixed.split('.')
+    intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, thousandSeparator)
+    const numberPart = decimals > 0 ? `${intPart}${decimalSeparator}${decPart}` : intPart
+
+    switch (currencyPos) {
+        case 'left':
+            return `${currencySymbol}${numberPart}`
+        case 'left_space':
+            return `${currencySymbol} ${numberPart}`
+        case 'right_space':
+            return `${numberPart} ${currencySymbol}`
+        case 'right':
+        default:
+            return `${numberPart}${currencySymbol}`
+    }
+}
+
+function updateSummaryPrice(totalQuantity) {
+    const cfg = window.RH_PRICE_CONFIG || {}
+    const unitPrice = Number(cfg.unitPrice)
+    const resolvedUnit = Number.isFinite(unitPrice) ? unitPrice : 0
+    const totalValue = resolvedUnit * Math.max(1, Number(totalQuantity) || 1)
+
+    const unitEl = document.getElementById('summary-unit-price')
+    const totalEl = document.getElementById('summary-total-price')
+
+    if (unitEl) {
+        unitEl.textContent = formatMoney(resolvedUnit)
+    }
+    if (totalEl) {
+        totalEl.textContent = formatMoney(totalValue)
+    }
 }
 
 function updateSummaryPeople() {
-    const counts = getPartyCounts()
+    const counts = enforceCountsByRules(getPartyCounts(), 'adults')
+    applyCountsToUI(counts)
     const total = getTotalQuantity()
 
     const peopleEl = document.getElementById('summary-people')
@@ -49,6 +306,8 @@ function updateSummaryPeople() {
     if (childrenInput) childrenInput.value = String(counts.children)
     if (quantityInput) quantityInput.value = String(total)
     if (cartQuantityInput) cartQuantityInput.value = String(total)
+
+    updateSummaryPrice(total)
 }
 
 // --- Calendar and Timeslot Logic ---
@@ -342,6 +601,7 @@ async function fetchAndRenderTimeslots(dateStr) {
                             container.querySelectorAll('.time-slot').forEach(s => s.classList.remove('selected'))
                             this.classList.add('selected')
                             updateSummaryTime(this.getAttribute('data-time'))
+                            applyProposalQuantityRules(proposal)
 
 
 
@@ -551,19 +811,31 @@ async function saveProposalToSession(block, resourceId, productId) {
         else {
             // here result.supplements is on add ons section id this addonSection
             console.log('Supplements to add:', result.supplements)
-            const addonSection = document.getElementById('addonSection')
-            if (addonSection) {
-                addonSection.innerHTML = '' // Clear existing content
-                result.supplements.forEach(supplement => {
+            const addonItems = document.getElementById('addonSummaryItems')
+            if (addonItems) {
+                addonItems.innerHTML = ''
+                const supplements = Array.isArray(result.supplements) ? result.supplements : []
+                if (!supplements.length) {
+                    addonItems.innerHTML = '<span class="summary-label">—</span>'
+                    return
+                }
+                supplements.forEach(supplement => {
+                    if (!supplement || !supplement.product) return
+                    const priceList = Array.isArray(supplement.product.prices)
+                        ? supplement.product.prices
+                        : (Array.isArray(supplement.product.price) ? supplement.product.price : [])
+                    const firstPrice = priceList.length ? priceList[0] : null
+                    const amount = firstPrice && Number.isFinite(Number(firstPrice.amount)) ? Number(firstPrice.amount) : 0
+
                     const div = document.createElement('div')
                     div.className = 'addon'
                     div.innerHTML = `
                         <div style="display:flex; justify-content:space-between; align-items:center; ">
                             <h4>${supplement.product.name}</h4>
-                            <span class="price">${supplement.product.price[0].amount}</span>
+                            <span class="price">${formatMoney(amount)}</span>
                         </div>
                     `
-                    addonSection.appendChild(div)
+                    addonItems.appendChild(div)
                 })
             }
         }

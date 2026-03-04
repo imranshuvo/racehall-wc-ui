@@ -482,6 +482,173 @@ function wk_rh_save_booking_data_to_cart( $cart_item_data, $product_id ) {
     return $cart_item_data;
 }
 
+function wk_rh_extract_quantity_rules_from_proposal( $proposal ) {
+    $rules = [
+        'adults' => [ 'min' => 1, 'max' => null, 'step' => 1 ],
+        'kids' => [ 'min' => 0, 'max' => null, 'step' => 1 ],
+        'total' => [ 'min' => 1, 'max' => null, 'step' => 1 ],
+    ];
+
+    if ( ! is_array( $proposal ) ) {
+        return $rules;
+    }
+
+    $proposal_min = isset( $proposal['minQuantity'] ) && is_numeric( $proposal['minQuantity'] ) ? (float) $proposal['minQuantity'] : null;
+    $proposal_max = isset( $proposal['maxQuantity'] ) && is_numeric( $proposal['maxQuantity'] ) ? (float) $proposal['maxQuantity'] : null;
+    $min_amount   = isset( $proposal['minAmount'] ) && is_numeric( $proposal['minAmount'] ) ? (float) $proposal['minAmount'] : null;
+    $max_amount   = isset( $proposal['maxAmount'] ) && is_numeric( $proposal['maxAmount'] ) ? (float) $proposal['maxAmount'] : null;
+
+    if ( $proposal_min !== null && $proposal_min >= 0 ) {
+        $rules['total']['min'] = (int) round( $proposal_min );
+    }
+    if ( $proposal_max !== null && $proposal_max >= 0 ) {
+        $rules['total']['max'] = (int) round( $proposal_max );
+    }
+    if ( $min_amount !== null && $min_amount > 0 ) {
+        $rules['total']['min'] = max( (int) $rules['total']['min'], (int) round( $min_amount ) );
+    }
+    if ( $max_amount !== null && $max_amount > 0 ) {
+        $resolved_max = (int) round( $max_amount );
+        $rules['total']['max'] = $rules['total']['max'] === null ? $resolved_max : min( (int) $rules['total']['max'], $resolved_max );
+    }
+
+    $groups = isset( $proposal['dynamicGroups'] ) && is_array( $proposal['dynamicGroups'] ) ? $proposal['dynamicGroups'] : [];
+    foreach ( $groups as $group ) {
+        if ( ! is_array( $group ) ) {
+            continue;
+        }
+
+        $tag = strtolower( trim( (string) ( $group['tag'] ?? '' ) ) );
+        $target_key = null;
+        if ( in_array( $tag, [ 'adults', 'adult', 'voksne' ], true ) ) {
+            $target_key = 'adults';
+        } elseif ( in_array( $tag, [ 'kids', 'children', 'child', 'born', 'børn' ], true ) ) {
+            $target_key = 'kids';
+        }
+
+        if ( $target_key === null ) {
+            continue;
+        }
+
+        if ( isset( $group['minQuantity'] ) && is_numeric( $group['minQuantity'] ) ) {
+            $rules[ $target_key ]['min'] = max( 0, (int) round( (float) $group['minQuantity'] ) );
+        }
+        if ( isset( $group['maxQuantity'] ) && is_numeric( $group['maxQuantity'] ) ) {
+            $rules[ $target_key ]['max'] = max( 0, (int) round( (float) $group['maxQuantity'] ) );
+        }
+
+        $step_candidates = [
+            $group['step'] ?? null,
+            $group['stepQuantity'] ?? null,
+            $group['quantityStep'] ?? null,
+            $group['stepSize'] ?? null,
+            $group['increment'] ?? null,
+        ];
+        foreach ( $step_candidates as $candidate ) {
+            if ( is_numeric( $candidate ) && (float) $candidate > 0 ) {
+                $rules[ $target_key ]['step'] = (int) round( (float) $candidate );
+                break;
+            }
+        }
+    }
+
+    return $rules;
+}
+
+function wk_rh_rule_value_matches_step( $value, $min, $step ) {
+    $step = (int) $step;
+    if ( $step <= 1 ) {
+        return true;
+    }
+    $delta = (int) $value - (int) $min;
+    return $delta >= 0 && $delta % $step === 0;
+}
+
+add_filter( 'woocommerce_add_to_cart_validation', 'wk_rh_validate_main_booking_quantity_rules', 30, 3 );
+function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quantity ) {
+    if ( ! $passed ) {
+        return false;
+    }
+
+    if ( isset( $_POST['is_addon'] ) ) {
+        return $passed;
+    }
+
+    if ( ! function_exists( 'WC' ) || ! WC()->session ) {
+        return $passed;
+    }
+
+    $session_booking = WC()->session->get( 'rh_bmi_booking' );
+    if ( ! is_array( $session_booking ) || empty( $session_booking['proposal'] ) || ! is_array( $session_booking['proposal'] ) ) {
+        return $passed;
+    }
+
+    $rules = wk_rh_extract_quantity_rules_from_proposal( $session_booking['proposal'] );
+
+    $adults = isset( $_POST['booking_adults'] ) ? max( 0, (int) $_POST['booking_adults'] ) : null;
+    $kids   = isset( $_POST['booking_children'] ) ? max( 0, (int) $_POST['booking_children'] ) : null;
+    $qty    = max( 1, (int) $quantity );
+
+    if ( $adults === null && $kids === null ) {
+        return $passed;
+    }
+    if ( $adults === null ) {
+        $adults = 0;
+    }
+    if ( $kids === null ) {
+        $kids = 0;
+    }
+
+    $group_checks = [
+        [ 'name' => __( 'Adults', 'onsite-booking-system' ), 'value' => $adults, 'rules' => $rules['adults'] ],
+        [ 'name' => __( 'Children', 'onsite-booking-system' ), 'value' => $kids, 'rules' => $rules['kids'] ],
+    ];
+
+    foreach ( $group_checks as $check ) {
+        $min = (int) $check['rules']['min'];
+        $max = isset( $check['rules']['max'] ) ? $check['rules']['max'] : null;
+        $step = (int) $check['rules']['step'];
+
+        if ( $check['value'] < $min ) {
+            wc_add_notice( sprintf( __( '%s must be at least %d.', 'onsite-booking-system' ), $check['name'], $min ), 'error' );
+            return false;
+        }
+        if ( $max !== null && $check['value'] > (int) $max ) {
+            wc_add_notice( sprintf( __( '%s cannot exceed %d.', 'onsite-booking-system' ), $check['name'], (int) $max ), 'error' );
+            return false;
+        }
+        if ( ! wk_rh_rule_value_matches_step( $check['value'], $min, $step ) ) {
+            wc_add_notice( sprintf( __( '%s quantity must follow step %d starting from %d.', 'onsite-booking-system' ), $check['name'], max( 1, $step ), $min ), 'error' );
+            return false;
+        }
+    }
+
+    $total = $adults + $kids;
+    if ( $total !== $qty ) {
+        wc_add_notice( __( 'Participant quantities do not match selected booking quantity.', 'onsite-booking-system' ), 'error' );
+        return false;
+    }
+
+    $total_min = (int) $rules['total']['min'];
+    $total_max = isset( $rules['total']['max'] ) ? $rules['total']['max'] : null;
+    $total_step = (int) $rules['total']['step'];
+
+    if ( $total < $total_min ) {
+        wc_add_notice( sprintf( __( 'Total participants must be at least %d.', 'onsite-booking-system' ), $total_min ), 'error' );
+        return false;
+    }
+    if ( $total_max !== null && $total > (int) $total_max ) {
+        wc_add_notice( sprintf( __( 'Total participants cannot exceed %d.', 'onsite-booking-system' ), (int) $total_max ), 'error' );
+        return false;
+    }
+    if ( ! wk_rh_rule_value_matches_step( $total, $total_min, $total_step ) ) {
+        wc_add_notice( sprintf( __( 'Total participants must follow step %d starting from %d.', 'onsite-booking-system' ), max( 1, $total_step ), $total_min ), 'error' );
+        return false;
+    }
+
+    return $passed;
+}
+
 add_filter( 'woocommerce_get_item_data', 'wk_rh_show_booking_data_in_cart', 10, 2 );
 function wk_rh_show_booking_data_in_cart( $item_data, $cart_item ) {
     if ( isset( $cart_item['booking_date'] ) ) {

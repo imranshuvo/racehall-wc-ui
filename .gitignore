@@ -3,3 +3,6 @@
 .env
 .env.*
 
+# Local build artifacts (never commit)
+.builds/
+

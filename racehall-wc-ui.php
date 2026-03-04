@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.0.0
+ * Version: 1.0.1
  * Author: Webkonsulenterne ApS
  */
 
@@ -11,6 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
+define( 'RACEHALL_WC_UI_VERSION', '1.0.1' );
 
 function wk_rh_get_settings_defaults() {
     return [
@@ -618,13 +619,13 @@ add_action('wp_enqueue_scripts', function() {
             'racehall-single-product-css',
             RACEHALL_WC_UI_URL . 'assets/css/single-product.css',
             [],
-            '1.0.1'
+            RACEHALL_WC_UI_VERSION
         );
         wp_enqueue_script(
             'racehall-single-product-js',
             RACEHALL_WC_UI_URL . 'assets/js/single-product.js',
             ['jquery'],
-            time(),
+            RACEHALL_WC_UI_VERSION,
             true
         );
         wp_localize_script('racehall-single-product-js', 'my_ajax_object', [
@@ -638,13 +639,13 @@ add_action('wp_enqueue_scripts', function() {
             'racehall-cart-css',
             RACEHALL_WC_UI_URL . 'assets/css/cart.css',
             [],
-            '1.0'
+                        RACEHALL_WC_UI_VERSION
         );
           wp_enqueue_script(
             'racehall-cart-js',
             RACEHALL_WC_UI_URL . 'assets/js/cart.js',
             ['jquery'],
-            '1.0',
+                        RACEHALL_WC_UI_VERSION,
             true
         );
     }

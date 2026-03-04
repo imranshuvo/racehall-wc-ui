@@ -46,6 +46,14 @@ if ( ! empty( $racehall_products ) && is_array( $racehall_products ) ) {
 window.RH_AJAX_URL = "<?php echo admin_url('admin-ajax.php'); ?>";
 window.RH_PRODUCT_ID = <?php echo $bm_id?>;
 window.RH_BOOKING_LOCATION = "<?php echo esc_js( $lokation ); ?>";
+window.RH_PRICE_CONFIG = {
+    unitPrice: <?php echo wp_json_encode( (float) $product->get_price() ); ?>,
+    currencySymbol: <?php echo wp_json_encode( get_woocommerce_currency_symbol() ); ?>,
+    currencyPos: <?php echo wp_json_encode( get_option( 'woocommerce_currency_pos', 'right' ) ); ?>,
+    decimals: <?php echo wp_json_encode( (int) wc_get_price_decimals() ); ?>,
+    decimalSeparator: <?php echo wp_json_encode( wc_get_price_decimal_separator() ); ?>,
+    thousandSeparator: <?php echo wp_json_encode( wc_get_price_thousand_separator() ); ?>
+};
 </script>
 
 <!-- Main Content -->
@@ -301,32 +309,7 @@ window.RH_BOOKING_LOCATION = "<?php echo esc_js( $lokation ); ?>";
                         </div>
                     </div>
                     <div class="accordion-content">
-                        <div class="counter">
-                            <div class="counter-row">
-                                <div class="counter-label">
-                                    <strong>Voksne</strong>
-                                    <small>18 år eller over.</small>
-                                </div>
-                                <div class="counter-controls">
-                                    <button onclick="updateCount('adult', -1)">−</button>
-                                    <span id="adult">1</span>
-                                    <button onclick="updateCount('adult', 1)">+</button>
-                                </div>
-                            </div>
-
-                            <div class="counter-row">
-                                <div class="counter-label">
-                                    <strong>Børn</strong>
-                                    <small>5–17 år.</small>
-                                </div>
-                                <div class="counter-controls">
-                                    <button onclick="updateCount('child', -1)">−</button>
-                                    <span id="child">0</span>
-                                    <button onclick="updateCount('child', 1)">+</button>
-                                </div>
-                            </div>
-
-                        </div>
+                        <span class="summary-label">Vælg kort kommer snart.</span>
                     </div>
                 </div>
 
@@ -384,7 +367,7 @@ window.RH_BOOKING_LOCATION = "<?php echo esc_js( $lokation ); ?>";
                                         <div class="summary-prices">
                                             <span class="price">
                                             <!-- product price -->
-                                                <?php echo wc_price( $product->get_price() ); ?></span>
+                                                <span id="summary-unit-price"><?php echo wc_price( $product->get_price() ); ?></span></span>
 
                                             <span id="summary-children-price" class="price"></span>
                                         </div>
@@ -417,7 +400,7 @@ window.RH_BOOKING_LOCATION = "<?php echo esc_js( $lokation ); ?>";
 
                             <div class="summary-section addon-section" id="addonSection">
                                 <h4>Add ons</h4>
-                                <div class="summary-item">
+                                <div class="summary-item" id="addonSummaryItems">
                                     <span class="summary-label">—</span>
                                 </div>
                             </div>
@@ -425,7 +408,7 @@ window.RH_BOOKING_LOCATION = "<?php echo esc_js( $lokation ); ?>";
                             <div class="summary-total">
                                 <div class="total-item">
                                     <span class="total-label">Total</span>
-                                    <span class="total-price">
+                                    <span class="total-price" id="summary-total-price">
                                         <?php echo wc_price( $product->get_price() ); ?>
                                     </span>
                                 </div>
