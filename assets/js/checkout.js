@@ -1,7 +1,112 @@
 (function () {
     'use strict';
 
+    function pad2(value) {
+        return String(value).padStart(2, '0');
+    }
+
+    function formatCountdown(seconds) {
+        var safe = Math.max(0, parseInt(seconds, 10) || 0);
+        var minutes = Math.floor(safe / 60);
+        var remain = safe % 60;
+        return pad2(minutes) + ':' + pad2(remain);
+    }
+
+    function disableCheckoutActions() {
+        document.querySelectorAll('#place_order, .payment-button, button[type="submit"]').forEach(function (el) {
+            if (el && typeof el.disabled !== 'undefined') {
+                el.disabled = true;
+            }
+        });
+    }
+
+    function initHoldCountdown() {
+        var banner = document.querySelector('.rh-hold-banner[data-expires-at]');
+        if (!banner) return;
+
+        var countdownEl = banner.querySelector('.rh-hold-countdown');
+        var expiresAt = parseInt(banner.getAttribute('data-expires-at'), 10) || 0;
+        var expiredText = banner.getAttribute('data-expired-text') || 'Reservation expired.';
+        var prefixText = banner.getAttribute('data-prefix-text') || '';
+        var timerCfg = window.RH_HOLD_TIMER || {};
+        var ajaxUrl = timerCfg.ajax_url || '';
+        var nonce = timerCfg.nonce || '';
+        var fallbackRedirect = timerCfg.fallback_redirect || banner.getAttribute('data-cart-url') || window.location.href;
+        if (!expiresAt || !countdownEl) return;
+
+        var redirected = false;
+
+        function redirectAfterExpiry() {
+            if (redirected) return;
+            redirected = true;
+
+            if (!ajaxUrl || !nonce || typeof fetch !== 'function') {
+                window.setTimeout(function () {
+                    window.location.href = fallbackRedirect;
+                }, 1200);
+                return;
+            }
+
+            var body = new URLSearchParams({
+                action: 'rh_expire_hold',
+                nonce: nonce
+            });
+
+            fetch(ajaxUrl, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body
+            })
+                .then(function (res) { return res.text(); })
+                .then(function (txt) {
+                    var redirectUrl = fallbackRedirect;
+                    try {
+                        var json = JSON.parse(txt);
+                        if (json && json.success && json.data && json.data.redirectUrl) {
+                            redirectUrl = json.data.redirectUrl;
+                        }
+                    } catch (e) {
+                    }
+
+                    window.setTimeout(function () {
+                        window.location.href = redirectUrl;
+                    }, 1200);
+                })
+                .catch(function () {
+                    window.setTimeout(function () {
+                        window.location.href = fallbackRedirect;
+                    }, 1200);
+                });
+        }
+
+        var timer = window.setInterval(function () {
+            var now = Math.floor(Date.now() / 1000);
+            var left = expiresAt - now;
+
+            if (left <= 0) {
+                countdownEl.textContent = '00:00';
+                banner.classList.add('expired');
+                banner.querySelector('strong').textContent = expiredText;
+                disableCheckoutActions();
+
+                redirectAfterExpiry();
+
+                window.clearInterval(timer);
+                return;
+            }
+
+            if (prefixText) {
+                countdownEl.textContent = prefixText + ' ' + formatCountdown(left);
+            } else {
+                countdownEl.textContent = formatCountdown(left);
+            }
+        }, 1000);
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
+        initHoldCountdown();
+
         const i18n = window.RH_CHECKOUT_I18N || {};
         const requiredNotice = i18n.requiredNotice || '';
         const processingText = i18n.processing || '';

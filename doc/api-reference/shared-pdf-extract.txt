@@ -1,0 +1,994 @@
+Racehall API documentation
+API Specification
+
+Base URL
+
+https://api.bmileisure.com
+Base Header Parameters
+Parameter
+
+Type
+
+Suggested
+value
+
+Description
+
+AcceptLanguage
+
+string
+
+en
+
+Language of
+properties
+
+Content-Type
+
+string
+
+application/json
+
+Suggested
+content-type for
+the API to
+consume
+
+Bmistring
+Subscription-Key
+
+xxxxxxxxxxxxx
+
+Subscription key
+for API usage
+
+Security
+The API is secured with authentication using a bearer token. Clients should obtain an access token by sending a POST
+request to the /auth/{clientkey}/publicbooking endpoint with their username and password in the
+request body. The response includes a bearer access token that should be included in the Authorization header of
+subsequent requests. The access token has an expiration time of 3600 seconds and is included in a list of valid client
+keys for added security.
+Note: clientkey in the example below is “ racehalltest “ - you can find the other values for clientkey and
+password below
+Endpoint URL
+
+POST /auth/racehalltest/publicbooking
+Request body
+1 {
+2
+"Username": "racehalltest",
+3
+"Password": "racehalltest"
+4 }
+
+Parameter
+
+Type
+
+Description
+
+username
+
+String
+
+Username to
+login
+
+Mandatory
+
+password
+
+String
+
+Password to
+login
+
+Response
+1 {
+2
+"TokenType": "bearer",
+3
+"AccessToken":
+"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbGllbnRrZXkiOiJ5YXNtYXJpbmEiL
+CJuYmYiOjE2ODIwODk0OTIsImV4cCI6MTY4MjA5MzA5MiwiaWF0IjoxNjgyMDg5NDkyfQ.x
+xxx",
+4
+"ExpiresIn": "3600",
+5
+"IncludedClientKeys": [
+6
+"racehalltest"
+7
+]
+8 }
+
+Decoded token
+1 {
+2
+"alg": "HS256",
+3
+"typ": "JWT"
+4 }.{
+5
+"clientkey": "racehalltest",
+6
+"nbf": 1682089492,
+7
+"exp": 1682093092,
+8
+"iat": 1682089492
+9 }.[Signature]
+10
+
+Error response(s)
+400
+
+A 400 (Bad request) response will return a ErrorResponse dto
+1 public class ErrorResponse
+2 {
+3
+public ExceptionKind Kind { get; set; }
+4
+public string Message { get; set; }
+5 }
+
+ExceptionKind
+1 public enum ExceptionKind
+2 {
+3
+Unknown,
+4
+Validation,
+5
+Database,
+6
+Business,
+7
+ActionRequired,
+8 }
+
+401
+
+A 401 (Unauthorized) response indicate either in passing a expired or wrong JWT.
+Also serving a ClientKey in the URL parameters that is not included in the JWT claims will also results in a 401.
+
+Endpoints
+1. Retrieve all locations
+Endpoint URL
+
+GET /public-booking/{clientKey}/locations
+Response 200 OK
+1 {
+2
+"locations": [
+3
+{
+4
+"clientKey": "...",
+5
+"name": "...."
+6
+},
+7
+{
+8
+"clientKey": "....",
+9
+"name": "..."
+10
+}
+11
+]
+12
+}
+
+Other possible responses: 400, 401, 500
+
+2. Retrieve all pages available on a date
+Endpoint URL
+
+GET /public-booking/{clientKey}/page?date={date}
+Parameter
+
+Type
+
+Description
+
+date
+
+DateTime
+
+Date on
+which page
+should be
+available
+
+Mandatory
+
+Example
+2025-0531T00:00:00.
+000Z
+
+Response 200 OK
+1 [
+2
+{
+3
+"id": 123,
+4
+"name": "...",
+5
+"kind": 0,
+6
+"products": [
+7
+{
+8
+"id": 10,
+9
+"name": "....",
+10
+"info": "<html>\r\n\r\n<style type=\"text/css\">....
+</style>\r\n\r\n<body>....</body>\r\n</html>",
+11
+"hasPicture": true,
+12
+"bookingMode": 0,
+13
+"productGroup": "...",
+14
+"minAmount": -1,
+15
+"maxAmount": -1,
+16
+"minAge": 0,
+17
+"maxAge": 200,
+18
+"resourceKind": "Race",
+19
+"kind": 2,
+20
+"isCombo": true,
+21
+"isMembersOnly": false,
+22
+"prices": [
+23
+{
+24
+"amount": 20.0,
+
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+
+},
+{
+
+},
+{
+
+"kind": 0,
+"shortName": "m",
+"depositKind": 0
+"amount": 1.0,
+"kind": 0,
+"shortName": "c",
+"depositKind": 2
+
+}
+],
+"resources": [
+{
+"id": 1,
+"xRef": null,
+"kind": "Race"
+}
+],
+"dynamicGroups": null,
+"xRef": null
+
+"id": 23,
+"name": "...",
+"info": "<html>\r\n\r\n<style type=\"text/css\">...
+</style>\r\n\r\n<body>....</body>\r\n</html>",
+"hasPicture": true,
+"bookingMode": 0,
+"productGroup": "...",
+"minAmount": -1,
+"maxAmount": 12,
+"minAge": null,
+"maxAge": null,
+"resourceKind": "Race",
+"kind": 7,
+"isCombo": true,
+"isMembersOnly": false,
+"prices": [
+{
+"amount": 37.0,
+"kind": 0,
+"shortName": "m",
+"depositKind": 0
+},
+{
+"amount": 1.0,
+"kind": 0,
+"shortName": "c",
+"depositKind": 2
+}
+],
+"resources": [
+{
+"id": 1,
+"xRef": null,
+"kind": "Race"
+}
+],
+"dynamicGroups": [
+{
+"name": "Child Drivers Aged 8-12 ",
+"tag": "kids",
+"minQuantity": 1.0,
+"maxQuantity": 10.0,
+"id": 123,
+"quantity": 1.0
+},
+{
+"name": "Adult Drivers Aged 13+",
+"tag": "adults",
+"minQuantity": 0.0,
+
+95
+96
+97
+98
+99
+100
+101
+102
+103
+104
+105
+106
+
+"maxQuantity": 11.0,
+"id": 124,
+"quantity": 0.0
+
+]
+
+}
+
+}
+],
+"xRef": null
+
+},
+{.....}
+]
+
+Other possible responses: 400, 401, 500
+
+3. Retrieve all bookable products
+Endpoint URL
+
+GET /public-booking/{clientKey}/products
+Response 200 OK
+1 [
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33 ]
+34
+
+{
+
+}
+
+"id": "123",
+"name": "...",
+"info": "...",
+"hasPicture": true,
+"isCombo": true,
+"bookingMode": 0,
+"prices": [
+{
+"amount": 99.95,
+"kind": 0,
+"shortName": "m",
+"depositKind": 0
+}
+],
+"productGroup": "...",
+"dynamicGroups": null,
+"minAmount": 14,
+"maxAmount": 18,
+"voucherMetaId": null,
+"voucherMetaKind": null,
+"isEntry": true,
+"resourceId": "123",
+"resourceKind": "Race",
+"kind": 2,
+"saleMode": 1,
+"sessionGroup": "Unknown",
+"minAge": 14,
+"maxAge": 100,
+"isMembersOnly": false
+
+Other possible responses: 400, 401, 500
+
+4. Return image of the product
+Endpoint URL
+
+GET /public-booking/{clientKey}/image/product?productId={productId}
+
+Request parameters
+
+Parameter
+
+Data type
+
+Description
+
+productId
+
+Long
+
+identifier of picked
+product
+
+Mandatory
+
+Response
+1 Image
+2
+
+Other possible responses: 400, 401, 404, 500
+
+5. Return available days of a product in a given period
+Endpoint URL
+
+GET /public-booking/{clientKey}/availability?productId=
+{productId}&dateFrom={dateFrom}&dateTill={dateTill}
+Request parameters
+
+Parameter
+
+Data type
+
+Description
+
+productId
+
+Long
+
+identifier of picked
+product
+
+dateFrom
+
+Date “2023-0401“
+
+beginning date to
+search availability
+e.g. beginning of
+the month
+
+dateTill
+
+Date “2023-0430“
+
+ending date to
+search availability
+e.g. end of the
+month
+
+Response
+1 {
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16 }
+17
+
+"activities" : [
+{
+"date": "2023-04-21",
+"status": 0 //0 available
+},
+{
+"date": "2022-04-21",
+"status": 0 // 0 available
+},
+{
+"date": "2022-04-23",
+"status": 1 //1 fully booked
+}
+]
+
+Mandatory
+
+Status
+
+enum: {0: "Available", 1: "Fully Booked"}
+Other possible responses: 400, 401, 404, 500
+
+6. Retrieve proposals for a product on the specific date
+Endpoint URL
+
+POST /public-booking/{clientKey}/availability?date={date}
+Request parameters
+
+Parameter
+
+Data type
+
+Description
+
+date
+
+Date “2023-0421“
+
+picked date to
+retrieve available
+time slots from.
+
+Mandatory
+
+Request body
+1 {
+2
+3
+4
+5 }
+
+"productId" : "123"
+"pageId": "123",
+"quantity": 1
+
+Property
+
+Data type
+
+Description
+
+productId
+
+Long
+
+identifier of picked
+product
+
+pageId
+
+Long
+
+identifier of picked
+page
+
+quantity
+
+Int
+
+Response
+1 {
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+
+"proposals": [
+{
+"blocks": [
+{
+"productLineIds": ["123"],
+"block": {
+"name": "...",
+"showSessionTimes": true,
+"capacity": 18,
+"freeSpots": 12,
+"resourceId": "123",
+"prices": [
+{
+"amount": 99.95,
+"kind": 0,
+"shortName": "m",
+"depositKind": 0
+}
+],
+"bookingMode": 0,
+
+Mandatory
+
+22
+23
+24
+25
+26
+27
+28
+29
+30 }
+31
+
+}
+
+]
+
+}
+
+}
+
+"start": "2023-04-21T14:40:00",
+"stop": "2023-04-21T14:55:00"
+
+],
+"productLineId": null
+
+Other possible responses: 400, 401, 404, 500
+
+7. Book a time slot
+Endpoint URL
+
+POST /public-booking/{clientKey}/booking/book
+Request body
+1 {
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14 }
+15
+
+"productId": "103983",
+"pageId": "739282",
+"quantity": 1,
+"resourceId": "19476",
+"proposal": {...},
+"contactPerson": {
+"firstName": "Nick",
+"lastName": "Test",
+"email": "nick.Test@gmail.com",
+"phone": "04500008260"
+},
+"orderId": "1234",
+
+Property
+
+Data type
+
+Description
+
+productId
+
+String
+
+identifier of the
+booked product
+
+pageId
+
+String
+
+identitier of the
+page, from
+where product
+was used
+
+quantity
+
+Int
+
+The amount of
+people to book
+
+resourceI
+d
+
+String
+
+identifier of a
+specific resource
+in our database
+
+proposal
+
+Object
+
+proposal you
+want to book on
+
+ContactPer Object
+son
+
+information
+about the person
+who buys the
+ticket, if not
+
+Mandatory
+
+included we will
+create a booking
+with a no-name
+person
+
+OrderId
+
+String
+
+nullable order id
+to add existing
+products to your
+order
+
+Response
+1 {
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11 }
+12
+
+"schedules": [
+{...}
+],
+"orderId": "63000000007315961",
+"projectId": "63000000007315962",
+"parentBillLineId": "63000000007315965",
+"prices": [
+{...}
+]
+
+Other possible responses: 400, 401, 404, 500
+
+8. Confirm external payment and return booking confirmation and QR code
+Endpoint URL
+
+POST /public-booking/{clientKey}/payment/confirm
+Request body
+1 {
+2
+"id": "string",
+3
+"paymentTime": "2023-04-20T13:31:54.135Z",
+4
+"amount": 0,
+5
+"orderId": 0,
+6
+"extraData": {
+7
+"additionalProp1": "string",
+8
+"additionalProp2": "string",
+9
+"additionalProp3": "string"
+10
+}
+11 }
+12
+
+Parameter
+
+Date type
+
+Description
+
+id
+
+String
+
+Identifier of
+external payment
+(stored for
+reference)
+
+paymentTim
+e
+
+DateTime (UTC)
+
+UTC datetime of
+payment
+confirmed
+
+Mandatory
+
+amount
+
+Decimal
+
+The amount that
+has been payed
+
+orderId
+
+Long
+
+Identifier of the
+order
+
+extraData
+
+Object
+
+place to put extra
+properties if
+necessary
+
+Response
+1 {
+2
+"status": 0, //0 = payment confirmed
+3
+"reservationCode": "r{id}", //replacement for Qr code payload
+4
+"reservationNumber" : "123"
+5
+"orderId": "1234"
+6 }
+7
+
+Other possible responses: 400, 401, 404, 500
+
+9. Cancel current bill/order
+Endpoint URL
+
+DELETE /public-booking/{clientKey}/bill/{orderId}/cancel
+Request parameters
+
+Parameter
+
+Data type
+
+Description
+
+orderId
+
+Long
+
+identifier of the bill you
+want to cancel (before
+payment)
+
+Other possible responses: 400, 401, 404, 500
+
+

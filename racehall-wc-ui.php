@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.11
+ * Version: 1.12
  * Author: Webkonsulenterne ApS
  */
 
@@ -11,12 +11,39 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 if ( defined( 'RACEHALL_WC_UI_BOOTSTRAPPED' ) ) {
     return;
 }
+
+function wk_rh_get_main_booking_product_url() {
+    if ( function_exists( 'WC' ) && WC()->session ) {
+        $session_url = WC()->session->get( 'rh_last_product_url' );
+        if ( is_string( $session_url ) && $session_url !== '' ) {
+            return esc_url_raw( $session_url );
+        }
+    }
+
+    if ( function_exists( 'WC' ) && WC()->cart && ! WC()->cart->is_empty() ) {
+        foreach ( WC()->cart->get_cart() as $cart_item ) {
+            if ( ! empty( $cart_item['is_addon'] ) ) {
+                continue;
+            }
+
+            $product_id = isset( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0;
+            if ( $product_id > 0 ) {
+                $url = get_permalink( $product_id );
+                if ( is_string( $url ) && $url !== '' ) {
+                    return $url;
+                }
+            }
+        }
+    }
+
+    return wc_get_cart_url();
+}
 define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.11' );
+define( 'RACEHALL_WC_UI_VERSION', '1.12' );
 
 function wk_rh_get_settings_defaults() {
     return [
@@ -24,10 +51,99 @@ function wk_rh_get_settings_defaults() {
         'test_base_url'       => 'https://testbmiapigateway.azure-api.net',
         'live_base_url'       => 'https://api.bmileisure.com',
         'accept_language'     => 'en',
+        'booking_hold_timeout_minutes' => 15,
         'test_locations_json' => '[]',
         'live_locations_json' => '[]',
     ];
 }
+
+function wk_rh_expire_current_cart_reservation( $source = 'manual' ) {
+    if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
+        return [
+            'success' => false,
+            'redirect_url' => wc_get_cart_url(),
+        ];
+    }
+
+    $redirect_url = wk_rh_get_main_booking_product_url();
+    $main_holds = [];
+
+    if ( ! WC()->cart->is_empty() ) {
+        foreach ( WC()->cart->get_cart() as $item ) {
+            if ( ! empty( $item['is_addon'] ) ) {
+                continue;
+            }
+
+            $upstream_order_id = isset( $item['bmi_order_id'] ) ? trim( (string) $item['bmi_order_id'] ) : '';
+            if ( $upstream_order_id === '' ) {
+                continue;
+            }
+
+            $location = isset( $item['booking_location'] ) ? sanitize_text_field( (string) $item['booking_location'] ) : '';
+            $main_holds[ $upstream_order_id ] = $location;
+        }
+    }
+
+    foreach ( $main_holds as $upstream_order_id => $location ) {
+        if ( function_exists( 'wk_rh_cancel_upstream_order_by_id' ) ) {
+            $cancelled = wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location, [
+                'source' => (string) $source,
+                'operation' => 'hold_timeout_cancel',
+            ] );
+
+            if ( ! $cancelled && function_exists( 'wk_rh_log_upstream_event' ) ) {
+                wk_rh_log_upstream_event( 'error', 'Failed to cancel reservation during forced timeout expiry', [
+                    'operation' => 'hold_timeout_cancel',
+                    'orderId' => (string) $upstream_order_id,
+                    'location' => (string) $location,
+                    'source' => (string) $source,
+                ] );
+            }
+        }
+
+        wk_rh_release_active_hold( $upstream_order_id );
+    }
+
+    WC()->cart->empty_cart();
+    wk_rh_clear_booking_session_state();
+
+    $notice = __( 'Din reservation er udløbet. Start venligst bookingprocessen igen.', 'racehall-wc-ui' );
+    wc_add_notice( $notice, 'error' );
+
+    return [
+        'success' => true,
+        'redirect_url' => $redirect_url,
+        'notice' => $notice,
+    ];
+}
+
+add_action( 'wp_ajax_rh_expire_hold', function() {
+    if ( ! isset( $_POST['nonce'] ) || ! wp_verify_nonce( $_POST['nonce'], 'rh_hold_nonce' ) ) {
+        wp_send_json_error( [ 'message' => 'Invalid nonce' ], 403 );
+    }
+
+    wk_rh_process_expired_active_holds( 'ajax_timeout' );
+    $result = wk_rh_expire_current_cart_reservation( 'ajax_timeout' );
+
+    wp_send_json_success( [
+        'redirectUrl' => isset( $result['redirect_url'] ) ? $result['redirect_url'] : wc_get_cart_url(),
+        'message' => isset( $result['notice'] ) ? $result['notice'] : '',
+    ] );
+} );
+
+add_action( 'wp_ajax_nopriv_rh_expire_hold', function() {
+    if ( ! isset( $_POST['nonce'] ) || ! wp_verify_nonce( $_POST['nonce'], 'rh_hold_nonce' ) ) {
+        wp_send_json_error( [ 'message' => 'Invalid nonce' ], 403 );
+    }
+
+    wk_rh_process_expired_active_holds( 'ajax_timeout' );
+    $result = wk_rh_expire_current_cart_reservation( 'ajax_timeout' );
+
+    wp_send_json_success( [
+        'redirectUrl' => isset( $result['redirect_url'] ) ? $result['redirect_url'] : wc_get_cart_url(),
+        'message' => isset( $result['notice'] ) ? $result['notice'] : '',
+    ] );
+} );
 
 function wk_rh_get_settings() {
     $saved = get_option( 'wk_rh_settings', [] );
@@ -193,11 +309,243 @@ function wk_rh_sanitize_settings( $input ) {
         'test_base_url'       => esc_url_raw( $input['test_base_url'] ?? $defaults['test_base_url'] ),
         'live_base_url'       => esc_url_raw( $input['live_base_url'] ?? $defaults['live_base_url'] ),
         'accept_language'     => sanitize_text_field( $input['accept_language'] ?? 'en' ),
+        'booking_hold_timeout_minutes' => max( 5, min( 120, (int) ( $input['booking_hold_timeout_minutes'] ?? $defaults['booking_hold_timeout_minutes'] ) ) ),
         'test_locations_json' => wk_rh_sanitize_locations_json( $input['test_locations_json'] ?? '[]', 'wk_rh_test_locations_json_invalid' ),
         'live_locations_json' => wk_rh_sanitize_locations_json( $input['live_locations_json'] ?? '[]', 'wk_rh_live_locations_json_invalid' ),
     ];
 
     return $sanitized;
+}
+
+function wk_rh_get_booking_hold_timeout_minutes() {
+    $settings = wk_rh_get_settings();
+    $value = isset( $settings['booking_hold_timeout_minutes'] ) ? (int) $settings['booking_hold_timeout_minutes'] : 15;
+    return max( 5, min( 120, $value ) );
+}
+
+function wk_rh_get_cart_hold_expiry_context() {
+    if ( ! function_exists( 'WC' ) || ! WC()->cart || WC()->cart->is_empty() ) {
+        return [
+            'expires_at' => 0,
+            'order_id'   => '',
+        ];
+    }
+
+    $earliest_expiry = 0;
+    $order_id = '';
+    foreach ( WC()->cart->get_cart() as $cart_item ) {
+        if ( ! empty( $cart_item['is_addon'] ) ) {
+            continue;
+        }
+
+        $item_expiry = isset( $cart_item['bmi_hold_expires_at'] ) ? (int) $cart_item['bmi_hold_expires_at'] : 0;
+        $item_order  = isset( $cart_item['bmi_order_id'] ) ? trim( (string) $cart_item['bmi_order_id'] ) : '';
+        if ( $item_expiry <= 0 || $item_order === '' ) {
+            continue;
+        }
+
+        if ( $earliest_expiry === 0 || $item_expiry < $earliest_expiry ) {
+            $earliest_expiry = $item_expiry;
+            $order_id = $item_order;
+        }
+    }
+
+    return [
+        'expires_at' => $earliest_expiry,
+        'order_id'   => $order_id,
+    ];
+}
+
+function wk_rh_render_hold_banner_html( $expires_at, $expired_text, $prefix_text, $headline_text = '', $extra_class = '' ) {
+    $expires_at = (int) $expires_at;
+    if ( $expires_at <= 0 ) {
+        return;
+    }
+
+    $headline = $headline_text !== ''
+        ? $headline_text
+        : __( 'Bekræft ordren inden tidsfristen udløber.', 'racehall-wc-ui' );
+
+    $class_name = trim( 'rh-hold-banner ' . sanitize_html_class( (string) $extra_class ) );
+    echo '<div class="' . esc_attr( $class_name ) . '" data-expires-at="' . esc_attr( $expires_at ) . '" data-expired-text="' . esc_attr( $expired_text ) . '" data-prefix-text="' . esc_attr( $prefix_text ) . '" data-cart-url="' . esc_url( wc_get_cart_url() ) . '">';
+    echo '<strong>' . esc_html( $headline ) . '</strong>';
+    echo '<span class="rh-hold-countdown" aria-live="polite">--:--</span>';
+    echo '</div>';
+}
+
+function wk_rh_get_hold_banner_markup( array $args = [] ) {
+    $defaults = [
+        'expires_at'   => 0,
+        'expired_text' => __( 'Reservationstiden er udløbet. Du skal starte bookingflowet igen.', 'racehall-wc-ui' ),
+        'prefix_text'  => __( 'Din reservation holdes i:', 'racehall-wc-ui' ),
+        'headline_text'=> __( 'Bekræft ordren inden tidsfristen udløber.', 'racehall-wc-ui' ),
+        'extra_class'  => '',
+    ];
+
+    $args = wp_parse_args( $args, $defaults );
+    $expires_at = (int) $args['expires_at'];
+    if ( $expires_at <= 0 ) {
+        $hold_ctx = wk_rh_get_cart_hold_expiry_context();
+        $expires_at = isset( $hold_ctx['expires_at'] ) ? (int) $hold_ctx['expires_at'] : 0;
+    }
+
+    if ( $expires_at <= 0 ) {
+        return '';
+    }
+
+    ob_start();
+    wk_rh_render_hold_banner_html(
+        $expires_at,
+        (string) $args['expired_text'],
+        (string) $args['prefix_text'],
+        (string) $args['headline_text'],
+        (string) $args['extra_class']
+    );
+    return (string) ob_get_clean();
+}
+
+add_shortcode( 'rh_hold_countdown', function( $atts ) {
+    $atts = shortcode_atts( [
+        'expired_text' => __( 'Reservationstiden er udløbet. Du skal starte bookingflowet igen.', 'racehall-wc-ui' ),
+        'prefix_text' => __( 'Din reservation holdes i:', 'racehall-wc-ui' ),
+        'headline_text' => __( 'Bekræft ordren inden tidsfristen udløber.', 'racehall-wc-ui' ),
+        'class' => '',
+    ], $atts, 'rh_hold_countdown' );
+
+    return wk_rh_get_hold_banner_markup( [
+        'expired_text' => (string) $atts['expired_text'],
+        'prefix_text' => (string) $atts['prefix_text'],
+        'headline_text' => (string) $atts['headline_text'],
+        'extra_class' => (string) $atts['class'],
+    ] );
+} );
+
+function wk_rh_render_checkoutwc_hold_banner() {
+    static $already_rendered = false;
+
+    if ( is_admin() || ! function_exists( 'is_checkout' ) || ! is_checkout() ) {
+        return;
+    }
+
+    if ( $already_rendered ) {
+        return;
+    }
+
+    $already_rendered = true;
+
+    echo wk_rh_get_hold_banner_markup( [
+        'extra_class' => 'rh-hold-banner-checkoutwc',
+    ] );
+}
+
+add_action( 'cfw_before_checkout_form', 'wk_rh_render_checkoutwc_hold_banner', 5 );
+add_action( 'cfw_before_main_content', 'wk_rh_render_checkoutwc_hold_banner', 5 );
+
+add_action( 'woocommerce_before_checkout_form', function() {
+    static $already_rendered = false;
+
+    if ( is_admin() ) {
+        return;
+    }
+
+    if ( $already_rendered ) {
+        return;
+    }
+
+    $already_rendered = true;
+
+    $hold_ctx = wk_rh_get_cart_hold_expiry_context();
+    $hold_expires_at = isset( $hold_ctx['expires_at'] ) ? (int) $hold_ctx['expires_at'] : 0;
+
+    wk_rh_render_hold_banner_html(
+        $hold_expires_at,
+        __( 'Reservationstiden er udløbet. Du skal starte bookingflowet igen.', 'racehall-wc-ui' ),
+        __( 'Din reservation holdes i:', 'racehall-wc-ui' )
+    );
+}, 5 );
+
+function wk_rh_get_active_holds() {
+    $holds = get_option( 'wk_rh_active_holds', [] );
+    return is_array( $holds ) ? $holds : [];
+}
+
+function wk_rh_set_active_holds( array $holds ) {
+    update_option( 'wk_rh_active_holds', $holds, false );
+}
+
+function wk_rh_register_active_hold( $upstream_order_id, $location, $expires_at, $context = [] ) {
+    $upstream_order_id = trim( (string) $upstream_order_id );
+    if ( $upstream_order_id === '' ) {
+        return;
+    }
+
+    $holds = wk_rh_get_active_holds();
+    $holds[ $upstream_order_id ] = [
+        'location'   => sanitize_text_field( (string) $location ),
+        'expires_at' => max( time(), (int) $expires_at ),
+        'status'     => 'active',
+        'updated_at' => time(),
+        'context'    => is_array( $context ) ? $context : [],
+    ];
+    wk_rh_set_active_holds( $holds );
+}
+
+function wk_rh_release_active_hold( $upstream_order_id ) {
+    $upstream_order_id = trim( (string) $upstream_order_id );
+    if ( $upstream_order_id === '' ) {
+        return;
+    }
+
+    $holds = wk_rh_get_active_holds();
+    if ( isset( $holds[ $upstream_order_id ] ) ) {
+        unset( $holds[ $upstream_order_id ] );
+        wk_rh_set_active_holds( $holds );
+    }
+}
+
+function wk_rh_process_expired_active_holds( $source = 'runtime' ) {
+    if ( ! function_exists( 'wk_rh_cancel_upstream_order_by_id' ) ) {
+        return;
+    }
+
+    $holds = wk_rh_get_active_holds();
+    if ( empty( $holds ) ) {
+        return;
+    }
+
+    $now = time();
+    $changed = false;
+
+    foreach ( $holds as $upstream_order_id => $hold ) {
+        if ( ! is_array( $hold ) ) {
+            unset( $holds[ $upstream_order_id ] );
+            $changed = true;
+            continue;
+        }
+
+        $expires_at = isset( $hold['expires_at'] ) ? (int) $hold['expires_at'] : 0;
+        if ( $expires_at <= 0 || $expires_at > $now ) {
+            continue;
+        }
+
+        $location = isset( $hold['location'] ) ? sanitize_text_field( (string) $hold['location'] ) : '';
+        $ok = wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location, [
+            'operation' => 'hold_timeout_cancel',
+            'source'    => (string) $source,
+        ] );
+
+        if ( $ok ) {
+            unset( $holds[ $upstream_order_id ] );
+        } else {
+            $holds[ $upstream_order_id ]['expires_at'] = $now + 300;
+            $holds[ $upstream_order_id ]['updated_at'] = $now;
+        }
+        $changed = true;
+    }
+
+    if ( $changed ) {
+        wk_rh_set_active_holds( $holds );
+    }
 }
 
 function wk_rh_register_settings() {
@@ -239,6 +587,13 @@ function wk_rh_render_settings_page() {
                 <tr>
                     <th scope="row"><label for="wk_rh_accept_language"><?php esc_html_e( 'Accept-Language', 'onsite-booking-system' ); ?></label></th>
                     <td><input class="regular-text" type="text" id="wk_rh_accept_language" name="wk_rh_settings[accept_language]" value="<?php echo esc_attr( $settings['accept_language'] ); ?>"></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="wk_rh_booking_hold_timeout_minutes"><?php esc_html_e( 'Booking hold timeout (minutes)', 'onsite-booking-system' ); ?></label></th>
+                    <td>
+                        <input class="small-text" type="number" min="5" max="120" step="1" id="wk_rh_booking_hold_timeout_minutes" name="wk_rh_settings[booking_hold_timeout_minutes]" value="<?php echo esc_attr( wk_rh_get_booking_hold_timeout_minutes() ); ?>">
+                        <p class="description"><?php esc_html_e( 'Recommended range is 10–20 minutes. When exceeded, held bookings are cancelled upstream and users must start again.', 'onsite-booking-system' ); ?></p>
+                    </td>
                 </tr>
                 <tr>
                     <th scope="row"><label for="wk_rh_test_locations_json"><?php esc_html_e( 'Test Location Credential Map (JSON)', 'onsite-booking-system' ); ?></label></th>
@@ -322,6 +677,26 @@ function wk_rh_register_admin_menu() {
     );
 }
 add_action( 'admin_menu', 'wk_rh_register_admin_menu' );
+
+add_filter( 'cron_schedules', function( $schedules ) {
+    if ( ! isset( $schedules['wk_rh_every_five_minutes'] ) ) {
+        $schedules['wk_rh_every_five_minutes'] = [
+            'interval' => 300,
+            'display'  => __( 'Every 5 minutes (Onsite Booking)', 'onsite-booking-system' ),
+        ];
+    }
+    return $schedules;
+} );
+
+add_action( 'init', function() {
+    if ( ! wp_next_scheduled( 'wk_rh_expire_booking_holds_event' ) ) {
+        wp_schedule_event( time() + 60, 'wk_rh_every_five_minutes', 'wk_rh_expire_booking_holds_event' );
+    }
+} );
+
+add_action( 'wk_rh_expire_booking_holds_event', function() {
+    wk_rh_process_expired_active_holds( 'cron' );
+} );
 
 function wk_rh_get_upstream_products_cache_key( $location = '' ) {
     $settings = wk_rh_get_settings();
@@ -653,6 +1028,35 @@ add_action('wp_enqueue_scripts', function() {
                         RACEHALL_WC_UI_VERSION,
             true
         );
+
+                wp_localize_script( 'racehall-cart-js', 'RH_HOLD_TIMER', [
+                        'ajax_url' => admin_url( 'admin-ajax.php' ),
+                        'nonce' => wp_create_nonce( 'rh_hold_nonce' ),
+                        'fallback_redirect' => wk_rh_get_main_booking_product_url(),
+                ] );
+    }
+
+    if ( is_checkout() ) {
+        wp_enqueue_style(
+            'racehall-checkout-css',
+            RACEHALL_WC_UI_URL . 'assets/css/checkout.css',
+            [],
+            RACEHALL_WC_UI_VERSION
+        );
+
+        wp_enqueue_script(
+            'racehall-checkout-js',
+            RACEHALL_WC_UI_URL . 'assets/js/checkout.js',
+            ['jquery'],
+            RACEHALL_WC_UI_VERSION,
+            true
+        );
+
+        wp_localize_script( 'racehall-checkout-js', 'RH_HOLD_TIMER', [
+            'ajax_url' => admin_url( 'admin-ajax.php' ),
+            'nonce' => wp_create_nonce( 'rh_hold_nonce' ),
+            'fallback_redirect' => wk_rh_get_main_booking_product_url(),
+        ] );
     }
 
 });
@@ -728,6 +1132,22 @@ add_action( 'woocommerce_remove_cart_item', function( $cart_item_key, $cart ) {
 
     if ( ! $is_main_product_removed ) return;
 
+    $main_order_id = isset( $item['bmi_order_id'] ) ? trim( (string) $item['bmi_order_id'] ) : '';
+    $main_location = ! empty( $item['booking_location'] ) ? sanitize_text_field( $item['booking_location'] ) : '';
+    if ( $main_order_id !== '' && function_exists( 'wk_rh_cancel_upstream_order_by_id' ) ) {
+        wk_rh_cancel_upstream_order_by_id( $main_order_id, $main_location, [
+            'source' => 'cart_remove_main',
+        ] );
+    }
+
+    if ( $main_order_id !== '' && function_exists( 'wk_rh_release_active_hold' ) ) {
+        wk_rh_release_active_hold( $main_order_id );
+    }
+
+    if ( function_exists( 'wk_rh_clear_booking_session_state' ) ) {
+        wk_rh_clear_booking_session_state();
+    }
+
     foreach ( $cart->get_cart() as $key => $cart_item ) {
         if ( isset( $cart_item['is_addon'] ) ) $cart->remove_cart_item( $key );
     }
@@ -739,6 +1159,9 @@ function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
     if ( $is_addon_request ) $cart_item_data['is_addon'] = true;
     if ( ! empty( $_POST['parent_racehall_product'] ) ) $cart_item_data['parent_racehall_product'] = absint($_POST['parent_racehall_product']);
     if ( ! empty( $_POST['booking_location'] ) ) $cart_item_data['booking_location'] = sanitize_text_field($_POST['booking_location']);
+    if ( $is_addon_request && isset( $_POST['addon_price'] ) && is_numeric( $_POST['addon_price'] ) ) {
+        $cart_item_data['addon_unit_price'] = wc_format_decimal( wp_unslash( $_POST['addon_price'] ) );
+    }
 
     // BMI booking session data (stored by rh_save_proposal AJAX, retrieved here)
     $bmi_data = WC()->session ? WC()->session->get('rh_bmi_booking') : null;
@@ -748,6 +1171,7 @@ function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
         $cart_item_data['bmi_resource_id'] = $bmi_data['resourceId']  ?? '';
         $cart_item_data['bmi_order_id']    = $bmi_data['orderId']     ?? '';
         $cart_item_data['bmi_order_item_id'] = $bmi_data['orderItemId'] ?? '';
+        $cart_item_data['bmi_hold_expires_at'] = isset( $bmi_data['expiresAt'] ) ? (int) $bmi_data['expiresAt'] : 0;
     }
 
     if ( $is_addon_request ) {
@@ -760,6 +1184,104 @@ function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
 
     return $cart_item_data;
 }
+
+add_filter( 'woocommerce_add_to_cart_redirect', function( $url ) {
+    if ( ! empty( $_REQUEST['add-to-cart'] ) ) {
+        return wc_get_cart_url();
+    }
+    return $url;
+}, 20 );
+
+add_action( 'woocommerce_before_calculate_totals', function( $cart ) {
+    if ( is_admin() && ! defined( 'DOING_AJAX' ) ) {
+        return;
+    }
+
+    if ( ! $cart || ! method_exists( $cart, 'get_cart' ) ) {
+        return;
+    }
+
+    foreach ( $cart->get_cart() as $cart_item ) {
+        if ( empty( $cart_item['is_addon'] ) || ! isset( $cart_item['addon_unit_price'] ) ) {
+            continue;
+        }
+        if ( empty( $cart_item['data'] ) || ! is_object( $cart_item['data'] ) || ! method_exists( $cart_item['data'], 'set_price' ) ) {
+            continue;
+        }
+
+        $addon_price = (float) $cart_item['addon_unit_price'];
+        if ( $addon_price >= 0 ) {
+            $cart_item['data']->set_price( $addon_price );
+        }
+    }
+}, 20 );
+
+function wk_rh_clear_booking_session_state() {
+    if ( ! function_exists( 'WC' ) || ! WC()->session ) {
+        return;
+    }
+
+    WC()->session->set( 'rh_bmi_booking', null );
+    WC()->session->set( 'booking_supplement', null );
+    WC()->session->set( 'rh_last_product_url', null );
+}
+
+function wk_rh_cancel_and_clear_expired_cart_holds() {
+    if ( ! function_exists( 'WC' ) || ! WC()->cart || WC()->cart->is_empty() ) {
+        return;
+    }
+
+    $now = time();
+    $expired_orders = [];
+    foreach ( WC()->cart->get_cart() as $item ) {
+        if ( ! empty( $item['is_addon'] ) ) {
+            continue;
+        }
+
+        $upstream_order_id = isset( $item['bmi_order_id'] ) ? trim( (string) $item['bmi_order_id'] ) : '';
+        $expires_at = isset( $item['bmi_hold_expires_at'] ) ? (int) $item['bmi_hold_expires_at'] : 0;
+        if ( $upstream_order_id === '' || $expires_at <= 0 || $expires_at > $now ) {
+            continue;
+        }
+
+        $location = isset( $item['booking_location'] ) ? sanitize_text_field( (string) $item['booking_location'] ) : '';
+        $expired_orders[ $upstream_order_id ] = $location;
+    }
+
+    if ( empty( $expired_orders ) ) {
+        return;
+    }
+
+    foreach ( $expired_orders as $upstream_order_id => $location ) {
+        if ( function_exists( 'wk_rh_cancel_upstream_order_by_id' ) ) {
+            $cancelled = wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location, [
+                'source' => 'cart_timeout_guard',
+            ] );
+            if ( ! $cancelled && function_exists( 'wk_rh_log_upstream_event' ) ) {
+                wk_rh_log_upstream_event( 'error', 'Failed to cancel expired hold while clearing cart', [
+                    'operation' => 'hold_timeout_cancel',
+                    'orderId' => (string) $upstream_order_id,
+                    'location' => (string) $location,
+                ] );
+            }
+        }
+
+        wk_rh_release_active_hold( $upstream_order_id );
+    }
+
+    WC()->cart->empty_cart();
+    wk_rh_clear_booking_session_state();
+
+    wc_add_notice(
+        __( 'Din reservation er udløbet. Kurven er nulstillet, så du kan vælge tidspunkt og booke igen.', 'racehall-wc-ui' ),
+        'error'
+    );
+}
+
+add_action( 'woocommerce_check_cart_items', function() {
+    wk_rh_process_expired_active_holds( 'checkout_guard' );
+    wk_rh_cancel_and_clear_expired_cart_holds();
+}, 5 );
 
 add_filter( 'woocommerce_add_to_cart_validation', 'wk_rh_block_addon_without_parent', 20, 3 );
 function wk_rh_block_addon_without_parent( $passed, $product_id, $quantity ) {
@@ -874,6 +1396,9 @@ function wk_rh_send_booking_to_bmi_on_add_to_cart( $cart_item_key, $product_id, 
                 }
 
                 WC()->cart->set_session();
+            } elseif ( function_exists( 'WC' ) && WC()->cart ) {
+                WC()->cart->remove_cart_item( $cart_item_key );
+                wc_add_notice( __( 'Add-on kunne ikke reserveres og blev fjernet fra kurven. Prøv igen.', 'racehall-wc-ui' ), 'error' );
             }
         }
 
@@ -971,6 +1496,11 @@ function wk_rh_send_booking_to_bmi_on_add_to_cart( $cart_item_key, $product_id, 
                 'error' => $response->get_error_message(),
             ] );
         }
+
+        if ( function_exists( 'WC' ) && WC()->cart ) {
+            WC()->cart->remove_cart_item( $cart_item_key );
+            wc_add_notice( __( 'Tidslot kunne ikke reserveres. Vælg tidspunkt igen og prøv på ny.', 'racehall-wc-ui' ), 'error' );
+        }
         return;
     }
 
@@ -986,10 +1516,21 @@ function wk_rh_send_booking_to_bmi_on_add_to_cart( $cart_item_key, $product_id, 
                 'body' => wp_remote_retrieve_body( $response ),
             ] );
         }
+
+        if ( function_exists( 'WC' ) && WC()->cart ) {
+            WC()->cart->remove_cart_item( $cart_item_key );
+            wc_add_notice( __( 'Tidslot blev optaget før reservationen kunne gennemføres. Vælg en ny tid.', 'racehall-wc-ui' ), 'error' );
+        }
         return;
     }
 
-    if ( empty( $result['orderId'] ) ) return;
+    if ( empty( $result['orderId'] ) ) {
+        if ( function_exists( 'WC' ) && WC()->cart ) {
+            WC()->cart->remove_cart_item( $cart_item_key );
+            wc_add_notice( __( 'Reservation mangler order-id. Prøv igen.', 'racehall-wc-ui' ), 'error' );
+        }
+        return;
+    }
 
     if ( empty( $result['orderItemId'] ) ) {
         if ( function_exists( 'wk_rh_log_upstream_event' ) ) {
@@ -1001,16 +1542,55 @@ function wk_rh_send_booking_to_bmi_on_add_to_cart( $cart_item_key, $product_id, 
                 'response' => $result,
             ] );
         }
+
+        if ( function_exists( 'WC' ) && WC()->cart ) {
+            WC()->cart->remove_cart_item( $cart_item_key );
+            wc_add_notice( __( 'Reservation mangler item-id. Prøv igen.', 'racehall-wc-ui' ), 'error' );
+        }
         return;
     }
+
+    $hold_timeout_minutes = function_exists( 'wk_rh_get_booking_hold_timeout_minutes' )
+        ? wk_rh_get_booking_hold_timeout_minutes()
+        : 15;
+    $expires_at = time() + ( max( 5, (int) $hold_timeout_minutes ) * 60 );
 
     // Save BMI IDs to cart item data
     if ( isset( WC()->cart->cart_contents[ $cart_item_key ] ) ) {
         WC()->cart->cart_contents[ $cart_item_key ]['bmi_order_id'] = $result['orderId'];
         WC()->cart->cart_contents[ $cart_item_key ]['bmi_order_item_id'] = $result['orderItemId'];
+        WC()->cart->cart_contents[ $cart_item_key ]['bmi_hold_expires_at'] = $expires_at;
         WC()->cart->set_session();
         if (isset(WC()->session)) {
             WC()->session->set('bmi_booked_' . $cart_item_key, true);
+            $session_booking = WC()->session->get( 'rh_bmi_booking' );
+            if ( ! is_array( $session_booking ) ) {
+                $session_booking = [];
+            }
+            $session_booking['orderId'] = (string) $result['orderId'];
+            $session_booking['orderItemId'] = (string) $result['orderItemId'];
+            $session_booking['expiresAt'] = $expires_at;
+            WC()->session->set( 'rh_bmi_booking', $session_booking );
+
+            WC()->session->set( 'booking_supplement', [
+                'supplements' => is_array( $result['supplements'] ?? null ) ? $result['supplements'] : [],
+                'orderId' => (string) $result['orderId'],
+                'expiresAt' => $expires_at,
+            ] );
+        }
+
+        if ( function_exists( 'wk_rh_register_active_hold' ) ) {
+            wk_rh_register_active_hold( (string) $result['orderId'], $booking_location, $expires_at, [
+                'source' => 'add_to_cart',
+                'wcProductId' => (string) $product_id,
+            ] );
+        }
+
+        if ( function_exists( 'WC' ) && WC()->session ) {
+            $product_url = get_permalink( (int) $product_id );
+            if ( is_string( $product_url ) && $product_url !== '' ) {
+                WC()->session->set( 'rh_last_product_url', $product_url );
+            }
         }
     }
 }

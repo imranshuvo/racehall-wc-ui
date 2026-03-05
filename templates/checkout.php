@@ -1,6 +1,7 @@
 <?php
 defined( 'ABSPATH' ) || exit;
 get_header();
+do_action( 'woocommerce_check_cart_items' );
 
 $checkout = WC()->checkout();
 $cart_items = WC()->cart->get_cart();
@@ -22,6 +23,11 @@ if ( ! WC()->cart->is_empty() ) {
         }
     }
 }
+
+$hold_ctx = function_exists( 'wk_rh_get_cart_hold_expiry_context' )
+    ? wk_rh_get_cart_hold_expiry_context()
+    : [ 'expires_at' => 0, 'order_id' => '' ];
+$hold_expires_at = isset( $hold_ctx['expires_at'] ) ? (int) $hold_ctx['expires_at'] : 0;
 ?>
 
 <script>
@@ -34,6 +40,17 @@ window.RH_CHECKOUT_I18N = {
 </script>
 
 <div class="container">
+
+<?php if ( $hold_expires_at > 0 ) : ?>
+    <div class="rh-hold-banner"
+         data-expires-at="<?php echo esc_attr( $hold_expires_at ); ?>"
+         data-expired-text="<?php echo esc_attr__( 'Reservationstiden er udløbet. Du skal starte bookingflowet igen.', 'racehall-wc-ui' ); ?>"
+         data-prefix-text="<?php echo esc_attr__( 'Din reservation holdes i:', 'racehall-wc-ui' ); ?>"
+         data-cart-url="<?php echo esc_url( wc_get_cart_url() ); ?>">
+        <strong><?php esc_html_e( 'Bekræft ordren inden tidsfristen udløber.', 'racehall-wc-ui' ); ?></strong>
+        <span class="rh-hold-countdown" aria-live="polite">--:--</span>
+    </div>
+<?php endif; ?>
 
 <?php if ( ! WC()->cart->is_empty() ) : ?>
 

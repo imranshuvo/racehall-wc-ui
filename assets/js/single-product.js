@@ -30,6 +30,16 @@ function parseRuleNumber(value, fallback = null) {
     return num
 }
 
+function parseRuleFromKeys(source, keys, fallback = null) {
+    if (!source || typeof source !== 'object' || !Array.isArray(keys)) return fallback
+    for (const key of keys) {
+        if (!Object.prototype.hasOwnProperty.call(source, key)) continue
+        const parsed = parseRuleNumber(source[key], null)
+        if (parsed !== null) return parsed
+    }
+    return fallback
+}
+
 function normalizeTag(tagValue) {
     return String(tagValue || '').trim().toLowerCase()
 }
@@ -62,10 +72,10 @@ function extractRulesFromProposal(proposal) {
         return rules
     }
 
-    const proposalMin = parseRuleNumber(proposal.minQuantity, null)
-    const proposalMax = parseRuleNumber(proposal.maxQuantity, null)
-    const minAmount = parseRuleNumber(proposal.minAmount, null)
-    const maxAmount = parseRuleNumber(proposal.maxAmount, null)
+    const proposalMin = parseRuleFromKeys(proposal, ['minQuantity', 'minQty', 'minimumQuantity', 'minimumQty'], null)
+    const proposalMax = parseRuleFromKeys(proposal, ['maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty'], null)
+    const minAmount = parseRuleFromKeys(proposal, ['minAmount', 'minimumAmount'], null)
+    const maxAmount = parseRuleFromKeys(proposal, ['maxAmount', 'maximumAmount'], null)
 
     if (proposalMin !== null) rules.total.min = proposalMin
     if (proposalMax !== null) rules.total.max = proposalMax
@@ -77,8 +87,8 @@ function extractRulesFromProposal(proposal) {
         if (!group || typeof group !== 'object') return
 
         const tag = normalizeTag(group.tag)
-        const min = parseRuleNumber(group.minQuantity, null)
-        const max = parseRuleNumber(group.maxQuantity, null)
+        const min = parseRuleFromKeys(group, ['minQuantity', 'minQty', 'minimumQuantity', 'minimumQty'], null)
+        const max = parseRuleFromKeys(group, ['maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty'], null)
         const step = pickStep(group)
         const quantity = parseRuleNumber(group.quantity, null)
 
@@ -720,45 +730,46 @@ async function fetchAndRenderTimeslots(dateStr) {
         }
         if (data.proposals && data.proposals.length) {
             data.proposals.forEach(proposal => {
-                proposal.blocks.forEach(block => {
-                    const slot = block.block
-                    const resourceId = slot.resourceId || (block.productLineIds && block.productLineIds[0]) || ''
-                    const start = slot.start ? slot.start.substring(11, 16) : ''
-                    const stop = slot.stop ? slot.stop.substring(11, 16) : ''
-                    const btn = document.createElement('button')
-                    btn.className = 'time-slot'
-                    btn.textContent = `${start} - ${stop}`
-                    btn.setAttribute('data-time', `${start} - ${stop}`)
+                const blocks = Array.isArray(proposal.blocks) ? proposal.blocks : []
+                const firstBlock = blocks.length ? blocks[0] : null
+                const firstSlot = firstBlock && firstBlock.block ? firstBlock.block : {}
+                const resourceId = firstSlot.resourceId || (firstBlock && firstBlock.productLineIds && firstBlock.productLineIds[0]) || ''
+                const start = firstSlot.start ? firstSlot.start.substring(11, 16) : ''
+                const stop = firstSlot.stop ? firstSlot.stop.substring(11, 16) : ''
+                const blockName = firstSlot && firstSlot.name ? String(firstSlot.name).trim() : ''
 
-                    // Disable button if slot == 0
-                    if (slot.slot === 0) {
-                        btn.disabled = true
-                        btn.classList.add('disabled')
-                    } else {
-                        btn.addEventListener('click', async function () {
-                            container.querySelectorAll('.time-slot').forEach(s => s.classList.remove('selected'))
-                            this.classList.add('selected')
-                            updateSummaryTime(this.getAttribute('data-time'))
-                            applyProposalQuantityRules(proposal)
+                const btn = document.createElement('button')
+                btn.className = 'time-slot'
+                btn.textContent = blockName ? `${blockName} - ${start}` : `${start} - ${stop}`
+                btn.setAttribute('data-time', `${start} - ${stop}`)
 
+                // Disable button if slot == 0
+                if (firstSlot.slot === 0) {
+                    btn.disabled = true
+                    btn.classList.add('disabled')
+                } else {
+                    btn.addEventListener('click', async function () {
+                        container.querySelectorAll('.time-slot').forEach(s => s.classList.remove('selected'))
+                        this.classList.add('selected')
+                        updateSummaryTime(this.getAttribute('data-time'))
+                        applyProposalQuantityRules(proposal)
 
+                        // Show spinner while saving proposal
+                        // container.innerHTML = `<span class="calendar-loading"><div class="spinner"></div></span>`
 
-                            // Show spinner while saving proposal
-                            // container.innerHTML = `<span class="calendar-loading"><div class="spinner"></div></span>`
+                        // Await the saveProposalToSession call
+                        await saveProposalToSession(proposal, resourceId, productId)
 
-                            // Await the saveProposalToSession call
-                            await saveProposalToSession(proposal, resourceId, productId)
+                        // Re-render the time slots for the same date to remove spinner and restore UI
+                        // fetchAndRenderTimeslots(
+                        //     selectedDate
+                        //         ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
+                        //         : ''
+                        // )
+                    })
+                }
 
-                            // Re-render the time slots for the same date to remove spinner and restore UI
-                            // fetchAndRenderTimeslots(
-                            //     selectedDate
-                            //         ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
-                            //         : ''
-                            // )
-                        })
-                    }
-                    container.appendChild(btn)
-                })
+                container.appendChild(btn)
             })
         } else {
             container.innerHTML = '<span style="color:#fff">Ingen ledige tider denne dag.</span>'
@@ -954,12 +965,11 @@ async function saveProposalToSession(block, resourceId, productId) {
             alert(result.errorMessage || 'Fejl ved lagring af booking. Prøv igen.')
         }
         else {
-            // here result.supplements is on add ons section id this addonSection
-            console.log('Supplements to add:', result.supplements)
             const addonItems = document.getElementById('addonSummaryItems')
             if (addonItems) {
                 addonItems.innerHTML = ''
-                const supplements = Array.isArray(result.supplements) ? result.supplements : []
+                const payload = result && typeof result.data === 'object' ? result.data : {}
+                const supplements = Array.isArray(payload.supplements) ? payload.supplements : []
                 if (!supplements.length) {
                     addonItems.innerHTML = '<span class="summary-label">—</span>'
                     return

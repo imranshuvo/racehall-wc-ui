@@ -1,0 +1,389 @@
+{
+  "generatedAtUtc": "2026-03-05T12:32:10Z",
+  "environment": "test",
+  "baseUrl": "https://testbmiapigateway.azure-api.net",
+  "clientKey": "racehallsandbox",
+  "request": {
+    "endpoint": "/public-booking/racehallsandbox/availability?date=2026-03-05",
+    "method": "POST",
+    "body": {
+      "productId": 30372861,
+      "pageId": 73471132,
+      "quantity": 1
+    },
+    "selectedDate": "2026-03-05",
+    "selectedPageId": 73471132
+  },
+  "response": {
+    "proposals": [
+      {
+        "blocks": [
+          {
+            "productLineIds": [
+              30372863
+            ],
+            "block": {
+              "name": "Qualify",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": [
+                {
+                  "amount": 400.0,
+                  "kind": 0,
+                  "shortName": "kr.",
+                  "depositKind": 0
+                }
+              ],
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T16:00:00",
+              "stop": "2026-03-05T16:10:00"
+            }
+          },
+          {
+            "productLineIds": [
+              30372866
+            ],
+            "block": {
+              "name": "Finale",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": null,
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T16:10:00",
+              "stop": "2026-03-05T16:30:00"
+            }
+          }
+        ],
+        "productLineId": null
+      },
+      {
+        "blocks": [
+          {
+            "productLineIds": [
+              30372863
+            ],
+            "block": {
+              "name": "Qualify",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": [
+                {
+                  "amount": 400.0,
+                  "kind": 0,
+                  "shortName": "kr.",
+                  "depositKind": 0
+                }
+              ],
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T16:30:00",
+              "stop": "2026-03-05T16:40:00"
+            }
+          },
+          {
+            "productLineIds": [
+              30372866
+            ],
+            "block": {
+              "name": "Finale",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": null,
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T16:40:00",
+              "stop": "2026-03-05T17:00:00"
+            }
+          }
+        ],
+        "productLineId": null
+      },
+      {
+        "blocks": [
+          {
+            "productLineIds": [
+              30372863
+            ],
+            "block": {
+              "name": "Qualify",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": [
+                {
+                  "amount": 400.0,
+                  "kind": 0,
+                  "shortName": "kr.",
+                  "depositKind": 0
+                }
+              ],
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T17:00:00",
+              "stop": "2026-03-05T17:10:00"
+            }
+          },
+          {
+            "productLineIds": [
+              30372866
+            ],
+            "block": {
+              "name": "Finale",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": null,
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T17:10:00",
+              "stop": "2026-03-05T17:30:00"
+            }
+          }
+        ],
+        "productLineId": null
+      },
+      {
+        "blocks": [
+          {
+            "productLineIds": [
+              30372863
+            ],
+            "block": {
+              "name": "Qualify",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": [
+                {
+                  "amount": 400.0,
+                  "kind": 0,
+                  "shortName": "kr.",
+                  "depositKind": 0
+                }
+              ],
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T17:30:00",
+              "stop": "2026-03-05T17:40:00"
+            }
+          },
+          {
+            "productLineIds": [
+              30372866
+            ],
+            "block": {
+              "name": "Finale",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": null,
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T17:40:00",
+              "stop": "2026-03-05T18:00:00"
+            }
+          }
+        ],
+        "productLineId": null
+      },
+      {
+        "blocks": [
+          {
+            "productLineIds": [
+              30372863
+            ],
+            "block": {
+              "name": "Qualify",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": [
+                {
+                  "amount": 400.0,
+                  "kind": 0,
+                  "shortName": "kr.",
+                  "depositKind": 0
+                }
+              ],
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T18:00:00",
+              "stop": "2026-03-05T18:10:00"
+            }
+          },
+          {
+            "productLineIds": [
+              30372866
+            ],
+            "block": {
+              "name": "Finale",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": null,
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T18:10:00",
+              "stop": "2026-03-05T18:30:00"
+            }
+          }
+        ],
+        "productLineId": null
+      },
+      {
+        "blocks": [
+          {
+            "productLineIds": [
+              30372863
+            ],
+            "block": {
+              "name": "Qualify",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": [
+                {
+                  "amount": 400.0,
+                  "kind": 0,
+                  "shortName": "kr.",
+                  "depositKind": 0
+                }
+              ],
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T18:30:00",
+              "stop": "2026-03-05T18:40:00"
+            }
+          },
+          {
+            "productLineIds": [
+              30372866
+            ],
+            "block": {
+              "name": "Finale",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": null,
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T18:40:00",
+              "stop": "2026-03-05T19:00:00"
+            }
+          }
+        ],
+        "productLineId": null
+      },
+      {
+        "blocks": [
+          {
+            "productLineIds": [
+              30372863
+            ],
+            "block": {
+              "name": "Qualify",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": [
+                {
+                  "amount": 400.0,
+                  "kind": 0,
+                  "shortName": "kr.",
+                  "depositKind": 0
+                }
+              ],
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T19:00:00",
+              "stop": "2026-03-05T19:10:00"
+            }
+          },
+          {
+            "productLineIds": [
+              30372866
+            ],
+            "block": {
+              "name": "Finale",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": null,
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T19:10:00",
+              "stop": "2026-03-05T19:30:00"
+            }
+          }
+        ],
+        "productLineId": null
+      },
+      {
+        "blocks": [
+          {
+            "productLineIds": [
+              30372863
+            ],
+            "block": {
+              "name": "Qualify",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": [
+                {
+                  "amount": 400.0,
+                  "kind": 0,
+                  "shortName": "kr.",
+                  "depositKind": 0
+                }
+              ],
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T19:30:00",
+              "stop": "2026-03-05T19:40:00"
+            }
+          },
+          {
+            "productLineIds": [
+              30372866
+            ],
+            "block": {
+              "name": "Finale",
+              "showSessionTimes": true,
+              "capacity": 34,
+              "freeSpots": 34,
+              "resourceId": 762321,
+              "prices": null,
+              "bookingMode": 0,
+              "resourceGroupMode": -1,
+              "start": "2026-03-05T19:40:00",
+              "stop": "2026-03-05T20:00:00"
+            }
+          }
+        ],
+        "productLineId": null
+      }
+    ]
+  }
+}

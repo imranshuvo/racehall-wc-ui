@@ -1,5 +1,6 @@
 <?php defined('ABSPATH') || exit;
 get_header();
+do_action( 'woocommerce_check_cart_items' );
 wc_print_notices();
 
 
@@ -48,6 +49,11 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
 // BMI booking session data (stored by rh_save_proposal AJAX, retrieved here)
     $supplement = WC()->session ? WC()->session->get('booking_supplement') : null;
 
+$hold_ctx = function_exists( 'wk_rh_get_cart_hold_expiry_context' )
+    ? wk_rh_get_cart_hold_expiry_context()
+    : [ 'expires_at' => 0, 'order_id' => '' ];
+$hold_expires_at = isset( $hold_ctx['expires_at'] ) ? (int) $hold_ctx['expires_at'] : 0;
+
 
 
 
@@ -64,6 +70,17 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
 ?>
 
 <div class="racehall-cart cart-page">
+    <?php if ( $hold_expires_at > 0 ) : ?>
+        <div class="rh-hold-banner"
+             data-expires-at="<?php echo esc_attr( $hold_expires_at ); ?>"
+             data-expired-text="<?php echo esc_attr__( 'Reservationstiden er udløbet. Kurven opdateres…', 'racehall-wc-ui' ); ?>"
+             data-prefix-text="<?php echo esc_attr__( 'Din reservation holdes i:', 'racehall-wc-ui' ); ?>"
+             data-cart-url="<?php echo esc_url( wc_get_cart_url() ); ?>">
+            <strong><?php esc_html_e( 'Bekræft din ordre inden tiden udløber.', 'racehall-wc-ui' ); ?></strong>
+            <span class="rh-hold-countdown" aria-live="polite">--:--</span>
+        </div>
+    <?php endif; ?>
+
     <!-- LEFT SECTION -->
     <section class="left">
         <h1><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h1>
@@ -92,7 +109,8 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
                     $product = $addon['product'];
                     $upstream_id = isset($product['id']) ? (string) $product['id'] : '';
                     $name = isset($product['name']) ? esc_html($product['name']) : '';
-                    $price = isset($product['prices'][0]['amount']) ? number_format($product['prices'][0]['amount'], 2, ',', '.') : '';
+                    $amount_raw = isset($product['prices'][0]['amount']) && is_numeric($product['prices'][0]['amount']) ? (float) $product['prices'][0]['amount'] : 0.0;
+                    $price = number_format($amount_raw, 2, ',', '.');
                     $currency = isset($product['prices'][0]['shortName']) ? esc_html($product['prices'][0]['shortName']) : '';
 
                     $mapped_product_id = 0;
@@ -124,6 +142,7 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
                                 <input type="hidden" name="is_addon" value="1">
                                 <input type="hidden" name="parent_racehall_product" value="<?php echo esc_attr( $main_product_id ); ?>">
                                 <input type="hidden" name="booking_location" value="<?php echo esc_attr( $cart_location ); ?>">
+                                <input type="hidden" name="addon_price" value="<?php echo esc_attr( wc_format_decimal( $amount_raw ) ); ?>">
                                 <button type="submit" class="btn secondary"><?php esc_html_e( 'Tilføj add-on', 'racehall-wc-ui' ); ?></button>
                             </form>
                         <?php else : ?>

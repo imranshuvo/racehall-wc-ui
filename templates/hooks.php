@@ -493,10 +493,37 @@ function wk_rh_extract_quantity_rules_from_proposal( $proposal ) {
         return $rules;
     }
 
-    $proposal_min = isset( $proposal['minQuantity'] ) && is_numeric( $proposal['minQuantity'] ) ? (float) $proposal['minQuantity'] : null;
-    $proposal_max = isset( $proposal['maxQuantity'] ) && is_numeric( $proposal['maxQuantity'] ) ? (float) $proposal['maxQuantity'] : null;
-    $min_amount   = isset( $proposal['minAmount'] ) && is_numeric( $proposal['minAmount'] ) ? (float) $proposal['minAmount'] : null;
-    $max_amount   = isset( $proposal['maxAmount'] ) && is_numeric( $proposal['maxAmount'] ) ? (float) $proposal['maxAmount'] : null;
+    $proposal_min = null;
+    foreach ( [ 'minQuantity', 'minQty', 'minimumQuantity', 'minimumQty' ] as $key ) {
+        if ( isset( $proposal[ $key ] ) && is_numeric( $proposal[ $key ] ) ) {
+            $proposal_min = (float) $proposal[ $key ];
+            break;
+        }
+    }
+
+    $proposal_max = null;
+    foreach ( [ 'maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty' ] as $key ) {
+        if ( isset( $proposal[ $key ] ) && is_numeric( $proposal[ $key ] ) ) {
+            $proposal_max = (float) $proposal[ $key ];
+            break;
+        }
+    }
+
+    $min_amount = null;
+    foreach ( [ 'minAmount', 'minimumAmount' ] as $key ) {
+        if ( isset( $proposal[ $key ] ) && is_numeric( $proposal[ $key ] ) ) {
+            $min_amount = (float) $proposal[ $key ];
+            break;
+        }
+    }
+
+    $max_amount = null;
+    foreach ( [ 'maxAmount', 'maximumAmount' ] as $key ) {
+        if ( isset( $proposal[ $key ] ) && is_numeric( $proposal[ $key ] ) ) {
+            $max_amount = (float) $proposal[ $key ];
+            break;
+        }
+    }
 
     if ( $proposal_min !== null && $proposal_min >= 0 ) {
         $rules['total']['min'] = (int) round( $proposal_min );
@@ -530,11 +557,17 @@ function wk_rh_extract_quantity_rules_from_proposal( $proposal ) {
             continue;
         }
 
-        if ( isset( $group['minQuantity'] ) && is_numeric( $group['minQuantity'] ) ) {
-            $rules[ $target_key ]['min'] = max( 0, (int) round( (float) $group['minQuantity'] ) );
+        foreach ( [ 'minQuantity', 'minQty', 'minimumQuantity', 'minimumQty' ] as $key ) {
+            if ( isset( $group[ $key ] ) && is_numeric( $group[ $key ] ) ) {
+                $rules[ $target_key ]['min'] = max( 0, (int) round( (float) $group[ $key ] ) );
+                break;
+            }
         }
-        if ( isset( $group['maxQuantity'] ) && is_numeric( $group['maxQuantity'] ) ) {
-            $rules[ $target_key ]['max'] = max( 0, (int) round( (float) $group['maxQuantity'] ) );
+        foreach ( [ 'maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty' ] as $key ) {
+            if ( isset( $group[ $key ] ) && is_numeric( $group[ $key ] ) ) {
+                $rules[ $target_key ]['max'] = max( 0, (int) round( (float) $group[ $key ] ) );
+                break;
+            }
         }
 
         $step_candidates = [
@@ -649,6 +682,52 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
     return $passed;
 }
 
+add_filter( 'woocommerce_add_to_cart_validation', 'wk_rh_validate_main_booking_selection', 25, 3 );
+function wk_rh_validate_main_booking_selection( $passed, $product_id, $quantity ) {
+    if ( ! $passed ) {
+        return false;
+    }
+
+    if ( isset( $_POST['is_addon'] ) ) {
+        return $passed;
+    }
+
+    $bm_id = function_exists( 'get_field' )
+        ? get_field( 'bmileisure_id', $product_id )
+        : get_post_meta( $product_id, 'bmileisure_id', true );
+
+    if ( empty( $bm_id ) ) {
+        return $passed;
+    }
+
+    $booking_date = isset( $_POST['booking_date'] ) ? sanitize_text_field( (string) $_POST['booking_date'] ) : '';
+    $booking_time = isset( $_POST['booking_time'] ) ? sanitize_text_field( (string) $_POST['booking_time'] ) : '';
+
+    if ( $booking_date === '' || $booking_time === '' ) {
+        wc_add_notice( __( 'Vælg venligst både dato og tidspunkt før du tilføjer til kurv.', 'racehall-wc-ui' ), 'error' );
+        return false;
+    }
+
+    if ( ! function_exists( 'WC' ) || ! WC()->session ) {
+        wc_add_notice( __( 'Booking session mangler. Opdater siden og prøv igen.', 'racehall-wc-ui' ), 'error' );
+        return false;
+    }
+
+    $session_booking = WC()->session->get( 'rh_bmi_booking' );
+    if ( ! is_array( $session_booking ) || empty( $session_booking['proposal'] ) ) {
+        wc_add_notice( __( 'Vælg et gyldigt tidspunkt før du tilføjer til kurv.', 'racehall-wc-ui' ), 'error' );
+        return false;
+    }
+
+    $session_product_id = isset( $session_booking['productId'] ) ? (string) $session_booking['productId'] : '';
+    if ( $session_product_id !== '' && $session_product_id !== (string) $bm_id ) {
+        wc_add_notice( __( 'Den valgte tid matcher ikke produktet. Vælg tidspunkt igen.', 'racehall-wc-ui' ), 'error' );
+        return false;
+    }
+
+    return $passed;
+}
+
 add_filter( 'woocommerce_get_item_data', 'wk_rh_show_booking_data_in_cart', 10, 2 );
 function wk_rh_show_booking_data_in_cart( $item_data, $cart_item ) {
     if ( isset( $cart_item['booking_date'] ) ) {
@@ -752,104 +831,25 @@ function wk_rh_save_proposal() {
 
     if ( WC()->session ) {
         WC()->session->set( 'rh_bmi_booking', [
-            'proposal'   => $proposal,
-            'pageId'     => $page_id,
-            'resourceId' => $resource_id,
-            'productId'  => $product_id,
-            'quantity'   => $quantity,
+            'proposal'        => $proposal,
+            'pageId'          => $page_id,
+            'resourceId'      => $resource_id,
+            'productId'       => $product_id,
+            'quantity'        => $quantity,
             'bookingLocation' => $booking_location,
+            'orderId'         => '',
+            'orderItemId'     => '',
+            'expiresAt'       => '',
         ] );
-    }
 
-    $token = wk_rh_get_token( $booking_location );
-    if ( ! $token ) {
-        wp_send_json_error( 'No token', 401 );
-    }
-
-    $creds = wk_rh_get_api_credentials( $booking_location );
-    $current_user = wp_get_current_user();
-    $body = [
-        'productId'     => (string) $product_id,
-        'pageId'        => (string) $page_id,
-        'quantity'      => $quantity,
-        'resourceId'    => (string) $resource_id,
-        'proposal'      => $proposal,
-        'contactPerson' => [
-            'firstName' => $current_user->user_firstname ?: 'Guest',
-            'lastName'  => $current_user->user_lastname ?: 'User',
-            'email'     => $current_user->user_email ?: 'guest@example.com',
-            'phone'     => get_user_meta( $current_user->ID, 'billing_phone', true ) ?: '00000000',
-        ],
-    ];
-
-    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/booking/book';
-    $response = wk_rh_remote_request_with_retry(
-        'POST',
-        $url,
-        [
-            'headers' => [
-                'Authorization'        => 'Bearer ' . $token,
-                'Content-Type'         => 'application/json',
-                'Accept'               => 'application/json',
-                'Accept-Language'      => $creds['accept_language'],
-                'Bmi-Subscription-Key' => $creds['subscription_key'],
-            ],
-            'body'    => wp_json_encode( $body ),
-            'timeout' => 60,
-        ],
-        1,
-        [
-            'operation' => 'booking_book_from_proposal',
-            'productId' => (string) $product_id,
-            'location' => (string) $booking_location,
-        ]
-    );
-
-    if ( is_wp_error( $response ) ) {
-        wp_send_json_error( $response->get_error_message(), 500 );
-    }
-
-    $code = (int) wp_remote_retrieve_response_code( $response );
-    $result = json_decode( wp_remote_retrieve_body( $response ), true );
-    if ( ! ( $code >= 200 && $code < 300 ) ) {
-        wk_rh_log_upstream_event( 'error', 'Upstream booking/book from proposal failed', [
-            'operation' => 'booking_book_from_proposal',
-            'productId' => (string) $product_id,
-            'location' => (string) $booking_location,
-            'httpCode' => $code,
-            'body' => wp_remote_retrieve_body( $response ),
-        ] );
-        wp_send_json_error( 'Upstream booking/book failed with HTTP ' . $code, 502 );
-    }
-
-    if ( WC()->session ) {
-        $session_booking = WC()->session->get( 'rh_bmi_booking' ) ?: [];
-
-        $order_id = isset( $result['orderId'] ) ? (string) $result['orderId'] : '';
-        $order_item_id = isset( $result['orderItemId'] ) ? (string) $result['orderItemId'] : '';
-
-        if ( $order_id !== '' && $order_item_id !== '' ) {
-            $session_booking['orderId']     = $order_id;
-            $session_booking['orderItemId'] = $order_item_id;
-        } else {
-            $session_booking['orderId']     = '';
-            $session_booking['orderItemId'] = '';
-            wk_rh_log_upstream_event( 'error', 'booking/book from proposal missing required identifiers', [
-                'operation' => 'booking_book_from_proposal',
-                'location' => (string) $booking_location,
-                'response' => $result,
-            ] );
-        }
-
-        WC()->session->set( 'rh_bmi_booking', $session_booking );
-    }
-
-    if ( WC()->session ) {
         WC()->session->set( 'booking_supplement', [
-            'supplements' => $result['supplements'] ?? [],
+            'supplements' => [],
         ] );
     }
-    wp_send_json( $result );
+
+    wp_send_json_success( [
+        'stored' => true,
+    ] );
 }
 
 function wk_rh_get_order_booking_location( WC_Order $order ) {
@@ -886,6 +886,13 @@ function wk_rh_mark_payment_confirmed( WC_Order $order, $response_body = '' ) {
     $order->update_meta_data( '_wk_rh_payment_confirmed', 'yes' );
     $order->save();
     $order->add_order_note( 'Onsite booking: payment/confirm synced to upstream.' );
+
+    if ( function_exists( 'wk_rh_release_active_hold' ) ) {
+        $upstream_order_id = wk_rh_get_order_upstream_order_id( $order );
+        if ( ! empty( $upstream_order_id ) ) {
+            wk_rh_release_active_hold( (string) $upstream_order_id );
+        }
+    }
 }
 
 function wk_rh_confirm_payment_for_order( $order_id ) {
@@ -977,26 +984,16 @@ add_action( 'woocommerce_payment_complete', 'wk_rh_confirm_payment_for_order', 2
 add_action( 'woocommerce_order_status_processing', 'wk_rh_confirm_payment_for_order', 20 );
 add_action( 'woocommerce_order_status_completed', 'wk_rh_confirm_payment_for_order', 20 );
 
-function wk_rh_cancel_upstream_order( $order_id ) {
-    $order = wc_get_order( $order_id );
-    if ( ! $order instanceof WC_Order ) {
-        return;
+function wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location = '', array $extra_context = [] ) {
+    $upstream_order_id = trim( (string) $upstream_order_id );
+    if ( $upstream_order_id === '' ) {
+        return false;
     }
 
-    if ( $order->get_meta( '_wk_rh_cancel_synced', true ) === 'yes' ) {
-        return;
-    }
-
-    $upstream_order_id = wk_rh_get_order_upstream_order_id( $order );
-    if ( empty( $upstream_order_id ) ) {
-        return;
-    }
-
-    $location = wk_rh_get_order_booking_location( $order );
     $token    = wk_rh_get_token( $location );
     $creds    = wk_rh_get_api_credentials( $location );
     if ( ! $token || empty( $creds['client_key'] ) || empty( $creds['subscription_key'] ) ) {
-        return;
+        return false;
     }
 
     $paths = [
@@ -1020,9 +1017,9 @@ function wk_rh_cancel_upstream_order( $order_id ) {
             [
                 'operation' => 'order_cancel',
                 'orderId' => (string) $upstream_order_id,
-                'wcOrderId' => (string) $order->get_id(),
                 'path' => (string) $path,
                 'location' => (string) $location,
+                'extra' => $extra_context,
             ]
         );
 
@@ -1032,19 +1029,50 @@ function wk_rh_cancel_upstream_order( $order_id ) {
 
         $code = (int) wp_remote_retrieve_response_code( $response );
         if ( $code >= 200 && $code < 300 ) {
-            $order->update_meta_data( '_wk_rh_cancel_synced', 'yes' );
-            $order->save();
-            $order->add_order_note( 'Onsite booking cancellation synced to upstream.' );
-            return;
+            if ( function_exists( 'wk_rh_release_active_hold' ) ) {
+                wk_rh_release_active_hold( $upstream_order_id );
+            }
+            return true;
         }
     }
 
     wk_rh_log_upstream_event( 'error', 'Upstream cancellation failed for all known endpoints', [
         'operation' => 'order_cancel',
         'orderId' => (string) $upstream_order_id,
-        'wcOrderId' => (string) $order->get_id(),
         'location' => (string) $location,
+        'extra' => $extra_context,
     ] );
+    return false;
+}
+
+function wk_rh_cancel_upstream_order( $order_id ) {
+    $order = wc_get_order( $order_id );
+    if ( ! $order instanceof WC_Order ) {
+        return;
+    }
+
+    if ( $order->get_meta( '_wk_rh_cancel_synced', true ) === 'yes' ) {
+        return;
+    }
+
+    $upstream_order_id = wk_rh_get_order_upstream_order_id( $order );
+    if ( empty( $upstream_order_id ) ) {
+        return;
+    }
+
+    $location = wk_rh_get_order_booking_location( $order );
+    $success = wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location, [
+        'wcOrderId' => (string) $order->get_id(),
+        'source'    => 'wc_order_status',
+    ] );
+
+    if ( $success ) {
+        $order->update_meta_data( '_wk_rh_cancel_synced', 'yes' );
+        $order->save();
+        $order->add_order_note( 'Onsite booking cancellation synced to upstream.' );
+        return;
+    }
+
     $order->add_order_note( 'Onsite booking cancellation sync failed for all known cancel endpoints.' );
 }
 
