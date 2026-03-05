@@ -1,7 +1,12 @@
 document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.accordion-header').forEach(header => {
         header.addEventListener('click', () => {
-            header.parentElement.classList.toggle('active')
+            const item = header.parentElement
+            if (item && item.classList.contains('always-open')) {
+                item.classList.add('active')
+                return
+            }
+            item.classList.toggle('active')
         })
     })
 })
@@ -13,6 +18,7 @@ let currentQuantityRules = {
 }
 
 function toPositiveNumber(value, fallback = null) {
+    if (value === null || value === undefined || value === '') return fallback
     const num = Number(value)
     if (!Number.isFinite(num)) return fallback
     return num
@@ -119,7 +125,7 @@ function enforceCountsByRules(counts, changedKey) {
     }
 
     const totalRule = currentQuantityRules.total || { min: 1, max: null, step: 1 }
-    const totalMin = parseRuleNumber(totalRule.min, 1)
+    const totalMin = Math.max(1, parseRuleNumber(totalRule.min, 1))
     const totalMax = parseRuleNumber(totalRule.max, null)
     const totalStep = parseRuleNumber(totalRule.step, 1)
 
@@ -180,8 +186,63 @@ function enforceCountsByRules(counts, changedKey) {
 function applyCountsToUI(counts) {
     const adultsEl = document.getElementById('adult-1')
     const childrenEl = document.getElementById('child-1')
-    if (adultsEl) adultsEl.textContent = String(Math.max(0, counts.adults))
-    if (childrenEl) childrenEl.textContent = String(Math.max(0, counts.children))
+    if (adultsEl) {
+        if ('value' in adultsEl) {
+            adultsEl.value = String(Math.max(0, counts.adults))
+        } else {
+            adultsEl.textContent = String(Math.max(0, counts.adults))
+        }
+    }
+    if (childrenEl) {
+        if ('value' in childrenEl) {
+            childrenEl.value = String(Math.max(0, counts.children))
+        } else {
+            childrenEl.textContent = String(Math.max(0, counts.children))
+        }
+    }
+}
+
+let quantityInputsBound = false
+
+function applyManualCount(type) {
+    const el = document.getElementById(type)
+    if (!el) return
+
+    const isAdult = type === 'adult-1'
+    const key = isAdult ? 'adults' : 'children'
+    const raw = ('value' in el) ? el.value : el.textContent
+    const parsed = parseInt(String(raw || ''), 10)
+
+    const counts = getPartyCounts()
+    const candidate = {
+        adults: counts.adults,
+        children: counts.children
+    }
+
+    if (Number.isFinite(parsed)) {
+        candidate[key] = parsed
+    }
+
+    const enforced = enforceCountsByRules(candidate, key)
+    applyCountsToUI(enforced)
+    updateSummaryPeople()
+}
+
+function bindQuantityInputEvents() {
+    if (quantityInputsBound) return
+    quantityInputsBound = true
+
+    const adultsEl = document.getElementById('adult-1')
+    const childrenEl = document.getElementById('child-1')
+
+    if (adultsEl && 'value' in adultsEl) {
+        adultsEl.addEventListener('change', function () { applyManualCount('adult-1') })
+        adultsEl.addEventListener('blur', function () { applyManualCount('adult-1') })
+    }
+    if (childrenEl && 'value' in childrenEl) {
+        childrenEl.addEventListener('change', function () { applyManualCount('child-1') })
+        childrenEl.addEventListener('blur', function () { applyManualCount('child-1') })
+    }
 }
 
 function setNumericInputRules(input, rule, value, fallbackMin = 0) {
@@ -280,12 +341,30 @@ function updateCount(type, delta) {
     updateSummaryPeople()
 }
 
+window.updateCount = updateCount
+
 function getPartyCounts() {
     const adultsEl = document.getElementById('adult-1')
     const childrenEl = document.getElementById('child-1')
-    const adults = Math.max(0, parseInt(adultsEl ? adultsEl.textContent : '1', 10) || 0)
-    const children = Math.max(0, parseInt(childrenEl ? childrenEl.textContent : '0', 10) || 0)
+    const adultMin = parseRuleNumber((currentQuantityRules.adults || {}).min, 1)
+    const childMin = parseRuleNumber((currentQuantityRules.children || {}).min, 0)
+    const adultsRaw = adultsEl ? (('value' in adultsEl) ? adultsEl.value : adultsEl.textContent) : String(adultMin)
+    const childrenRaw = childrenEl ? (('value' in childrenEl) ? childrenEl.value : childrenEl.textContent) : String(childMin)
+    const adults = Math.max(adultMin, parseInt(String(adultsRaw), 10) || adultMin)
+    const children = Math.max(childMin, parseInt(String(childrenRaw), 10) || childMin)
     return { adults, children }
+}
+
+function initializeQuantityState() {
+    bindQuantityInputEvents()
+    const initial = {
+        adults: parseRuleNumber((currentQuantityRules.adults || {}).quantity, parseRuleNumber((currentQuantityRules.adults || {}).min, 1)),
+        children: parseRuleNumber((currentQuantityRules.children || {}).quantity, parseRuleNumber((currentQuantityRules.children || {}).min, 0))
+    }
+    const enforced = enforceCountsByRules(initial, 'adults')
+    applyCountsToUI(enforced)
+    updateSummaryPeople()
+    syncQuantityConstraintsToForm(enforced)
 }
 
 function getTotalQuantity() {
@@ -384,6 +463,7 @@ let selectedDate = new Date(todayStart)
 let currentMonth = today.getMonth()
 let currentYear = today.getFullYear()
 let availabilityMap = {}
+let availabilityState = 'unknown'
 
 
 function isPastDate(date) {
@@ -475,17 +555,22 @@ async function fetchAvailabilityForMonth(month, year) {
         try {
             data = JSON.parse(text)
         } catch (e) {
+            availabilityState = 'error'
             showCalendarError('Fejl i kalenderdata. Prøv at genindlæse siden.')
             return {}
         }
         availabilityMap = {}
-        if (data.activities) {
+        if (Array.isArray(data.activities) && data.activities.length > 0) {
+            availabilityState = 'ok'
             data.activities.forEach(a => {
                 availabilityMap[a.date.split('T')[0]] = a.status
             })
+        } else {
+            availabilityState = 'empty'
         }
         return availabilityMap
     } catch (err) {
+        availabilityState = 'error'
         showCalendarError('Netværksfejl ved hentning af kalender.')
         return {}
     }
@@ -558,12 +643,15 @@ function renderCalendar(month, year) {
         const dateCur = new Date(year, month, d)
         const dateKey = `${dateCur.getFullYear()}-${String(dateCur.getMonth() + 1).padStart(2, '0')}-${String(dateCur.getDate()).padStart(2, '0')}`
         const status = availabilityMap[dateKey]
-        const isBooked = typeof status !== 'undefined' && status !== 0
+        const forceUnavailable = availabilityState !== 'ok'
+        const isBooked = forceUnavailable || (typeof status !== 'undefined' && status !== 0)
         if (isBooked || isPastDate(dateCur)) {
             span.className = 'muted disabled'
             span.style.cursor = 'not-allowed'
             span.style.color = isPastDate(dateCur) ? '#999999' : '#555555'
-            span.title = isBooked ? (status === 1 ? 'Fully booked' : 'Unavailable') : 'Unavailable'
+            span.title = forceUnavailable
+                ? 'Unavailable'
+                : (isBooked ? (status === 1 ? 'Fully booked' : 'Unavailable') : 'Unavailable')
         } else {
             // Available date
             span.style.color = '#FFF'
@@ -600,7 +688,7 @@ async function fetchAndRenderTimeslots(dateStr) {
     if (!window.RH_PRODUCT_ID) return
     const container = document.querySelector('.time-slots')
     if (container) {
-        container.innerHTML = '<span class="loading"><div class="spinner"></div></span>'
+        container.innerHTML = '<div class="loading"><div class="spinner"></div></div>'
     }
     try {
         const productId = window.RH_PRODUCT_ID
@@ -788,7 +876,14 @@ async function initCalendar() {
     updateSummaryDate(selectedDate)
     if (selectedDate) {
         const dateKey = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
-        fetchAndRenderTimeslots(dateKey)
+        if (availabilityState === 'ok') {
+            fetchAndRenderTimeslots(dateKey)
+        } else {
+            const container = document.querySelector('.time-slots')
+            if (container) {
+                container.innerHTML = '<span style="color:#fff">Ingen ledige tider denne dag.</span>'
+            }
+        }
     }
     if (prevBtn) {
         prevBtn.addEventListener('click', async function () {
@@ -827,9 +922,9 @@ if (document.readyState === 'loading') {
 }
 
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', updateSummaryPeople)
+    document.addEventListener('DOMContentLoaded', initializeQuantityState)
 } else {
-    updateSummaryPeople()
+    initializeQuantityState()
 }
 
 

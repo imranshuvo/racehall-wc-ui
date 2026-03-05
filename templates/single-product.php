@@ -251,9 +251,17 @@ window.RH_I18N = {
                     <div class="accordion-content">
                         <div class="calendar">
                             <div class="month-nav">
-                                <button id="prevMonthBtn">&lt;</button>
+                                <button id="prevMonthBtn" aria-label="Previous month">
+                                    <svg width="16" height="9" viewBox="0 0 16 9" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                        <path d="M10.5 0.75L4.5 4.5L10.5 8.25" stroke="currentColor"/>
+                                    </svg>
+                                </button>
                                 <span id="monthYear"></span>
-                                <button id="nextMonthBtn">&gt;</button>
+                                <button id="nextMonthBtn" aria-label="Next month">
+                                    <svg width="16" height="9" viewBox="0 0 16 9" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                        <path d="M5.5 0.75L11.5 4.5L5.5 8.25" stroke="currentColor"/>
+                                    </svg>
+                                </button>
                             </div>
 
                             <div class="weekdays">
@@ -294,9 +302,9 @@ window.RH_I18N = {
                                     <small><?php esc_html_e( '18 år eller over.', 'racehall-wc-ui' ); ?></small>
                                 </div>
                                 <div class="counter-controls">
-                                    <button onclick="updateCount('adult-1', -1)">−</button>
-                                    <span id="adult-1">1</span>
-                                    <button onclick="updateCount('adult-1', 1)">+</button>
+                                    <button type="button" onclick="updateCount('adult-1', -1)">−</button>
+                                    <input type="number" id="adult-1" value="1" min="1" step="1" inputmode="numeric" />
+                                    <button type="button" onclick="updateCount('adult-1', 1)">+</button>
                                 </div>
                             </div>
 
@@ -306,9 +314,9 @@ window.RH_I18N = {
                                     <small><?php esc_html_e( '5–17 år.', 'racehall-wc-ui' ); ?></small>
                                 </div>
                                 <div class="counter-controls">
-                                    <button onclick="updateCount('child-1', -1)">−</button>
-                                    <span id="child-1">0</span>
-                                    <button onclick="updateCount('child-1', 1)">+</button>
+                                    <button type="button" onclick="updateCount('child-1', -1)">−</button>
+                                    <input type="number" id="child-1" value="0" min="0" step="1" inputmode="numeric" />
+                                    <button type="button" onclick="updateCount('child-1', 1)">+</button>
                                 </div>
                             </div>
 
@@ -316,7 +324,7 @@ window.RH_I18N = {
                     </div>
                 </div>
 
-                <div class="accordion-item">
+                <div class="accordion-item active">
                     <div class="accordion-header">
                         <span><?php esc_html_e( 'Tidspunkt', 'racehall-wc-ui' ); ?></span>
                         <div class="chevron">
@@ -335,7 +343,7 @@ window.RH_I18N = {
                         </div>
                     </div>
                 </div>
-                <div class="accordion-item">
+                <div class="accordion-item active always-open">
                     <div class="accordion-header">
                         <span><?php esc_html_e( 'Bane', 'racehall-wc-ui' ); ?></span>
                         <div class="chevron">
@@ -365,23 +373,7 @@ window.RH_I18N = {
                             <div class="summary-section">
                                 <h4><?php esc_html_e( 'Antal', 'racehall-wc-ui' ); ?></h4>
                                 <div class="summary-item">
-                                    <div class="summary-details">
-                                        <span id="summary-people" class="summary-label"><?php echo wp_kses_post( __( '1 voksen<br>0 børn', 'racehall-wc-ui' ) ); ?></span>
-                                        <div class="summary-prices">
-                                            <span class="price">
-                                            <!-- product price -->
-                                                <span id="summary-unit-price"><?php echo wc_price( $product->get_price() ); ?></span></span>
-
-                                            <span id="summary-children-price" class="price"></span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="summary-section">
-                                <h4><?php esc_html_e( 'Karts', 'racehall-wc-ui' ); ?></h4>
-                                <div class="summary-item">
-                                    <span id="summary-karts" class="summary-label"><?php echo wp_kses_post( __( '1 voksen kart<br>0 børne kart', 'racehall-wc-ui' ) ); ?></span>
+                                    <span id="summary-people" class="summary-label"><?php echo wp_kses_post( __( '1 voksen<br>0 børn', 'racehall-wc-ui' ) ); ?></span>
                                 </div>
                             </div>
 
@@ -398,16 +390,6 @@ window.RH_I18N = {
                                     <span id="summary-time" class="summary-label"></span>
                                 </div>
                             </div>
-
-
-
-                            <div class="summary-section addon-section" id="addonSection">
-                                <h4><?php esc_html_e( 'Add ons', 'racehall-wc-ui' ); ?></h4>
-                                <div class="summary-item" id="addonSummaryItems">
-                                    <span class="summary-label">—</span>
-                                </div>
-                            </div>
-
                             <div class="summary-total">
                                 <div class="total-item">
                                     <span class="total-label"><?php esc_html_e( 'Total', 'racehall-wc-ui' ); ?></span>

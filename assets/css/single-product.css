@@ -409,7 +409,11 @@ footer{
     cursor: pointer !important;
     position: relative !important;
     margin-top: 10px;
-    margin-bottom: 10px;
+    margin-bottom: 25px;
+}
+
+.single_add_to_cart_button.add-to-cart-button {
+    margin-bottom: 25px !important;
 }
 .add-to-cart-button:hover {
     background: var(--accent) !important;
@@ -520,6 +524,7 @@ footer{
     display: flex;
     justify-content: space-between;
     align-items: center;
+    min-height: 30.5px;
     cursor: pointer;
     font-weight: 600;
 
@@ -565,6 +570,10 @@ footer{
 .accordion-item.active .chevron svg {
     transform: rotate(-180deg);
     transition: all 0.3s ease;
+}
+
+.accordion-item.always-open .chevron {
+    display: none;
 }
 
 /* ===== CONTENT ===== */
@@ -634,15 +643,37 @@ footer{
 .month-nav button {
     background: var(--text);
     color: #b30000;
-    width: 20px;
-    height: 20px;
+    width: 33.5px;
+    height: 30.5px;
     display: flex;
     justify-content: center;
     align-items: center;
-    border-radius: 100% !important;
     cursor: pointer;
     border: none !important;
     padding: 0 !important;
+    position: relative;
+}
+
+.month-nav button:hover,
+.month-nav button:active,
+.month-nav button:focus-visible {
+    background: #b30000;
+    color: #ffffff;
+}
+
+.month-nav button svg {
+    display: block;
+}
+
+.month-nav button::after {
+    content: '';
+    position: absolute;
+    right: -8px;
+    bottom: -8px;
+    width: 14px;
+    height: 14px;
+    background: var(--bg);
+    transform: rotate(45deg);
 }
 
 /* disabled/past date styling for calendar */
@@ -659,6 +690,13 @@ footer{
     opacity: 0.35;
     cursor: default;
     pointer-events: none;
+}
+
+.month-nav button[disabled]:hover,
+.month-nav button[disabled]:active,
+.month-nav button[disabled]:focus-visible {
+    background: var(--text);
+    color: #b30000;
 }
 
 .weekdays,
@@ -734,6 +772,38 @@ footer{
     color: var(--text);
 }
 
+.counter-controls input {
+    width: auto;
+    height: 20px;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    text-align: center;
+    font-family: 'Oxanium', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 0;
+    outline: none;
+}
+
+.counter-controls input::-webkit-outer-spin-button,
+.counter-controls input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.counter-controls input[type=number] {
+    -moz-appearance: textfield;
+}
+
+input#adult-1,
+input#child-1 {
+    max-width: 40px;
+    width: 40px;
+    padding-left: 2px;
+    padding-right: 2px;
+}
+
 /* ===== TIME SLOTS ===== */
 /* ===== TIME SLOTS ===== */
 .time-slots {
@@ -741,6 +811,32 @@ footer{
     grid-template-columns: 1fr 1fr 1fr;
     gap: 6px;
     padding: 10px 5px;
+}
+
+.time-slots > .loading {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
+    margin: 0 auto !important;
+}
+
+.days .calendar-loading {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
+}
+
+.time-slots .spinner,
+.days .spinner {
+    width: 28px;
+    height: 28px;
+    border-width: 3px;
 }
 
 .time-slot {
