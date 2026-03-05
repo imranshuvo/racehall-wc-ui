@@ -1,4 +1,37 @@
 (function(){
+  function showCartLoading() {
+    var overlay = document.getElementById('rh-cart-loading');
+    if (!overlay) return;
+    overlay.classList.add('is-visible');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.documentElement.classList.add('rh-cart-loading-active');
+  }
+
+  function hideCartLoading() {
+    var overlay = document.getElementById('rh-cart-loading');
+    if (overlay) {
+      overlay.classList.remove('is-visible');
+      overlay.setAttribute('aria-hidden', 'true');
+    }
+    document.documentElement.classList.remove('rh-cart-loading-active');
+  }
+
+  function submitFormWithLoader(form, submitter) {
+    if (!form) return;
+    showCartLoading();
+    window.setTimeout(function () {
+      if (typeof form.requestSubmit === 'function') {
+        if (submitter) {
+          form.requestSubmit(submitter);
+        } else {
+          form.requestSubmit();
+        }
+      } else {
+        form.submit();
+      }
+    }, 20);
+  }
+
   function pad2(value) {
     return String(value).padStart(2, '0');
   }
@@ -102,17 +135,80 @@
     }, 1000);
   }
 
-  document.addEventListener('DOMContentLoaded', initHoldCountdown);
+  document.addEventListener('DOMContentLoaded', function () {
+    initHoldCountdown();
+    window.setTimeout(hideCartLoading, 50);
+  });
+
+  window.addEventListener('pageshow', function () {
+    window.setTimeout(hideCartLoading, 10);
+  });
+
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form || !form.matches) return;
+    if (
+      form.matches('form.woocommerce-cart-form') ||
+      form.matches('form.addon-add-form') ||
+      form.closest('.racehall-cart')
+    ) {
+      showCartLoading();
+    }
+  });
 
   document.addEventListener('click', function(e){
     var target = e.target;
+    var clicked = target && target.closest ? target.closest('.addon-action-add, .addon-action-remove, .remove-item, .update-cart-button') : null;
+
+    if (clicked && clicked.classList.contains('addon-action-add')) {
+      e.preventDefault();
+      if (clicked.disabled) return;
+      submitFormWithLoader(clicked.closest('form'), clicked);
+      return;
+    }
+
+    if (clicked && clicked.classList.contains('addon-action-remove')) {
+      e.preventDefault();
+      if (clicked.disabled) return;
+      submitFormWithLoader(clicked.closest('form'), clicked);
+      return;
+    }
+
+    if (clicked && clicked.classList.contains('update-cart-button')) {
+      e.preventDefault();
+      if (clicked.disabled) return;
+      var formId = clicked.getAttribute('form');
+      var form = formId ? document.getElementById(formId) : clicked.closest('form');
+      submitFormWithLoader(form, clicked);
+      return;
+    }
+
+    if (clicked && clicked.classList.contains('remove-item')) {
+      e.preventDefault();
+      showCartLoading();
+      var href = clicked.getAttribute('href');
+      window.setTimeout(function () {
+        if (href) window.location.href = href;
+      }, 20);
+      return;
+    }
+
     if ( target.classList.contains('qty-increase') || target.classList.contains('qty-decrease') ) {
       e.preventDefault();
       var container = target.closest('.addon');
       var input = container.querySelector('.qty-input');
       var current = parseInt(input.value, 10) || 0;
+      var minValue = parseInt(input.getAttribute('min'), 10);
+      if (!Number.isFinite(minValue)) minValue = 0;
+      var maxAttr = input.getAttribute('max');
+      var maxValue = (maxAttr !== null && maxAttr !== '') ? parseInt(maxAttr, 10) : null;
+      if (!Number.isFinite(maxValue)) maxValue = null;
+
       if ( target.classList.contains('qty-increase') ) current++;
-      else current = Math.max(0, current - 1);
+      else current--;
+
+      current = Math.max(minValue, current);
+      if (maxValue !== null) current = Math.min(maxValue, current);
       input.value = current;
       // trigger a small debounce submit
       clearTimeout(window.racehallCartUpdateTimer);
@@ -120,12 +216,60 @@
         // submit the parent cart form
         var form = container.closest('form.woocommerce-cart-form');
         if (form) {
-          // click update button if exists
-          var btn = form.querySelector('.update-cart-button');
-          if (btn) btn.click();
-          else form.submit();
+          submitFormWithLoader(form, null);
         }
       }, 500);
     }
+
+    if (target.classList.contains('addon-qty-increase') || target.classList.contains('addon-qty-decrease')) {
+      e.preventDefault();
+      var addonForm = target.closest('form.addon-add-form');
+      if (!addonForm) return;
+
+      var addonInput = addonForm.querySelector('.addon-qty-input');
+      if (!addonInput) return;
+
+      var currentValue = parseInt(addonInput.value, 10);
+      if (!Number.isFinite(currentValue)) {
+        currentValue = parseInt(addonInput.getAttribute('min'), 10);
+      }
+      if (!Number.isFinite(currentValue)) currentValue = 1;
+
+      var minValue = parseInt(addonInput.getAttribute('min'), 10);
+      if (!Number.isFinite(minValue)) minValue = 1;
+
+      var maxAttr = addonInput.getAttribute('max');
+      var maxValue = maxAttr !== null && maxAttr !== '' ? parseInt(maxAttr, 10) : null;
+      if (!Number.isFinite(maxValue)) maxValue = null;
+
+      if (target.classList.contains('addon-qty-increase')) {
+        currentValue += 1;
+      } else {
+        currentValue -= 1;
+      }
+
+      currentValue = Math.max(minValue, currentValue);
+      if (maxValue !== null) currentValue = Math.min(maxValue, currentValue);
+      addonInput.value = currentValue;
+    }
+  });
+
+  document.addEventListener('input', function (e) {
+    var target = e.target;
+    if (!target || !target.classList || !target.classList.contains('addon-qty-input')) return;
+
+    var minValue = parseInt(target.getAttribute('min'), 10);
+    if (!Number.isFinite(minValue)) minValue = 1;
+    var maxAttr = target.getAttribute('max');
+    var maxValue = maxAttr !== null && maxAttr !== '' ? parseInt(maxAttr, 10) : null;
+    if (!Number.isFinite(maxValue)) maxValue = null;
+
+    var parsed = parseInt(target.value, 10);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+    parsed = Math.max(minValue, parsed);
+    if (maxValue !== null) parsed = Math.min(maxValue, parsed);
+    target.value = parsed;
   });
 })();

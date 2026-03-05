@@ -410,7 +410,7 @@ window.RH_I18N = {
                                         <input type="hidden" name="quantity" id="cart_quantity" value="1" />
                                         <!-- Optional booking meta (populated by JS) -->
 
-                                        <button type="submit" class="single_add_to_cart_button button alt add-to-cart-button"><?php esc_html_e( 'Tilføj til kurv', 'racehall-wc-ui' ); ?></button>
+                                        <button type="submit" class="single_add_to_cart_button button alt add-to-cart-button" disabled aria-disabled="true"><?php esc_html_e( 'Tilføj til kurv', 'racehall-wc-ui' ); ?></button>
                                     </form>
                             <!-- <button class="add-to-cart-button">Tilføj til kurv</button> -->
                         </div>

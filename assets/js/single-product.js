@@ -16,10 +16,26 @@ let currentQuantityRules = {
     children: { min: 0, max: null, step: 1, quantity: 0 },
     total: { min: 1, max: null, step: 1 }
 }
+let currentPageProductLimits = null
+
+function getBookingSubmitButton() {
+    return document.querySelector('.booking-s form.cart .single_add_to_cart_button')
+}
+
+function setBookingSubmitEnabled(isEnabled) {
+    const button = getBookingSubmitButton()
+    if (!button) return
+    button.disabled = !isEnabled
+    button.setAttribute('aria-disabled', isEnabled ? 'false' : 'true')
+}
 
 function toPositiveNumber(value, fallback = null) {
     if (value === null || value === undefined || value === '') return fallback
-    const num = Number(value)
+    let normalized = value
+    if (typeof normalized === 'string') {
+        normalized = normalized.trim().replace(',', '.')
+    }
+    const num = Number(normalized)
     if (!Number.isFinite(num)) return fallback
     return num
 }
@@ -32,9 +48,20 @@ function parseRuleNumber(value, fallback = null) {
 
 function parseRuleFromKeys(source, keys, fallback = null) {
     if (!source || typeof source !== 'object' || !Array.isArray(keys)) return fallback
+    const sourceKeys = Object.keys(source)
     for (const key of keys) {
-        if (!Object.prototype.hasOwnProperty.call(source, key)) continue
-        const parsed = parseRuleNumber(source[key], null)
+        let value = null
+        if (Object.prototype.hasOwnProperty.call(source, key)) {
+            value = source[key]
+        } else {
+            const matchedKey = sourceKeys.find((candidate) => String(candidate).toLowerCase() === String(key).toLowerCase())
+            if (matchedKey) {
+                value = source[matchedKey]
+            }
+        }
+
+        if (value === null || value === undefined) continue
+        const parsed = parseRuleNumber(value, null)
         if (parsed !== null) return parsed
     }
     return fallback
@@ -61,28 +88,39 @@ function pickStep(group) {
     return 1
 }
 
-function extractRulesFromProposal(proposal) {
+function extractRulesFromProposal(proposal, pageProductLimits = null) {
     const rules = {
         adults: { min: 1, max: null, step: 1, quantity: 1 },
         children: { min: 0, max: null, step: 1, quantity: 0 },
         total: { min: 1, max: null, step: 1 }
     }
 
-    if (!proposal || typeof proposal !== 'object') {
-        return rules
+    const proposalSource = (proposal && typeof proposal === 'object') ? proposal : {}
+    const pageSource = (pageProductLimits && typeof pageProductLimits === 'object') ? pageProductLimits : {}
+
+    const proposalMin = parseRuleFromKeys(proposalSource, ['minQuantity', 'minQty', 'minimumQuantity', 'minimumQty'], null)
+    const proposalMax = parseRuleFromKeys(proposalSource, ['maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty'], null)
+    const proposalMinAmount = parseRuleFromKeys(proposalSource, ['minAmount', 'minimumAmount'], null)
+    const proposalMaxAmount = parseRuleFromKeys(proposalSource, ['maxAmount', 'maximumAmount'], null)
+    const pageMinAmount = parseRuleFromKeys(pageSource, ['minAmount', 'minimumAmount'], null)
+    const pageMaxAmount = parseRuleFromKeys(pageSource, ['maxAmount', 'maximumAmount'], null)
+
+    if (pageMinAmount !== null && pageMinAmount > 0) {
+        rules.total.min = pageMinAmount
+    } else {
+        if (proposalMin !== null) rules.total.min = proposalMin
+        if (proposalMinAmount !== null && proposalMinAmount > 0) rules.total.min = Math.max(rules.total.min, proposalMinAmount)
     }
 
-    const proposalMin = parseRuleFromKeys(proposal, ['minQuantity', 'minQty', 'minimumQuantity', 'minimumQty'], null)
-    const proposalMax = parseRuleFromKeys(proposal, ['maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty'], null)
-    const minAmount = parseRuleFromKeys(proposal, ['minAmount', 'minimumAmount'], null)
-    const maxAmount = parseRuleFromKeys(proposal, ['maxAmount', 'maximumAmount'], null)
+    if (pageMaxAmount !== null && pageMaxAmount > 0) {
+        rules.total.max = pageMaxAmount
+    } else {
+        if (proposalMax !== null) rules.total.max = proposalMax
+        if (proposalMaxAmount !== null && proposalMaxAmount > 0) rules.total.max = rules.total.max === null ? proposalMaxAmount : Math.min(rules.total.max, proposalMaxAmount)
+    }
 
-    if (proposalMin !== null) rules.total.min = proposalMin
-    if (proposalMax !== null) rules.total.max = proposalMax
-    if (minAmount !== null && minAmount > 0) rules.total.min = Math.max(rules.total.min, minAmount)
-    if (maxAmount !== null && maxAmount > 0) rules.total.max = rules.total.max === null ? maxAmount : Math.min(rules.total.max, maxAmount)
-
-    const groups = Array.isArray(proposal.dynamicGroups) ? proposal.dynamicGroups : []
+    const proposalGroups = Array.isArray(proposalSource.dynamicGroups) ? proposalSource.dynamicGroups : []
+    const groups = proposalGroups
     groups.forEach(group => {
         if (!group || typeof group !== 'object') return
 
@@ -104,6 +142,35 @@ function extractRulesFromProposal(proposal) {
         if (step > 0) target.step = step
         if (quantity !== null) target.quantity = quantity
     })
+
+    const adultsMin = parseRuleNumber(rules.adults.min, 1)
+    const childrenMin = parseRuleNumber(rules.children.min, 0)
+    const totalMin = parseRuleNumber(rules.total.min, 1)
+    const adultsMax = parseRuleNumber(rules.adults.max, null)
+    const childrenMax = parseRuleNumber(rules.children.max, null)
+
+    if (adultsMax !== null && adultsMax < adultsMin) {
+        rules.adults.max = adultsMin
+    }
+    if (childrenMax !== null && childrenMax < childrenMin) {
+        rules.children.max = childrenMin
+    }
+
+    const resolvedAdultsMax = parseRuleNumber(rules.adults.max, null)
+    const resolvedChildrenMax = parseRuleNumber(rules.children.max, null)
+    if (resolvedAdultsMax !== null && resolvedChildrenMax !== null) {
+        const maxCapacity = resolvedAdultsMax + resolvedChildrenMax
+        if (maxCapacity < totalMin) {
+            rules.adults.max = null
+            rules.children.max = null
+        }
+    }
+
+    rules.adults.min = Math.max(parseRuleNumber(rules.adults.min, 1), totalMin)
+    const currentAdultQty = parseRuleNumber(rules.adults.quantity, null)
+    if (currentAdultQty !== null && currentAdultQty < rules.adults.min) {
+        rules.adults.quantity = rules.adults.min
+    }
 
     return rules
 }
@@ -315,11 +382,16 @@ function syncQuantityConstraintsToForm(counts) {
     updateCounterButtonStates(counts)
 }
 
-function applyProposalQuantityRules(proposal) {
-    currentQuantityRules = extractRulesFromProposal(proposal)
+function applyProposalQuantityRules(proposal, pageProductLimits = null) {
+    currentQuantityRules = extractRulesFromProposal(proposal, pageProductLimits)
     const initial = {
         adults: parseRuleNumber(currentQuantityRules.adults.quantity, currentQuantityRules.adults.min),
         children: parseRuleNumber(currentQuantityRules.children.quantity, currentQuantityRules.children.min)
+    }
+    const targetMinTotal = parseRuleNumber((currentQuantityRules.total || {}).min, 1)
+    const initialTotal = (Number(initial.adults) || 0) + (Number(initial.children) || 0)
+    if (targetMinTotal > initialTotal) {
+        initial.adults = (Number(initial.adults) || 0) + (targetMinTotal - initialTotal)
     }
     const enforced = enforceCountsByRules(initial, 'adults')
     applyCountsToUI(enforced)
@@ -696,6 +768,8 @@ function renderCalendar(month, year) {
 
 async function fetchAndRenderTimeslots(dateStr) {
     if (!window.RH_PRODUCT_ID) return
+    updateSummaryTime('')
+    setBookingSubmitEnabled(false)
     const container = document.querySelector('.time-slots')
     if (container) {
         container.innerHTML = '<div class="loading"><div class="spinner"></div></div>'
@@ -728,6 +802,7 @@ async function fetchAndRenderTimeslots(dateStr) {
             container.innerHTML = `<span class="calendar-error">${data.message || 'Ingen tider tilgængelige.'}</span>`
             return
         }
+        currentPageProductLimits = (data && typeof data.pageProductLimits === 'object') ? data.pageProductLimits : null
         if (data.proposals && data.proposals.length) {
             data.proposals.forEach(proposal => {
                 const blocks = Array.isArray(proposal.blocks) ? proposal.blocks : []
@@ -752,13 +827,14 @@ async function fetchAndRenderTimeslots(dateStr) {
                         container.querySelectorAll('.time-slot').forEach(s => s.classList.remove('selected'))
                         this.classList.add('selected')
                         updateSummaryTime(this.getAttribute('data-time'))
-                        applyProposalQuantityRules(proposal)
+                        applyProposalQuantityRules(proposal, currentPageProductLimits)
 
                         // Show spinner while saving proposal
                         // container.innerHTML = `<span class="calendar-loading"><div class="spinner"></div></span>`
 
                         // Await the saveProposalToSession call
                         await saveProposalToSession(proposal, resourceId, productId)
+                        setBookingSubmitEnabled(true)
 
                         // Re-render the time slots for the same date to remove spinner and restore UI
                         // fetchAndRenderTimeslots(
@@ -998,4 +1074,32 @@ async function saveProposalToSession(block, resourceId, productId) {
         // Non-critical — booking will still work if session already has data
         console.warn('Could not save proposal to session:', e)
     }
+}
+
+function initBookingAddToCartSubmitGuard() {
+    const form = document.querySelector('.booking-s form.cart')
+    if (!form) return
+
+    setBookingSubmitEnabled(false)
+
+    form.addEventListener('submit', function (event) {
+        const bookingDateInput = form.querySelector('#booking_date')
+        const bookingTimeInput = form.querySelector('#booking_time')
+        const selectedDate = bookingDateInput ? String(bookingDateInput.value || '').trim() : ''
+        const selectedTime = bookingTimeInput ? String(bookingTimeInput.value || '').trim() : ''
+
+        if (!selectedDate || !selectedTime) {
+            event.preventDefault()
+            setBookingSubmitEnabled(false)
+            return false
+        }
+
+        return true
+    })
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initBookingAddToCartSubmitGuard)
+} else {
+    initBookingAddToCartSubmitGuard()
 }

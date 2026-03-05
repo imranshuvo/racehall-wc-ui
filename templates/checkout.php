@@ -202,9 +202,12 @@ window.RH_CHECKOUT_I18N = {
 <div class="summary-section">
     <h3 class="summary-label"><?php esc_html_e( 'Produkt', 'racehall-wc-ui' ); ?></h3>
     <?php foreach ( $cart_items as $cart_item ) :
-        $product = $cart_item['data']; ?>
+        $product = $cart_item['data'];
+        $line_name = ! empty( $cart_item['is_addon'] ) && ! empty( $cart_item['addon_display_name'] )
+            ? (string) $cart_item['addon_display_name']
+            : $product->get_name(); ?>
         <span class="summary-text">
-            <?php echo esc_html( $product->get_name() ); ?>
+            <?php echo esc_html( $line_name ); ?>
         </span>
     <?php endforeach; ?>
 </div>
@@ -213,12 +216,15 @@ window.RH_CHECKOUT_I18N = {
     <h3 class="summary-label"><?php esc_html_e( 'Antal', 'racehall-wc-ui' ); ?></h3>
     <?php foreach ( $cart_items as $cart_item ) :
         $product  = $cart_item['data'];
+        $line_name = ! empty( $cart_item['is_addon'] ) && ! empty( $cart_item['addon_display_name'] )
+            ? (string) $cart_item['addon_display_name']
+            : $product->get_name();
         $quantity = $cart_item['quantity'];
         $line_total = wc_price( $cart_item['line_total'] );
     ?>
         <div class="detail-item">
             <span class="detail-text">
-                <?php echo esc_html( $quantity . ' × ' . $product->get_name() ); ?>
+                <?php echo esc_html( $quantity . ' × ' . $line_name ); ?>
             </span>
             <span class="detail-price">
                 <?php echo $line_total; ?>

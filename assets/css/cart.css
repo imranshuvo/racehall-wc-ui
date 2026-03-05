@@ -31,7 +31,7 @@ body {
     width: 100%;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     gap: 12px;
     margin: 0 0 16px;
     padding: 12px 16px;
@@ -47,6 +47,46 @@ body {
 
 .rh-hold-banner.expired .rh-hold-countdown {
     color: #ffffff;
+}
+section.addons .summary-item {
+    padding-left: 0px !important;
+}
+
+.rh-cart-loading {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.5);
+    z-index: 9999;
+}
+
+html.rh-cart-loading-active .racehall-cart {
+    visibility: hidden;
+}
+
+html.rh-cart-loading-active .rh-cart-loading {
+    display: flex;
+}
+
+.rh-cart-loading.is-visible {
+    display: flex;
+}
+
+.rh-cart-loading .spinner {
+    width: 50px;
+    height: 50px;
+    border: 5px solid #e5e7eb;
+    border-top: 5px solid #C8102E;
+    border-radius: 50%;
+    animation: rh-cart-spin 0.8s linear infinite;
+}
+
+@keyframes rh-cart-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .cart-page {
@@ -130,6 +170,9 @@ body {
     border: 1px solid var(--border);
     clip-path: polygon(0% 0%, 100% 0%, 100% calc(100% - 40px), calc(100% - 40px) 100%, 0% 100%, 0% 20px);
 }
+.racehall-cart .center {
+    width: 100%;
+}
 
 .center::after {
 
@@ -153,18 +196,22 @@ body {
     gap: 10px;
     padding: 18px;
     margin-bottom: 10px;
-    max-width: 368px;
+    max-width: 100%;
     width: 100%;
     justify-content: space-between;
     background: transparent;
+    padding-left: 0px; 
+    padding-bottom: 0;
+    padding-top: 0;
+    margin-bottom: 25px !important;
 }
 
 .addon-img,
 .addon-img img {
-    height: 90px;
+    height: auto;
     width: 90px;
     display: block;
-    object-fit: cover;
+    object-fit: fill;
 }
 
 .info-container {
@@ -465,7 +512,7 @@ body {
 
     .addons {
         width: 440px;
-        max-width: 60%;
+        max-width: 100%;
         height: 520px;
         padding: 18px;
     }
@@ -494,6 +541,10 @@ body {
 .summary-section {
     display: flex;
     flex-direction: column;
+}
+
+.racehall-cart a.remove-item {
+    display: none;
 }
 
 .summary-section h4 {
@@ -539,6 +590,7 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 20px;
 }
 
 .summary-total {
@@ -577,7 +629,7 @@ body {
     }
 
     .racehall-cart .left {
-        flex: 0 0 320px;
+        flex: 0 0 400px;
     }
 
     .racehall-cart .center {

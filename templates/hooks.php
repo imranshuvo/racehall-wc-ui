@@ -71,9 +71,22 @@ function wk_rh_remote_request_with_retry( $method, $url, array $args = [], $atte
 }
 
 function wk_rh_get_token( $location = '' ) {
+    static $runtime_cache = [];
+
     $creds = wk_rh_get_api_credentials( $location );
     if ( empty( $creds['base_url'] ) || empty( $creds['client_key'] ) || empty( $creds['subscription_key'] ) || empty( $creds['username'] ) || empty( $creds['password'] ) ) {
         return false;
+    }
+
+    $cache_key = 'wk_rh_token_' . md5( (string) $location . '|' . (string) $creds['base_url'] . '|' . (string) $creds['client_key'] . '|' . (string) $creds['username'] );
+    if ( isset( $runtime_cache[ $cache_key ] ) && is_string( $runtime_cache[ $cache_key ] ) && $runtime_cache[ $cache_key ] !== '' ) {
+        return $runtime_cache[ $cache_key ];
+    }
+
+    $cached_token = get_transient( $cache_key );
+    if ( is_string( $cached_token ) && $cached_token !== '' ) {
+        $runtime_cache[ $cache_key ] = $cached_token;
+        return $cached_token;
     }
 
     $url = $creds['base_url'] . '/auth/' . rawurlencode( $creds['client_key'] ) . '/publicbooking';
@@ -103,7 +116,99 @@ function wk_rh_get_token( $location = '' ) {
     }
 
     $data = json_decode( wp_remote_retrieve_body( $response ), true );
-    return $data['AccessToken'] ?? false;
+    $token = isset( $data['AccessToken'] ) ? (string) $data['AccessToken'] : '';
+    if ( $token === '' ) {
+        return false;
+    }
+
+    $expires_in = isset( $data['ExpiresIn'] ) && is_numeric( $data['ExpiresIn'] ) ? (int) $data['ExpiresIn'] : 3600;
+    $ttl = max( 60, $expires_in - 60 );
+    set_transient( $cache_key, $token, $ttl );
+    $runtime_cache[ $cache_key ] = $token;
+
+    return $token;
+}
+
+function wk_rh_get_product_image_data_uri( $location, $product_id ) {
+    if ( function_exists( 'is_cart' ) && ! is_cart() ) {
+        return '';
+    }
+
+    static $runtime_image_cache = [];
+
+    $product_id = trim( (string) $product_id );
+    if ( $product_id === '' ) {
+        return '';
+    }
+
+    $runtime_key = md5( (string) $location . '|' . $product_id );
+    if ( isset( $runtime_image_cache[ $runtime_key ] ) ) {
+        return (string) $runtime_image_cache[ $runtime_key ];
+    }
+
+    $cache_key = 'wk_rh_img_' . md5( (string) $location . '|' . $product_id );
+    $cached = get_transient( $cache_key );
+    if ( is_string( $cached ) && $cached !== '' ) {
+        $runtime_image_cache[ $runtime_key ] = $cached;
+        return $cached;
+    }
+
+    $token = wk_rh_get_token( $location );
+    $creds = wk_rh_get_api_credentials( $location );
+    if ( ! $token || empty( $creds['client_key'] ) || empty( $creds['subscription_key'] ) || empty( $creds['base_url'] ) ) {
+        $runtime_image_cache[ $runtime_key ] = '';
+        return '';
+    }
+
+    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/image/product?productId=' . rawurlencode( $product_id );
+    $response = wk_rh_remote_request_with_retry(
+        'GET',
+        $url,
+        [
+            'headers' => [
+                'Authorization'        => 'Bearer ' . $token,
+                'Content-Type'         => 'application/json',
+                'Accept-Language'      => $creds['accept_language'],
+                'Bmi-Subscription-Key' => $creds['subscription_key'],
+            ],
+            'timeout' => 30,
+        ],
+        1,
+        [
+            'operation' => 'product_image',
+            'productId' => $product_id,
+            'location'  => (string) $location,
+        ]
+    );
+
+    if ( is_wp_error( $response ) ) {
+        $runtime_image_cache[ $runtime_key ] = '';
+        return '';
+    }
+
+    $code = (int) wp_remote_retrieve_response_code( $response );
+    if ( $code < 200 || $code >= 300 ) {
+        $runtime_image_cache[ $runtime_key ] = '';
+        return '';
+    }
+
+    $body = wp_remote_retrieve_body( $response );
+    if ( ! is_string( $body ) || $body === '' ) {
+        $runtime_image_cache[ $runtime_key ] = '';
+        return '';
+    }
+
+    $content_type = wp_remote_retrieve_header( $response, 'content-type' );
+    $content_type = is_string( $content_type ) ? trim( $content_type ) : '';
+    if ( strpos( $content_type, 'image/' ) !== 0 ) {
+        $content_type = 'image/jpeg';
+    }
+
+    $data_uri = 'data:' . $content_type . ';base64,' . base64_encode( $body );
+    set_transient( $cache_key, $data_uri, 12 * HOUR_IN_SECONDS );
+    $runtime_image_cache[ $runtime_key ] = $data_uri;
+
+    return $data_uri;
 }
 
 function wk_rh_post_booking_sell( $location, $product_id, $quantity, $order_id, $parent_order_item_id = '' ) {
@@ -439,6 +544,7 @@ function wk_rh_ajax_get_timeslots() {
     }
 
     $page_id = null;
+    $matched_product = null;
     foreach ( $pages as $page ) {
         if ( empty( $page['products'] ) || ! is_array( $page['products'] ) ) {
             continue;
@@ -446,6 +552,7 @@ function wk_rh_ajax_get_timeslots() {
         foreach ( $page['products'] as $prod ) {
             if ( isset( $prod['id'] ) && (int) $prod['id'] === $product_id ) {
                 $page_id = $page['id'];
+                $matched_product = is_array( $prod ) ? $prod : null;
                 break 2;
             }
         }
@@ -456,6 +563,12 @@ function wk_rh_ajax_get_timeslots() {
     }
 
     $timeslots = wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity, $booking_location );
+    if ( is_array( $timeslots ) ) {
+        $timeslots['pageProductLimits'] = [
+            'minAmount' => isset( $matched_product['minAmount'] ) ? $matched_product['minAmount'] : null,
+            'maxAmount' => isset( $matched_product['maxAmount'] ) ? $matched_product['maxAmount'] : null,
+        ];
+    }
     wp_send_json( $timeslots );
 }
 

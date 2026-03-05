@@ -1,10 +1,7 @@
 # Copilot instructions for `racehall-wc-ui`
 
 ## Release packaging (mandatory)
-- Always create distributable zip files in `.builds/` inside this repository.
-- Never create release zip files outside the repo root (e.g. `/var/www/html`).
-- Zip must contain exactly one top-level folder: `racehall-wc-ui/`.
-- Zip content must include plugin runtime files only.
+- Just push to staging found in .local. Bump the versions. 
 
 ## Exclusions (mandatory)
 Do **not** include these paths in release zips:
