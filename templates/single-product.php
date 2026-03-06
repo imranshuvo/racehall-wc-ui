@@ -249,7 +249,7 @@ window.RH_I18N = {
                     </div>
 
                     <div class="accordion-content">
-                        <div class="calendar">
+                        <div class="calendar" id="booking-calendar-section" tabindex="-1" role="group" aria-label="<?php esc_attr_e( 'Vælg dato', 'racehall-wc-ui' ); ?>">
                             <div class="month-nav">
                                 <button id="prevMonthBtn" aria-label="Previous month">
                                     <svg width="16" height="9" viewBox="0 0 16 9" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -276,8 +276,30 @@ window.RH_I18N = {
                             </div>
 
                             <div class="days" id="calendarDays"></div>
+                            <p class="booking-validation-message" id="booking-date-error" aria-live="polite" hidden></p>
                         </div>
 
+                    </div>
+                </div>
+
+                <div class="accordion-item active">
+                    <div class="accordion-header">
+                        <span><?php esc_html_e( 'Tidspunkt', 'racehall-wc-ui' ); ?></span>
+                        <div class="chevron">
+                            <svg width="16" height="9" viewBox="0 0 16 9" fill="none"
+                                 xmlns="http://www.w3.org/2000/svg">
+                                <path d="M0.353516 0.353516L7.85352 7.85352L15.3535 0.353516" stroke="#D9D9D9"/>
+                            </svg>
+
+                        </div>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="accordion-content">
+                            <div class="time-slots" id="booking-time-slots-section" tabindex="-1" role="group" aria-label="<?php esc_attr_e( 'Vælg tidspunkt', 'racehall-wc-ui' ); ?>">
+
+                            </div>
+                            <p class="booking-validation-message" id="booking-time-error" aria-live="polite" hidden></p>
+                        </div>
                     </div>
                 </div>
 
@@ -320,26 +342,6 @@ window.RH_I18N = {
                                 </div>
                             </div>
 
-                        </div>
-                    </div>
-                </div>
-
-                <div class="accordion-item active">
-                    <div class="accordion-header">
-                        <span><?php esc_html_e( 'Tidspunkt', 'racehall-wc-ui' ); ?></span>
-                        <div class="chevron">
-                            <svg width="16" height="9" viewBox="0 0 16 9" fill="none"
-                                 xmlns="http://www.w3.org/2000/svg">
-                                <path d="M0.353516 0.353516L7.85352 7.85352L15.3535 0.353516" stroke="#D9D9D9"/>
-                            </svg>
-
-                        </div>
-                    </div>
-                    <div class="accordion-content">
-                        <div class="accordion-content">
-                            <div class="time-slots">
-
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -410,7 +412,7 @@ window.RH_I18N = {
                                         <input type="hidden" name="quantity" id="cart_quantity" value="1" />
                                         <!-- Optional booking meta (populated by JS) -->
 
-                                        <button type="submit" class="single_add_to_cart_button button alt add-to-cart-button" disabled aria-disabled="true"><?php esc_html_e( 'Tilføj til kurv', 'racehall-wc-ui' ); ?></button>
+                                        <button type="submit" class="single_add_to_cart_button button alt add-to-cart-button" aria-disabled="false"><?php esc_html_e( 'Tilføj til kurv', 'racehall-wc-ui' ); ?></button>
                                     </form>
                             <!-- <button class="add-to-cart-button">Tilføj til kurv</button> -->
                         </div>

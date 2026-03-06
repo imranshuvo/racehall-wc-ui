@@ -616,6 +616,25 @@ footer{
     color: #fff;
 }
 
+.calendar:focus-visible,
+.calendar.focus-target,
+.time-slots:focus-visible,
+.time-slots.focus-target {
+    outline: 2px solid #ffffff;
+    outline-offset: 4px;
+    border-radius: 2px;
+}
+
+.booking-validation-message {
+    color: #ff8f8f;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    margin: 8px 0 0;
+    padding: 0 4px;
+    margin-bottom: 10px;
+}
+
 .calendar-header {
     display: flex;
     justify-content: space-between;

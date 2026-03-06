@@ -572,6 +572,7 @@ function updateSummaryDate(date) {
         // 🔥 SAVE TO CART FORM
         const input = document.getElementById('booking_date')
         if (input) input.value = formatDateShort(date)
+        setBookingValidationMessage('date', '')
     } else {
         label.textContent = ''
     }
@@ -585,6 +586,105 @@ function updateSummaryTime(timeStr) {
     // 🔥 SAVE TO CART FORM
     const input = document.getElementById('booking_time')
     if (input) input.value = timeStr || ''
+    if (timeStr) {
+        setBookingValidationMessage('time', '')
+    }
+}
+
+function getBookingValidationMessageElement(type) {
+    if (type === 'date') return document.getElementById('booking-date-error')
+    if (type === 'time') return document.getElementById('booking-time-error')
+    return null
+}
+
+function setBookingValidationMessage(type, message) {
+    const element = getBookingValidationMessageElement(type)
+    if (!element) return
+
+    const text = String(message || '').trim()
+    element.textContent = text
+
+    if (text) {
+        element.hidden = false
+    } else {
+        element.hidden = true
+    }
+}
+
+function expandAccordionForElement(element) {
+    const accordionItem = element ? element.closest('.accordion-item') : null
+    if (!accordionItem) return
+    accordionItem.classList.add('active')
+}
+
+function moveFocusToBookingSection(section, preferredTarget = null) {
+    const focusTarget = preferredTarget || section
+    if (!focusTarget) return
+
+    expandAccordionForElement(section || focusTarget)
+
+    if (section) {
+        section.classList.add('focus-target')
+        window.setTimeout(() => {
+            section.classList.remove('focus-target')
+        }, 1800)
+    }
+
+    if (typeof focusTarget.focus === 'function') {
+        try {
+            focusTarget.focus({ preventScroll: true })
+        } catch (error) {
+            focusTarget.focus()
+        }
+    }
+
+    const scrollTarget = section || focusTarget
+    if (scrollTarget && typeof scrollTarget.scrollIntoView === 'function') {
+        scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+}
+
+function focusCalendarSection() {
+    const calendar = document.getElementById('booking-calendar-section')
+    moveFocusToBookingSection(calendar)
+}
+
+function focusTimeSlotsSection() {
+    const container = document.getElementById('booking-time-slots-section') || document.querySelector('.time-slots')
+    const selectedSlot = container ? container.querySelector('.time-slot.selected:not(:disabled)') : null
+    const firstAvailableSlot = container ? container.querySelector('.time-slot:not(:disabled)') : null
+    moveFocusToBookingSection(container, selectedSlot || firstAvailableSlot || container)
+}
+
+function hasSelectedBookingDate() {
+    const input = document.getElementById('booking_date')
+    return !!(input && String(input.value || '').trim())
+}
+
+function hasSelectedBookingTime() {
+    const input = document.getElementById('booking_time')
+    return !!(input && String(input.value || '').trim())
+}
+
+function validateBookingSelection(options = {}) {
+    const shouldFocus = options.shouldFocus !== false
+
+    setBookingValidationMessage('date', '')
+    setBookingValidationMessage('time', '')
+
+    if (!hasSelectedBookingDate()) {
+        setBookingValidationMessage('date', 'Vælg venligst en dato for at fortsætte.')
+        if (shouldFocus) focusCalendarSection()
+        return false
+    }
+
+    if (!hasSelectedBookingTime()) {
+        setBookingValidationMessage('time', 'Vælg venligst et tidspunkt for at fortsætte.')
+        if (shouldFocus) focusTimeSlotsSection()
+        return false
+    }
+
+    return true
 }
 
 function canGoPrev(month, year) {
@@ -800,6 +900,7 @@ async function fetchAndRenderTimeslots(dateStr) {
         container.innerHTML = ''
         if (data.success === false || data.data === false) {
             container.innerHTML = `<span class="calendar-error">${data.message || 'Ingen tider tilgængelige.'}</span>`
+            setBookingSubmitEnabled(true)
             return
         }
         currentPageProductLimits = (data && typeof data.pageProductLimits === 'object') ? data.pageProductLimits : null
@@ -850,8 +951,10 @@ async function fetchAndRenderTimeslots(dateStr) {
         } else {
             container.innerHTML = '<span style="color:#fff">Ingen ledige tider denne dag.</span>'
         }
+        setBookingSubmitEnabled(true)
     } catch (err) {
         if (container) container.innerHTML = '<span class="calendar-error" style="color:#fff">Netværksfejl ved hentning af tider.</span>'
+        setBookingSubmitEnabled(true)
     }
 }
 
@@ -1080,17 +1183,11 @@ function initBookingAddToCartSubmitGuard() {
     const form = document.querySelector('.booking-s form.cart')
     if (!form) return
 
-    setBookingSubmitEnabled(false)
+    setBookingSubmitEnabled(true)
 
     form.addEventListener('submit', function (event) {
-        const bookingDateInput = form.querySelector('#booking_date')
-        const bookingTimeInput = form.querySelector('#booking_time')
-        const selectedDate = bookingDateInput ? String(bookingDateInput.value || '').trim() : ''
-        const selectedTime = bookingTimeInput ? String(bookingTimeInput.value || '').trim() : ''
-
-        if (!selectedDate || !selectedTime) {
+        if (!validateBookingSelection({ shouldFocus: true })) {
             event.preventDefault()
-            setBookingSubmitEnabled(false)
             return false
         }
 
