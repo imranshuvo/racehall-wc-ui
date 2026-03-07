@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.52
+ * Version: 1.53
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.52' );
+define( 'RACEHALL_WC_UI_VERSION', '1.53' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -1027,32 +1027,36 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
         <?php if ( ! $is_ready ) : ?>
             <div class="wk-rh-checkout-step-empty"></div>
         <?php elseif ( empty( $supplements ) ) : ?>
-            <div class="wk-rh-checkout-addon-head">
-                <div class="left wk-rh-checkout-addon-intro">
-                    <h1 class="wk-rh-checkout-addon-intro-title"><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h1>
-                    <p class="wk-rh-checkout-addon-intro-copy"><?php esc_html_e( 'Løft din oplevelse til næste niveau. Her får du muligheden for at skræddersy dit race, finjustere detaljerne og sætte dit personlige præg på dagen. Uanset om jagten er fart, præcision eller bare den perfekte oplevelse, er dette stedet, hvor du former dit eget løb.', 'racehall-wc-ui' ); ?></p>
+            <div class="racehall-cart cart-page wk-rh-checkout-addons-layout">
+                <section class="left">
+                    <h1><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h1>
+                    <p><?php esc_html_e( 'Løft din oplevelse til næste niveau. Her får du muligheden for at skræddersy dit race, finjustere detaljerne og sætte dit personlige præg på dagen. Uanset om jagten er fart, præcision eller bare den perfekte oplevelse, er dette stedet, hvor du former dit eget løb.', 'racehall-wc-ui' ); ?></p>
+                    <div class="wk-rh-checkout-addon-toolbar">
+                        <button type="button" class="wk-rh-checkout-back-btn"><?php esc_html_e( 'Back', 'racehall-wc-ui' ); ?></button>
+                    </div>
+                </section>
+                <div class="center wk-rh-checkout-addons-shell">
+                    <section class="addons wk-rh-checkout-addons-list">
+                        <h2><?php esc_html_e( 'ADD ONS', 'racehall-wc-ui' ); ?></h2>
+                        <div class="wk-rh-checkout-step-empty">
+                            <?php esc_html_e( 'Der er ingen tilgængelige tilvalg til denne booking.', 'racehall-wc-ui' ); ?>
+                        </div>
+                    </section>
                 </div>
-                <div class="wk-rh-checkout-addon-toolbar">
-                    <button type="button" class="wk-rh-checkout-back-btn"><?php esc_html_e( 'Back', 'racehall-wc-ui' ); ?></button>
-                </div>
-            </div>
-            <div class="wk-rh-checkout-step-empty">
-                <?php esc_html_e( 'Der er ingen tilgængelige tilvalg til denne booking.', 'racehall-wc-ui' ); ?>
             </div>
         <?php else : ?>
-            <div class="wk-rh-checkout-addon-head">
-                <div class="left wk-rh-checkout-addon-intro">
-                    <h1 class="wk-rh-checkout-addon-intro-title"><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h1>
-                    <p class="wk-rh-checkout-addon-intro-copy"><?php esc_html_e( 'Løft din oplevelse til næste niveau. Her får du muligheden for at skræddersy dit race, finjustere detaljerne og sætte dit personlige præg på dagen. Uanset om jagten er fart, præcision eller bare den perfekte oplevelse, er dette stedet, hvor du former dit eget løb.', 'racehall-wc-ui' ); ?></p>
-                </div>
-                <div class="wk-rh-checkout-addon-toolbar">
-                    <button type="button" class="wk-rh-checkout-back-btn"><?php esc_html_e( 'Back', 'racehall-wc-ui' ); ?></button>
-                </div>
-            </div>
-            <div class="center wk-rh-checkout-addons-shell">
-            <div class="addons wk-rh-checkout-addons-list">
-                <h2><?php esc_html_e( 'ADD ONS', 'racehall-wc-ui' ); ?></h2>
-                <div class="summary-item">
+            <div class="racehall-cart cart-page wk-rh-checkout-addons-layout">
+                <section class="left">
+                    <h1><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h1>
+                    <p><?php esc_html_e( 'Løft din oplevelse til næste niveau. Her får du muligheden for at skræddersy dit race, finjustere detaljerne og sætte dit personlige præg på dagen. Uanset om jagten er fart, præcision eller bare den perfekte oplevelse, er dette stedet, hvor du former dit eget løb.', 'racehall-wc-ui' ); ?></p>
+                    <div class="wk-rh-checkout-addon-toolbar">
+                        <button type="button" class="wk-rh-checkout-back-btn"><?php esc_html_e( 'Back', 'racehall-wc-ui' ); ?></button>
+                    </div>
+                </section>
+                <div class="center wk-rh-checkout-addons-shell">
+                <section class="addons wk-rh-checkout-addons-list">
+                    <h2><?php esc_html_e( 'ADD ONS', 'racehall-wc-ui' ); ?></h2>
+                    <div class="summary-item">
                 <?php foreach ( $supplements as $supplement_row ) :
                     if ( ! is_array( $supplement_row ) ) {
                         continue;
@@ -1105,7 +1109,8 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                         </div>
                     </div>
                 <?php endforeach; ?>
-                </div>
+                    </div>
+                </section>
             </div>
             </div>
             <div class="wk-rh-checkout-step-notice wk-rh-checkout-step-notice--supplements" aria-live="polite"></div>

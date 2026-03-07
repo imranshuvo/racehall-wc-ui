@@ -495,6 +495,38 @@ body.checkout-wc .wk-rh-checkout-step-notice.is-success {
   background: rgba(31, 143, 82, 0.18);
 }
 
+body.checkout-wc .wk-rh-checkout-addons-layout {
+  display: flex;
+  max-width: 1280px;
+  width: 100%;
+  margin: 0 auto;
+  gap: 25px;
+  padding: 0;
+}
+
+body.checkout-wc .wk-rh-checkout-addons-layout > .left {
+  flex: 0 0 420px;
+}
+
+body.checkout-wc .wk-rh-checkout-addons-layout > .center {
+  flex: 1 1 auto;
+  width: 100%;
+}
+
+body.checkout-wc .wk-rh-checkout-addons-layout .left h1 {
+  font-size: 30px;
+  font-weight: 800;
+  margin-bottom: 20px;
+  color: var(--text);
+}
+
+body.checkout-wc .wk-rh-checkout-addons-layout .left p {
+  max-width: 420px;
+  line-height: 1.6;
+  opacity: 0.8;
+  color: var(--text);
+}
+
 body.checkout-wc .wk-rh-checkout-addon-head {
   display: flex;
   align-items: flex-end;
@@ -545,6 +577,7 @@ body.checkout-wc .wk-rh-checkout-back-btn {
   font-family: 'Oxanium', sans-serif;
   font-weight: 800;
   cursor: pointer;
+  margin-top: 24px;
 }
 
 body.checkout-wc .wk-rh-checkout-addons-shell {
@@ -621,6 +654,17 @@ body.checkout-wc .wk-rh-supplement-card {
 
 body.checkout-wc .wk-rh-supplement-card.is-selected {
   box-shadow: none;
+}
+
+body.checkout-wc .wk-rh-checkout-addons-layout .addon,
+body.checkout-wc .wk-rh-checkout-addons-layout .info-container,
+body.checkout-wc .wk-rh-checkout-addons-layout .addon-info,
+body.checkout-wc .wk-rh-checkout-addons-layout .addon-control-row,
+body.checkout-wc .wk-rh-checkout-addons-layout .addon-img,
+body.checkout-wc .wk-rh-checkout-addons-layout .addon-img img,
+body.checkout-wc .wk-rh-checkout-addons-layout .qty-input,
+body.checkout-wc .wk-rh-checkout-addons-layout .addon-add-button {
+  box-sizing: border-box;
 }
 
 body.checkout-wc .wk-rh-supplement-card-media {
@@ -735,6 +779,17 @@ body.checkout-wc .wk-rh-invalid-wrap textarea {
 }
 
 @media (max-width: 767px) {
+  body.checkout-wc .wk-rh-checkout-addons-layout {
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  body.checkout-wc .wk-rh-checkout-addons-layout > .left,
+  body.checkout-wc .wk-rh-checkout-addons-layout > .center {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
   body.checkout-wc .wk-rh-checkout-addon-head {
     flex-direction: column;
     align-items: stretch;
