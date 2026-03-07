@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.69
+ * Version: 1.70
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.69' );
+define( 'RACEHALL_WC_UI_VERSION', '1.70' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -2105,7 +2105,6 @@ function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
         $cart_item_data['bmi_page_id']     = $bmi_data['pageId']      ?? '';
         $cart_item_data['bmi_resource_id'] = $bmi_data['resourceId']  ?? '';
         $cart_item_data['bmi_page_product_limits'] = $bmi_data['pageProductLimits'] ?? null;
-        $cart_item_data['bmi_page_products'] = $bmi_data['pageProducts'] ?? [];
         $cart_item_data['bmi_order_id']    = '';
         $cart_item_data['bmi_order_item_id'] = '';
         $cart_item_data['bmi_hold_expires_at'] = 0;
@@ -2128,8 +2127,7 @@ function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
             $cart_item_data['bmi_proposal'],
             $cart_item_data['bmi_page_id'],
             $cart_item_data['bmi_resource_id'],
-            $cart_item_data['bmi_page_product_limits'],
-            $cart_item_data['bmi_page_products']
+            $cart_item_data['bmi_page_product_limits']
         );
     }
 
@@ -3245,8 +3243,11 @@ function wk_rh_store_main_cart_booking_hold( $main_cart_item_key, array $main_it
     WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_order_item_id'] = $main_order_item_id;
     WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_hold_expires_at'] = $expires_at;
     WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_supplements'] = $normalized_supplements;
-    WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_booking_response'] = $result;
     WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_contact_person'] = $prepared_contact_person;
+
+    if ( isset( WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_booking_response'] ) ) {
+        unset( WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_booking_response'] );
+    }
 
     if ( function_exists( 'WC' ) && WC()->session ) {
         $session_booking = WC()->session->get( 'rh_bmi_booking' );
@@ -3259,7 +3260,6 @@ function wk_rh_store_main_cart_booking_hold( $main_cart_item_key, array $main_it
         $session_booking['productId'] = (string) $bm_id;
         $session_booking['quantity'] = $main_quantity;
         $session_booking['pageProductLimits'] = $main_item['bmi_page_product_limits'] ?? null;
-        $session_booking['pageProducts'] = $main_item['bmi_page_products'] ?? [];
         $session_booking['bookingLocation'] = $booking_location;
         $session_booking['orderId'] = $main_order_id;
         $session_booking['orderItemId'] = $main_order_item_id;
