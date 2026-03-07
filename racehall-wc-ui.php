@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.65
+ * Version: 1.66
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.65' );
+define( 'RACEHALL_WC_UI_VERSION', '1.66' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -3991,27 +3991,27 @@ add_action( 'woocommerce_check_cart_items', function() {
 add_action( 'woocommerce_checkout_create_order_line_item', 'wk_rh_add_bmi_ids_to_order_item', 10, 4 );
 function wk_rh_add_bmi_ids_to_order_item( $item, $cart_item_key, $values, $order ) {
     $is_addon = ! empty( $values['is_addon'] );
+    $bmi_order_id = isset( $values['bmi_order_id'] ) ? sanitize_text_field( (string) $values['bmi_order_id'] ) : '';
+    $bmi_order_item_id = isset( $values['bmi_order_item_id'] ) ? sanitize_text_field( (string) $values['bmi_order_item_id'] ) : '';
 
     if ( $is_addon && ! empty( $values['addon_display_name'] ) && is_callable( [ $item, 'set_name' ] ) ) {
         $item->set_name( sanitize_text_field( (string) $values['addon_display_name'] ) );
     }
 
-    if ( isset( $values['bmi_order_id'] ) ) {
-        $item->add_meta_data( 'bmi_order_id', $values['bmi_order_id'], true );
-        $item->add_meta_data( 'bmi_order_item_id', $values['bmi_order_item_id'], true );
-
-        if ( $is_addon ) {
-            $item->add_meta_data( 'Type', __( 'Add-on', 'racehall-wc-ui' ), true );
-            $item->add_meta_data( 'Upstream orderId', sanitize_text_field( (string) $values['bmi_order_id'] ), true );
-            if ( ! empty( $values['bmi_order_item_id'] ) ) {
-                $item->add_meta_data( 'Upstream orderItemId', sanitize_text_field( (string) $values['bmi_order_item_id'] ), true );
-            }
-        }
+    if ( $bmi_order_id !== '' ) {
+        $item->add_meta_data( 'bmi_order_id', $bmi_order_id, true );
 
         if ( ! $is_addon ) {
-            $item->add_meta_data( 'Booking reference', sanitize_text_field( (string) $values['bmi_order_id'] ), true );
-            $order->update_meta_data( 'bmi_order_id', $values['bmi_order_id'] );
-            $order->update_meta_data( 'bmi_order_item_id', $values['bmi_order_item_id'] );
+            $item->add_meta_data( 'Booking reference', $bmi_order_id, true );
+            $order->update_meta_data( 'bmi_order_id', $bmi_order_id );
+        }
+    }
+
+    if ( $bmi_order_item_id !== '' ) {
+        $item->add_meta_data( 'bmi_order_item_id', $bmi_order_item_id, true );
+
+        if ( ! $is_addon ) {
+            $order->update_meta_data( 'bmi_order_item_id', $bmi_order_item_id );
         }
     }
 
@@ -4048,7 +4048,6 @@ function wk_rh_add_bmi_ids_to_order_item( $item, $cart_item_key, $values, $order
 
         if ( $addon_upstream_id !== '' ) {
             $item->add_meta_data( '_wk_rh_addon_upstream_id', $addon_upstream_id, true );
-            $item->add_meta_data( 'Upstream add-on ID', $addon_upstream_id, true );
         }
 
         if ( isset( $values['addon_display_name'] ) ) {
