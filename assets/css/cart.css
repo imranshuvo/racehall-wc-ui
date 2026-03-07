@@ -678,10 +678,6 @@ input.qty-input.addon-qty-input {
         align-items: flex-start;
     }
 
-    .racehall-cart .left {
-        flex: 0 0 400px;
-    }
-
     .racehall-cart .center {
         flex: 1 1 auto;
         min-width: 480px;
