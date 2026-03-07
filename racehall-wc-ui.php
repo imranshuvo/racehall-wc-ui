@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.74
+ * Version: 1.75
  * Author: Webkonsulenterne ApS
  */
 
@@ -10,6 +10,10 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 if ( defined( 'RACEHALL_WC_UI_BOOTSTRAPPED' ) ) {
     return;
+}
+
+function wk_rh_get_booking_fallback_url() {
+    return home_url( '/' );
 }
 
 function wk_rh_get_main_booking_product_url() {
@@ -36,14 +40,14 @@ function wk_rh_get_main_booking_product_url() {
         }
     }
 
-    return wc_get_cart_url();
+    return wk_rh_get_booking_fallback_url();
 }
 define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.74' );
+define( 'RACEHALL_WC_UI_VERSION', '1.75' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -415,7 +419,7 @@ function wk_rh_expire_current_cart_reservation( $source = 'manual', $add_notice 
     if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
         return [
             'success' => false,
-            'redirect_url' => wc_get_cart_url(),
+            'redirect_url' => wk_rh_get_main_booking_product_url(),
         ];
     }
 
@@ -489,7 +493,7 @@ add_action( 'wp_ajax_rh_expire_hold', function() {
     $result = wk_rh_expire_current_cart_reservation( 'ajax_timeout' );
 
     wp_send_json_success( [
-        'redirectUrl' => isset( $result['redirect_url'] ) ? $result['redirect_url'] : wc_get_cart_url(),
+        'redirectUrl' => isset( $result['redirect_url'] ) ? $result['redirect_url'] : wk_rh_get_main_booking_product_url(),
         'message' => isset( $result['notice'] ) ? $result['notice'] : '',
     ] );
 } );
@@ -504,7 +508,7 @@ add_action( 'wp_ajax_nopriv_rh_expire_hold', function() {
     $result = wk_rh_expire_current_cart_reservation( 'ajax_timeout' );
 
     wp_send_json_success( [
-        'redirectUrl' => isset( $result['redirect_url'] ) ? $result['redirect_url'] : wc_get_cart_url(),
+        'redirectUrl' => isset( $result['redirect_url'] ) ? $result['redirect_url'] : wk_rh_get_main_booking_product_url(),
         'message' => isset( $result['notice'] ) ? $result['notice'] : '',
     ] );
 } );
@@ -972,83 +976,6 @@ add_filter( 'body_class', function( $classes ) {
     return $classes;
 } );
 
-function wk_rh_get_checkout_previous_back_link_markup() {
-    if ( is_admin() || ! function_exists( 'is_checkout' ) || ! is_checkout() ) {
-        return '';
-    }
-
-    $main_context = wk_rh_get_main_booking_context();
-    if ( empty( $main_context['cartItemKey'] ) || ! wk_rh_is_checkout_booking_step_ready() ) {
-        return '';
-    }
-
-    return sprintf(
-        '<a href="javascript:" data-tab="#cfw-customer-info" class="cfw-prev-tab cfw-return-to-information-btn wk-rh-checkout-back-btn">&laquo; %s</a>',
-        esc_html__( 'Tilbage', 'racehall-wc-ui' )
-    );
-}
-
-function wk_rh_customize_checkout_previous_link_markup( $link ) {
-    if ( is_admin() || ! function_exists( 'is_checkout' ) || ! is_checkout() ) {
-        return $link;
-    }
-
-    $main_context = wk_rh_get_main_booking_context();
-    if ( empty( $main_context['cartItemKey'] ) ) {
-        return $link;
-    }
-
-    $custom_link = wk_rh_get_checkout_previous_back_link_markup();
-    if ( $custom_link !== '' ) {
-        return $custom_link;
-    }
-
-    if ( ! is_string( $link ) || $link === '' ) {
-        return $link;
-    }
-
-    $back_label = '&laquo; ' . esc_html__( 'Tilbage', 'racehall-wc-ui' );
-
-    if ( preg_match( '/class="([^"]*)"/', $link, $class_matches ) ) {
-        $classes = preg_split( '/\s+/', trim( (string) $class_matches[1] ) );
-        $classes = is_array( $classes ) ? $classes : [];
-
-        if ( ! in_array( 'wk-rh-checkout-back-btn', $classes, true ) ) {
-            $classes[] = 'wk-rh-checkout-back-btn';
-        }
-
-        $link = preg_replace(
-            '/class="([^"]*)"/',
-            'class="' . esc_attr( trim( implode( ' ', array_filter( $classes ) ) ) ) . '"',
-            $link,
-            1
-        );
-    } else {
-        $link = preg_replace( '/<a\b/', '<a class="wk-rh-checkout-back-btn"', $link, 1 ) ?: $link;
-    }
-
-    return preg_replace_callback(
-        '/<a\b([^>]*)>(.*?)<\/a>/is',
-        static function( $matches ) use ( $back_label ) {
-            return '<a' . $matches[1] . '>' . $back_label . '</a>';
-        },
-        $link,
-        1
-    ) ?: $link;
-}
-
-add_filter( 'cfw_return_to_cart_link', function( $link ) {
-    return wk_rh_customize_checkout_previous_link_markup( $link );
-}, 20 );
-
-add_filter( 'cfw_return_to_customer_information_link', function( $link ) {
-    return wk_rh_customize_checkout_previous_link_markup( $link );
-}, 20 );
-
-add_filter( 'cfw_return_to_shipping_method_link', function( $link ) {
-    return wk_rh_customize_checkout_previous_link_markup( $link );
-}, 20 );
-
 function wk_rh_render_checkout_step_customer_gate() {
     if ( is_admin() || ! function_exists( 'is_checkout' ) || ! is_checkout() ) {
         return;
@@ -1109,6 +1036,11 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
     ob_start();
     ?>
     <div class="wk-rh-checkout-step-panel wk-rh-checkout-step-panel--supplements <?php echo $is_ready ? 'is-ready' : 'is-locked'; ?>" data-step="supplements">
+        <?php if ( $is_ready ) : ?>
+            <div class="wk-rh-checkout-step-actions">
+                <button type="button" class="wk-rh-checkout-back-btn">&laquo; <?php esc_html_e( 'Tilbage', 'racehall-wc-ui' ); ?></button>
+            </div>
+        <?php endif; ?>
         <?php if ( ! $is_ready ) : ?>
             <div class="wk-rh-checkout-step-empty"></div>
         <?php elseif ( empty( $supplements ) ) : ?>
@@ -1962,11 +1894,6 @@ add_action('template_redirect', function() {
 
     // CART
     if ( is_cart() ) {
-        if ( function_exists( 'WC' ) && WC()->cart && ! WC()->cart->is_empty() ) {
-            wp_safe_redirect( wc_get_checkout_url() );
-            exit;
-        }
-
         if ( isset( $_GET['rh_clear_cart'] ) && $_GET['rh_clear_cart'] === '1' ) {
             $nonce = isset( $_GET['_wpnonce'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['_wpnonce'] ) ) : '';
             if ( ! wp_verify_nonce( $nonce, 'rh_clear_cart' ) ) {
@@ -2981,7 +2908,7 @@ function wk_rh_remove_all_cart_addon_items( $set_session = true ) {
 
 function wk_rh_get_checkout_booking_redirect_url() {
     $url = wk_rh_get_main_booking_product_url();
-    return is_string( $url ) && $url !== '' ? $url : wc_get_cart_url();
+    return is_string( $url ) && $url !== '' ? $url : wk_rh_get_booking_fallback_url();
 }
 
 function wk_rh_add_checkout_booking_error( WP_Error $errors, $message, $redirect_to_product = false ) {

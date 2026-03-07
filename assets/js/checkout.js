@@ -510,7 +510,7 @@
 
         redirectToProductIfNeeded();
 
-        setCheckoutStepState(false);
+        setCheckoutStepState(!!flow.is_step_ready);
 
         document.addEventListener('input', function (event) {
             var target = event.target;
@@ -595,6 +595,8 @@
 
             var backButton = event.target.closest('.wk-rh-checkout-back-btn');
             if (backButton) {
+                event.preventDefault();
+
                 if (backButton.classList.contains('is-disabled')) {
                     logBookingClientEvent('checkout_back_blocked', {
                         href: backButton.getAttribute('href') || '',
