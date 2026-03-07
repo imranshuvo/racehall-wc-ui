@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.76
+ * Version: 1.77
  * Author: Webkonsulenterne ApS
  */
 
@@ -47,7 +47,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.76' );
+define( 'RACEHALL_WC_UI_VERSION', '1.77' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -323,6 +323,84 @@ function wk_rh_log_upstream_event( $level, $message, array $context = [] ) {
 function wk_rh_log_user_event( $message, array $context = [], $level = 'info' ) {
     return wk_rh_write_log_entry( 'user-actions', $level, $message, $context );
 }
+
+function wk_rh_is_frontend_checkout_request() {
+    return ! is_admin()
+        && function_exists( 'is_checkout' )
+        && is_checkout()
+        && ! ( function_exists( 'is_order_received_page' ) && is_order_received_page() );
+}
+
+function wk_rh_get_checkout_request_diagnostics_context() {
+    $context = [
+        'responseCode' => function_exists( 'http_response_code' ) ? (int) http_response_code() : 0,
+        'didTemplateRedirect' => did_action( 'template_redirect' ),
+        'didTemplateInclude' => did_action( 'template_include' ),
+        'didGetHeader' => did_action( 'get_header' ),
+        'didWpHead' => did_action( 'wp_head' ),
+        'didCheckoutBeforeForm' => did_action( 'woocommerce_before_checkout_form' ),
+        'didCfwBeforeCheckoutForm' => did_action( 'cfw_before_checkout_form' ),
+        'didCfwBeforeMainContent' => did_action( 'cfw_before_main_content' ),
+        'didWpFooter' => did_action( 'wp_footer' ),
+        'cartAvailable' => function_exists( 'WC' ) && WC()->cart ? 1 : 0,
+        'cartEmpty' => function_exists( 'WC' ) && WC()->cart ? ( WC()->cart->is_empty() ? 1 : 0 ) : 1,
+        'obLevel' => function_exists( 'ob_get_level' ) ? (int) ob_get_level() : 0,
+    ];
+
+    if ( function_exists( 'WC' ) && WC()->cart ) {
+        $main_context = wk_rh_get_main_booking_context();
+        $context['mainCartItemKey'] = isset( $main_context['cartItemKey'] ) ? (string) $main_context['cartItemKey'] : '';
+        $context['orderId'] = isset( $main_context['orderId'] ) ? (string) $main_context['orderId'] : '';
+        $context['orderItemId'] = isset( $main_context['orderItemId'] ) ? (string) $main_context['orderItemId'] : '';
+        $context['supplementCount'] = isset( $main_context['supplements'] ) && is_array( $main_context['supplements'] ) ? count( $main_context['supplements'] ) : 0;
+    }
+
+    return $context;
+}
+
+add_action( 'wp', function() {
+    if ( ! wk_rh_is_frontend_checkout_request() ) {
+        return;
+    }
+
+    $GLOBALS['wk_rh_checkout_request_active'] = true;
+
+    wk_rh_log_user_event( 'checkout.request_started', wk_rh_get_checkout_request_diagnostics_context() );
+}, 1 );
+
+add_filter( 'template_include', function( $template ) {
+    if ( ! empty( $GLOBALS['wk_rh_checkout_request_active'] ) ) {
+        wk_rh_log_user_event( 'checkout.template_include', array_merge( wk_rh_get_checkout_request_diagnostics_context(), [
+            'template' => is_string( $template ) ? $template : '',
+        ] ) );
+    }
+
+    return $template;
+}, 999 );
+
+register_shutdown_function( function() {
+    if ( empty( $GLOBALS['wk_rh_checkout_request_active'] ) ) {
+        return;
+    }
+
+    $context = wk_rh_get_checkout_request_diagnostics_context();
+    $error = error_get_last();
+    $fatal_types = [ E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR ];
+
+    if ( is_array( $error ) && isset( $error['type'] ) && in_array( (int) $error['type'], $fatal_types, true ) ) {
+        $context['fatal'] = [
+            'type' => (int) $error['type'],
+            'message' => isset( $error['message'] ) ? (string) $error['message'] : '',
+            'file' => isset( $error['file'] ) ? (string) $error['file'] : '',
+            'line' => isset( $error['line'] ) ? (int) $error['line'] : 0,
+        ];
+
+        wk_rh_log_user_event( 'checkout.request_shutdown_fatal', $context, 'error' );
+        return;
+    }
+
+    wk_rh_log_user_event( 'checkout.request_shutdown', $context );
+} );
 
 function wk_rh_get_recent_log_entries( array $channels = [], $limit = 200, $environment = '' ) {
     $environment = $environment !== '' ? sanitize_key( $environment ) : wk_rh_get_log_environment();
