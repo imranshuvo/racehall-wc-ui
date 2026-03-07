@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.59
+ * Version: 1.60
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.59' );
+define( 'RACEHALL_WC_UI_VERSION', '1.60' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -2326,6 +2326,21 @@ function wk_rh_clear_booking_session_state() {
     WC()->session->set( 'rh_last_product_url', null );
 }
 
+add_action( 'template_redirect', function() {
+    if ( is_admin() || ! function_exists( 'is_checkout' ) || ! is_checkout() || ! function_exists( 'WC' ) || ! WC()->session ) {
+        return;
+    }
+
+    $redirect_url = WC()->session->get( 'rh_checkout_redirect_url' );
+    if ( ! is_string( $redirect_url ) || $redirect_url === '' ) {
+        return;
+    }
+
+    WC()->session->set( 'rh_checkout_redirect_url', null );
+    wp_safe_redirect( $redirect_url );
+    exit;
+}, 1 );
+
 function wk_rh_cancel_and_clear_expired_cart_holds() {
     if ( ! function_exists( 'WC' ) || ! WC()->cart || WC()->cart->is_empty() ) {
         return;
@@ -2382,9 +2397,8 @@ function wk_rh_cancel_and_clear_expired_cart_holds() {
         'error'
     );
 
-    if ( ! wp_doing_ajax() && function_exists( 'is_checkout' ) && is_checkout() && is_string( $redirect_url ) && $redirect_url !== '' ) {
-        wp_safe_redirect( $redirect_url );
-        exit;
+    if ( ! wp_doing_ajax() && function_exists( 'is_checkout' ) && is_checkout() && is_string( $redirect_url ) && $redirect_url !== '' && function_exists( 'WC' ) && WC()->session ) {
+        WC()->session->set( 'rh_checkout_redirect_url', $redirect_url );
     }
 }
 
