@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.53
+ * Version: 1.54
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.53' );
+define( 'RACEHALL_WC_UI_VERSION', '1.54' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -944,6 +944,26 @@ function wk_rh_render_checkoutwc_hold_banner() {
 
 add_action( 'cfw_before_checkout_form', 'wk_rh_render_checkoutwc_hold_banner', 5 );
 add_action( 'cfw_before_main_content', 'wk_rh_render_checkoutwc_hold_banner', 5 );
+
+function wk_rh_render_checkout_loading_overlay() {
+    static $already_rendered = false;
+
+    if ( is_admin() ) {
+        return;
+    }
+
+    if ( $already_rendered ) {
+        return;
+    }
+
+    $already_rendered = true;
+
+    echo '<div id="rh-checkout-loading" class="rh-checkout-loading" aria-hidden="true"><div class="spinner" aria-hidden="true"></div></div>';
+}
+
+add_action( 'cfw_before_checkout_form', 'wk_rh_render_checkout_loading_overlay', 6 );
+add_action( 'cfw_before_main_content', 'wk_rh_render_checkout_loading_overlay', 6 );
+add_action( 'woocommerce_before_checkout_form', 'wk_rh_render_checkout_loading_overlay', 6 );
 
 add_action( 'wp', function() {
     if ( is_admin() || ! function_exists( 'is_checkout' ) || ! is_checkout() ) {

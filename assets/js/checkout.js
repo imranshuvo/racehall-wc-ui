@@ -51,6 +51,25 @@
         });
     }
 
+    function showCheckoutLoading() {
+        var overlay = document.getElementById('rh-checkout-loading');
+        if (!overlay) return;
+
+        overlay.classList.add('is-visible');
+        overlay.setAttribute('aria-hidden', 'false');
+        document.documentElement.classList.add('rh-checkout-loading-active');
+    }
+
+    function hideCheckoutLoading() {
+        var overlay = document.getElementById('rh-checkout-loading');
+        if (overlay) {
+            overlay.classList.remove('is-visible');
+            overlay.setAttribute('aria-hidden', 'true');
+        }
+
+        document.documentElement.classList.remove('rh-checkout-loading-active');
+    }
+
     function getCheckoutFlowConfig() {
         return window.RH_CHECKOUT_FLOW || {};
     }
@@ -265,6 +284,12 @@
     }
 
     function setSupplementsLoading(isLoading) {
+        if (isLoading) {
+            showCheckoutLoading();
+        } else {
+            hideCheckoutLoading();
+        }
+
         var list = document.querySelector('.wk-rh-checkout-addons-list');
         if (list) {
             list.classList.toggle('is-updating', !!isLoading);
@@ -437,6 +462,7 @@
     document.addEventListener('DOMContentLoaded', function () {
         initHoldCountdown();
         logBookingClientEvent('checkout_page_ready', {});
+        hideCheckoutLoading();
 
         const i18n = window.RH_CHECKOUT_I18N || {};
         const flow = getCheckoutFlowConfig();
@@ -488,6 +514,7 @@
                     return;
                 }
 
+                showCheckoutLoading();
                 setPrepareButtonLoading(prepareButton, true);
                 showFlowNotice('', 'success');
 
@@ -535,6 +562,7 @@
                         }
                     })
                     .finally(function () {
+                        hideCheckoutLoading();
                         setPrepareButtonLoading(prepareButton, false);
                     });
 
@@ -626,6 +654,7 @@
         if (window.jQuery && typeof window.jQuery === 'function') {
             window.jQuery(document.body).on('checkout_error', function () {
                 logBookingClientEvent('checkout_error', {});
+                hideCheckoutLoading();
                 if (payLaterBtn) {
                     payLaterBtn.disabled = false;
                     payLaterBtn.textContent = payLaterText;
@@ -694,5 +723,9 @@
             form.submit();
         });
 
+    });
+
+    window.addEventListener('pageshow', function () {
+        hideCheckoutLoading();
     });
 })();

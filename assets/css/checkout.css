@@ -54,6 +54,45 @@ footer{
   color: #FFFFFF;
 }
 
+.rh-checkout-loading {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+}
+
+html.rh-checkout-loading-active .wk-rh-checkout-flow,
+html.rh-checkout-loading-active form.checkout,
+html.rh-checkout-loading-active #order_review {
+  visibility: hidden;
+}
+
+html.rh-checkout-loading-active .rh-checkout-loading {
+  display: flex;
+}
+
+.rh-checkout-loading.is-visible {
+  display: flex;
+}
+
+.rh-checkout-loading .spinner {
+  width: 50px;
+  height: 50px;
+  border: 5px solid #e5e7eb;
+  border-top: 5px solid #C8102E;
+  border-radius: 50%;
+  animation: rh-checkout-spin 0.8s linear infinite;
+}
+
+@keyframes rh-checkout-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 
 
 /* Main Content */
