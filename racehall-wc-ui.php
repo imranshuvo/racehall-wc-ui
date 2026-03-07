@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.78
+ * Version: 1.79
  * Author: Webkonsulenterne ApS
  */
 
@@ -47,7 +47,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.78' );
+define( 'RACEHALL_WC_UI_VERSION', '1.79' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -1984,11 +1984,25 @@ function wk_rh_replace_main_product_only( $passed, $product_id, $quantity ) {
     $is_main_product = get_post_meta( $product_id, 'bmileisure_id', true );
     if ( ! $is_main_product || WC()->cart->is_empty() ) return $passed;
 
+    $removed_existing_booking = false;
+
     foreach ( WC()->cart->get_cart() as $cart_item_key => $cart_item ) {
         $cart_product_id = $cart_item['product_id'];
         $cart_is_main    = get_post_meta( $cart_product_id, 'bmileisure_id', true );
-        if ( $cart_is_main ) WC()->cart->remove_cart_item( $cart_item_key );
+        if ( $cart_is_main || ! empty( $cart_item['is_addon'] ) ) {
+            WC()->cart->remove_cart_item( $cart_item_key );
+            $removed_existing_booking = true;
+        }
     }
+
+    if ( $removed_existing_booking ) {
+        WC()->cart->calculate_totals();
+
+        if ( method_exists( WC()->cart, 'set_session' ) ) {
+            WC()->cart->set_session();
+        }
+    }
+
     return $passed;
 }
 
