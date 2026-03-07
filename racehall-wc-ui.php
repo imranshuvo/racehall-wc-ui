@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.46
+ * Version: 1.47
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.46' );
+define( 'RACEHALL_WC_UI_VERSION', '1.47' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -2403,12 +2403,17 @@ function wk_rh_get_cart_item_addon_upstream_id( array $cart_item, array $supplem
         return '';
     }
 
+    $available_supplement_ids = [];
+
     foreach ( $supplements as $supplement ) {
         if ( ! is_array( $supplement ) ) {
             continue;
         }
 
         $supplement_id = isset( $supplement['id'] ) ? trim( (string) $supplement['id'] ) : '';
+        if ( $supplement_id !== '' ) {
+            $available_supplement_ids[] = $supplement_id;
+        }
         if ( $supplement_id === '' || $supplement_id !== $stored_supplement_id ) {
             continue;
         }
@@ -2417,6 +2422,15 @@ function wk_rh_get_cart_item_addon_upstream_id( array $cart_item, array $supplem
         if ( $resolved_upstream_id !== '' ) {
             return $resolved_upstream_id;
         }
+    }
+
+    if ( function_exists( 'wk_rh_log_user_event' ) ) {
+        wk_rh_log_user_event( 'checkout.addon_supplement_not_found', [
+            'addonName' => isset( $cart_item['addon_display_name'] ) ? sanitize_text_field( (string) $cart_item['addon_display_name'] ) : '',
+            'storedSupplementId' => $stored_supplement_id,
+            'storedUpstreamId' => $stored_upstream_id,
+            'availableSupplementIds' => $available_supplement_ids,
+        ], 'error' );
     }
 
     return '';
@@ -2761,7 +2775,32 @@ function wk_rh_extract_booking_supplements( $result ) {
     }
 
     if ( isset( $result['supplements'] ) && is_array( $result['supplements'] ) ) {
-        return $result['supplements'];
+        $normalized_supplements = [];
+
+        foreach ( $result['supplements'] as $supplement ) {
+            if ( ! is_array( $supplement ) ) {
+                continue;
+            }
+
+            $product = isset( $supplement['product'] ) && is_array( $supplement['product'] ) ? $supplement['product'] : [];
+            $normalized = $supplement;
+
+            if ( ! empty( $product ) ) {
+                foreach ( [ 'id', 'name', 'info', 'hasPicture', 'prices', 'minAmount', 'maxAmount', 'resourceId', 'resourceKind', 'kind', 'saleMode', 'bookingMode', 'productGroup', 'dynamicGroups', 'isEntry', 'isCombo', 'minAge', 'maxAge', 'isMembersOnly' ] as $key ) {
+                    if ( ! array_key_exists( $key, $normalized ) && array_key_exists( $key, $product ) ) {
+                        $normalized[ $key ] = $product[ $key ];
+                    }
+                }
+
+                if ( ! isset( $normalized['id'] ) && isset( $product['id'] ) ) {
+                    $normalized['id'] = $product['id'];
+                }
+            }
+
+            $normalized_supplements[] = $normalized;
+        }
+
+        return $normalized_supplements;
     }
 
     if ( function_exists( 'wk_rh_log_upstream_event' ) ) {
