@@ -94,6 +94,13 @@
         };
     }
 
+    function canRestoreReadyStateOnLoad(flow) {
+        if (!flow || !flow.is_step_ready) return false;
+
+        var paymentMethod = document.getElementById('cfw-payment-method');
+        return !!(paymentMethod && paymentMethod.offsetParent !== null);
+    }
+
     function setCheckoutStepState(isReady) {
         document.body.classList.toggle('wk-rh-checkout-step-ready', !!isReady);
         document.body.classList.toggle('wk-rh-checkout-step-pending', !isReady);
@@ -510,7 +517,7 @@
 
         redirectToProductIfNeeded();
 
-        setCheckoutStepState(!!flow.is_step_ready);
+        setCheckoutStepState(canRestoreReadyStateOnLoad(flow));
 
         document.addEventListener('input', function (event) {
             var target = event.target;
