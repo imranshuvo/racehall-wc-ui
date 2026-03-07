@@ -91,11 +91,13 @@ html.rh-cart-loading-active .rh-cart-loading {
 
 .cart-page {
     display: flex;
+    flex-direction: column;
     max-width: 1280px;
     width: 100%;
     margin: 0 auto;
     gap: 25px;
     padding: 60px 0;
+    padding-top: 0;
 }
 
 /* LEFT */
@@ -106,11 +108,23 @@ html.rh-cart-loading-active .rh-cart-loading {
 }
 
 .left p {
-    max-width: 420px;
+    max-width: 100%;
     line-height: 1.6;
     opacity: 0.8;
 }
-
+.center.wk-rh-checkout-addons-shell {
+    border: none;
+    padding-top: 30px;
+}
+.addon-control-row.wk-rh-addon-card-actions button.wk-rh-addon-qty-btn {
+    width: 20px;
+    height: 20px;
+    display: inline-block;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--text);
+    color: var(--accent);
+}
 .trophy img {
     margin-top: 40px;
     position: absolute;
@@ -291,6 +305,7 @@ input.qty-input.addon-qty-input {
     line-height: 1;
     height: 20px;
     outline: none;
+    appearance: textfield;
     -moz-appearance: textfield;
 }
 

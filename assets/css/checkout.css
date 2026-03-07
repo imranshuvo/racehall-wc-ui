@@ -528,12 +528,6 @@ body.checkout-wc .wk-rh-checkout-step-notice.is-success {
   background: rgba(31, 143, 82, 0.18);
 }
 
-body.checkout-wc .wk-rh-checkout-addon-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  flex: 0 0 auto;
-}
-
 body.checkout-wc .wk-rh-checkout-back-btn {
   display: inline-flex;
   align-items: center;
@@ -547,7 +541,6 @@ body.checkout-wc .wk-rh-checkout-back-btn {
   font-family: 'Oxanium', sans-serif;
   font-weight: 800;
   cursor: pointer;
-  margin-top: 24px;
   text-decoration: none;
 }
 

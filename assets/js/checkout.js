@@ -540,7 +540,7 @@
 
                         return refreshCheckoutFragments().then(function () {
                             setCheckoutStepState(true);
-                            showFlowNotice(data.message || '', 'success', '.wk-rh-checkout-step-notice--supplements');
+                            showFlowNotice('', 'error', '.wk-rh-checkout-step-notice--supplements');
 
                             supplementsPanel = supplementsPanel || document.querySelector('.wk-rh-checkout-step-panel--supplements');
                             if (supplementsPanel && typeof supplementsPanel.scrollIntoView === 'function') {
@@ -574,7 +574,7 @@
                 }
 
                 setCheckoutStepState(false);
-                showFlowNotice('', 'success', '.wk-rh-checkout-step-notice--supplements');
+                showFlowNotice('', 'error', '.wk-rh-checkout-step-notice--supplements');
                 return;
             }
 
@@ -627,7 +627,7 @@
             if (!addonId) return;
 
             setSupplementsLoading(true);
-            showFlowNotice(flow.messages && flow.messages.supplementUpdating ? flow.messages.supplementUpdating : processingText, 'success', '.wk-rh-checkout-step-notice--supplements');
+            showFlowNotice('', 'error', '.wk-rh-checkout-step-notice--supplements');
 
             var addonPayload = new URLSearchParams({
                 action: 'rh_checkout_set_addon_qty',
@@ -641,7 +641,7 @@
                     var appliedQty = data && typeof data.quantity !== 'undefined' ? data.quantity : nextQty;
                     updateAddonCardState(card, appliedQty);
                     logBookingClientEvent('checkout_addon_quantity_updated', { addonId: addonId, quantity: appliedQty });
-                    showFlowNotice('', 'success', '.wk-rh-checkout-step-notice--supplements');
+                    showFlowNotice('', 'error', '.wk-rh-checkout-step-notice--supplements');
                     return refreshCheckoutFragments();
                 })
                 .catch(function (error) {

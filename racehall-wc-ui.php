@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.56
+ * Version: 1.57
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.56' );
+define( 'RACEHALL_WC_UI_VERSION', '1.57' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -972,6 +972,32 @@ add_filter( 'body_class', function( $classes ) {
     return $classes;
 } );
 
+function wk_rh_get_checkout_previous_back_link_markup() {
+    if ( is_admin() || ! function_exists( 'is_checkout' ) || ! is_checkout() ) {
+        return '';
+    }
+
+    $main_context = wk_rh_get_main_booking_context();
+    if ( empty( $main_context['cartItemKey'] ) || ! wk_rh_is_checkout_booking_step_ready() ) {
+        return '';
+    }
+
+    return sprintf(
+        '<a href="javascript:" data-tab="#cfw-customer-info" class="cfw-prev-tab cfw-return-to-information-btn wk-rh-checkout-back-btn">&laquo; %s</a>',
+        esc_html__( 'Back', 'racehall-wc-ui' )
+    );
+}
+
+add_filter( 'cfw_return_to_cart_link', function( $link ) {
+    $custom_link = wk_rh_get_checkout_previous_back_link_markup();
+    return $custom_link !== '' ? $custom_link : $link;
+}, 20 );
+
+add_filter( 'cfw_return_to_customer_information_link', function( $link ) {
+    $custom_link = wk_rh_get_checkout_previous_back_link_markup();
+    return $custom_link !== '' ? $custom_link : $link;
+}, 20 );
+
 function wk_rh_render_checkout_step_customer_gate() {
     if ( is_admin() || ! function_exists( 'is_checkout' ) || ! is_checkout() ) {
         return;
@@ -1037,18 +1063,15 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
         <?php elseif ( empty( $supplements ) ) : ?>
             <div class="racehall-cart cart-page wk-rh-checkout-addons-layout">
                 <section class="left">
-                    <h1><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h1>
+                    <h2 style="color: #fff;"><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h2>
                     <p><?php esc_html_e( 'Løft din oplevelse til næste niveau. Her får du muligheden for at skræddersy dit race, finjustere detaljerne og sætte dit personlige præg på dagen. Uanset om jagten er fart, præcision eller bare den perfekte oplevelse, er dette stedet, hvor du former dit eget løb.', 'racehall-wc-ui' ); ?></p>
-                    <div class="wk-rh-checkout-addon-toolbar">
-                        <a href="javascript:" data-tab="#cfw-customer-info" class="cfw-prev-tab cfw-return-to-information-btn wk-rh-checkout-back-btn">&laquo; <?php esc_html_e( 'Back', 'racehall-wc-ui' ); ?></a>
-                    </div>
                     <div class="trophy">
                         <img src="<?php echo esc_url( plugins_url( 'assets/image/trophy.png', __FILE__ ) ); ?>" alt="<?php echo esc_attr__( 'Trophy illustration', 'racehall-wc-ui' ); ?>" />
                     </div>
                 </section>
                 <div class="center wk-rh-checkout-addons-shell">
                     <section class="addons wk-rh-checkout-addons-list">
-                        <h2><?php esc_html_e( 'ADD ONS', 'racehall-wc-ui' ); ?></h2>
+                        <!-- <h2><?php esc_html_e( 'ADD ONS', 'racehall-wc-ui' ); ?></h2> -->
                         <div class="wk-rh-checkout-step-empty">
                             <?php esc_html_e( 'Der er ingen tilgængelige tilvalg til denne booking.', 'racehall-wc-ui' ); ?>
                         </div>
@@ -1060,9 +1083,6 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                 <section class="left">
                     <h1><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h1>
                     <p><?php esc_html_e( 'Løft din oplevelse til næste niveau. Her får du muligheden for at skræddersy dit race, finjustere detaljerne og sætte dit personlige præg på dagen. Uanset om jagten er fart, præcision eller bare den perfekte oplevelse, er dette stedet, hvor du former dit eget løb.', 'racehall-wc-ui' ); ?></p>
-                    <div class="wk-rh-checkout-addon-toolbar">
-                        <a href="javascript:" data-tab="#cfw-customer-info" class="cfw-prev-tab cfw-return-to-information-btn wk-rh-checkout-back-btn">&laquo; <?php esc_html_e( 'Back', 'racehall-wc-ui' ); ?></a>
-                    </div>
                     <div class="trophy">
                         <img src="<?php echo esc_url( plugins_url( 'assets/image/trophy.png', __FILE__ ) ); ?>" alt="<?php echo esc_attr__( 'Trophy illustration', 'racehall-wc-ui' ); ?>" />
                     </div>
