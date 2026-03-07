@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.55
+ * Version: 1.56
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.55' );
+define( 'RACEHALL_WC_UI_VERSION', '1.56' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -842,18 +842,6 @@ function wk_rh_get_cart_hold_expiry_context() {
         }
     }
 
-    if ( $earliest_expiry <= 0 && function_exists( 'WC' ) && WC()->session ) {
-        $session_booking = WC()->session->get( 'rh_bmi_booking' );
-        if ( is_array( $session_booking ) ) {
-            $session_expiry = isset( $session_booking['expiresAt'] ) ? (int) $session_booking['expiresAt'] : 0;
-            $session_order  = isset( $session_booking['orderId'] ) ? trim( (string) $session_booking['orderId'] ) : '';
-            if ( $session_expiry > 0 && $session_order !== '' ) {
-                $earliest_expiry = $session_expiry;
-                $order_id = $session_order;
-            }
-        }
-    }
-
     return [
         'expires_at' => $earliest_expiry,
         'order_id'   => $order_id,
@@ -958,7 +946,7 @@ function wk_rh_render_checkout_loading_overlay() {
 
     $already_rendered = true;
 
-    echo '<div id="rh-checkout-loading" class="rh-checkout-loading loading" aria-hidden="true"><div class="spinner" aria-hidden="true"></div></div>';
+    echo '<div id="rh-checkout-loading" class="rh-checkout-loading" aria-hidden="true"><div class="spinner" aria-hidden="true"></div></div>';
 }
 
 add_action( 'cfw_before_checkout_form', 'wk_rh_render_checkout_loading_overlay', 6 );
@@ -2094,9 +2082,21 @@ function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
         $cart_item_data['bmi_resource_id'] = $bmi_data['resourceId']  ?? '';
         $cart_item_data['bmi_page_product_limits'] = $bmi_data['pageProductLimits'] ?? null;
         $cart_item_data['bmi_page_products'] = $bmi_data['pageProducts'] ?? [];
-        $cart_item_data['bmi_order_id']    = $bmi_data['orderId']     ?? '';
-        $cart_item_data['bmi_order_item_id'] = $bmi_data['orderItemId'] ?? '';
-        $cart_item_data['bmi_hold_expires_at'] = isset( $bmi_data['expiresAt'] ) ? (int) $bmi_data['expiresAt'] : 0;
+        $cart_item_data['bmi_order_id']    = '';
+        $cart_item_data['bmi_order_item_id'] = '';
+        $cart_item_data['bmi_hold_expires_at'] = 0;
+
+        if ( WC()->session ) {
+            if ( is_array( $bmi_data ) ) {
+                $bmi_data['orderId'] = '';
+                $bmi_data['orderItemId'] = '';
+                $bmi_data['expiresAt'] = 0;
+                $bmi_data['contactPerson'] = [];
+                WC()->session->set( 'rh_bmi_booking', $bmi_data );
+            }
+
+            WC()->session->set( 'booking_supplement', null );
+        }
     }
 
     if ( $is_addon_request ) {
