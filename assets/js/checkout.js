@@ -74,9 +74,34 @@
         return window.RH_CHECKOUT_FLOW || {};
     }
 
+    function collectCheckoutDebugState() {
+        var body = document.body;
+        var customerInfo = document.getElementById('cfw-customer-info');
+        var shippingMethod = document.getElementById('cfw-shipping-method');
+        var paymentMethod = document.getElementById('cfw-payment-method');
+        var supplementsPanel = document.querySelector('.wk-rh-checkout-step-panel--supplements');
+
+        return {
+            href: window.location.href,
+            hash: window.location.hash || '',
+            bodyClasses: body ? body.className : '',
+            isReady: !!(body && body.classList.contains('wk-rh-checkout-step-ready')),
+            isPending: !!(body && body.classList.contains('wk-rh-checkout-step-pending')),
+            customerInfoVisible: !!(customerInfo && customerInfo.offsetParent !== null),
+            shippingMethodVisible: !!(shippingMethod && shippingMethod.offsetParent !== null),
+            paymentMethodVisible: !!(paymentMethod && paymentMethod.offsetParent !== null),
+            supplementsVisible: !!(supplementsPanel && supplementsPanel.offsetParent !== null)
+        };
+    }
+
     function setCheckoutStepState(isReady) {
         document.body.classList.toggle('wk-rh-checkout-step-ready', !!isReady);
         document.body.classList.toggle('wk-rh-checkout-step-pending', !isReady);
+
+        logBookingClientEvent('checkout_step_state_changed', {
+            isReady: !!isReady,
+            state: collectCheckoutDebugState()
+        });
 
         document.querySelectorAll('.wk-rh-checkout-next-btn').forEach(function (button) {
             if (!button) return;
@@ -458,7 +483,9 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         initHoldCountdown();
-        logBookingClientEvent('checkout_page_ready', {});
+        logBookingClientEvent('checkout_page_ready', {
+            state: collectCheckoutDebugState()
+        });
         hideCheckoutLoading();
 
         const i18n = window.RH_CHECKOUT_I18N || {};
@@ -569,12 +596,34 @@
             var backButton = event.target.closest('.wk-rh-checkout-back-btn');
             if (backButton) {
                 if (backButton.classList.contains('is-disabled')) {
+                    logBookingClientEvent('checkout_back_blocked', {
+                        href: backButton.getAttribute('href') || '',
+                        dataTab: backButton.getAttribute('data-tab') || '',
+                        classes: backButton.className || '',
+                        state: collectCheckoutDebugState()
+                    });
                     event.preventDefault();
                     return;
                 }
 
+                logBookingClientEvent('checkout_back_clicked', {
+                    href: backButton.getAttribute('href') || '',
+                    dataTab: backButton.getAttribute('data-tab') || '',
+                    classes: backButton.className || '',
+                    state: collectCheckoutDebugState()
+                });
+
                 setCheckoutStepState(false);
                 showFlowNotice('', 'error', '.wk-rh-checkout-step-notice--supplements');
+
+                window.setTimeout(function () {
+                    logBookingClientEvent('checkout_back_after_click', {
+                        href: backButton.getAttribute('href') || '',
+                        dataTab: backButton.getAttribute('data-tab') || '',
+                        state: collectCheckoutDebugState()
+                    });
+                }, 150);
+
                 return;
             }
 
