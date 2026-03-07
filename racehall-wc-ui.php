@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.68
+ * Version: 1.69
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.68' );
+define( 'RACEHALL_WC_UI_VERSION', '1.69' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -1114,7 +1114,7 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                     $display_qty = $current_qty > 0 ? $current_qty : $min_qty;
                     $price_amount = wk_rh_get_supplement_price_amount( $supplement );
                     $addon_image = function_exists( 'wk_rh_get_product_image_data_uri' )
-                        ? wk_rh_get_product_image_data_uri( $location, $upstream_id )
+                        ? wk_rh_get_product_image_data_uri( $location, $upstream_id, false )
                         : '';
                     ?>
                     <div

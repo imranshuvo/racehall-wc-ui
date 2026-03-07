@@ -130,7 +130,7 @@ function wk_rh_get_token( $location = '' ) {
     return $token;
 }
 
-function wk_rh_get_product_image_data_uri( $location, $product_id ) {
+function wk_rh_get_product_image_data_uri( $location, $product_id, $allow_remote_fetch = true ) {
     static $runtime_image_cache = [];
 
     $product_id = trim( (string) $product_id );
@@ -148,6 +148,11 @@ function wk_rh_get_product_image_data_uri( $location, $product_id ) {
     if ( is_string( $cached ) && $cached !== '' ) {
         $runtime_image_cache[ $runtime_key ] = $cached;
         return $cached;
+    }
+
+    if ( ! $allow_remote_fetch ) {
+        $runtime_image_cache[ $runtime_key ] = '';
+        return '';
     }
 
     $token = wk_rh_get_token( $location );
