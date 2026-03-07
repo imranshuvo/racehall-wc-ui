@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.63
+ * Version: 1.64
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.63' );
+define( 'RACEHALL_WC_UI_VERSION', '1.64' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -4009,6 +4009,7 @@ function wk_rh_add_bmi_ids_to_order_item( $item, $cart_item_key, $values, $order
         }
 
         if ( ! $is_addon ) {
+            $item->add_meta_data( 'Booking reference', sanitize_text_field( (string) $values['bmi_order_id'] ), true );
             $order->update_meta_data( 'bmi_order_id', $values['bmi_order_id'] );
             $order->update_meta_data( 'bmi_order_item_id', $values['bmi_order_item_id'] );
         }
@@ -4078,6 +4079,32 @@ function wk_rh_add_bmi_ids_to_order_item( $item, $cart_item_key, $values, $order
         }
     }
 }
+
+function wk_rh_get_hidden_order_item_meta_keys() {
+    return [
+        'bmi_order_id',
+        'bmi_order_item_id',
+        'Upstream orderId',
+        'Upstream orderItemId',
+        'Upstream add-on ID',
+        'wk_rh_booking_response',
+        'wk_rh_booking_supplements',
+        'wk_rh_booking_expires_at',
+        'wk_rh_addon_sell_response',
+        '_wk_rh_is_addon',
+        '_wk_rh_addon_upstream_id',
+        '_wk_rh_addon_display_name',
+        '_wk_rh_addon_unit_price',
+    ];
+}
+
+add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden_meta ) {
+    if ( ! is_array( $hidden_meta ) ) {
+        $hidden_meta = [];
+    }
+
+    return array_values( array_unique( array_merge( $hidden_meta, wk_rh_get_hidden_order_item_meta_keys() ) ) );
+}, 20 );
 
 function racehall_get_connected_products() {
     return wk_rh_get_connected_products();
