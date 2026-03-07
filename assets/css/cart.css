@@ -131,6 +131,8 @@ html.rh-cart-loading-active .rh-cart-loading {
     left: 0;
 }
 
+
+
 /* ADDONS */
 
 .addons {
@@ -794,3 +796,11 @@ input.qty-input.addon-qty-input {
 .summary-section { margin-bottom: 12px; }
 
 /* ...existing code... */
+
+
+#cfw.context-thank-you section h6 { color: #fff; }
+button.button.addon-add-button.wk-rh-addon-add-btn {
+    background: transparent;
+    padding: 7.5px 20px;
+    margin-left: 15px;
+}

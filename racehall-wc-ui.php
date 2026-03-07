@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.64
+ * Version: 1.65
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.64' );
+define( 'RACEHALL_WC_UI_VERSION', '1.65' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -4105,6 +4105,30 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden_meta ) {
 
     return array_values( array_unique( array_merge( $hidden_meta, wk_rh_get_hidden_order_item_meta_keys() ) ) );
 }, 20 );
+
+add_filter( 'woocommerce_order_item_get_formatted_meta_data', function( $formatted_meta, $item ) {
+    if ( empty( $formatted_meta ) || ! is_array( $formatted_meta ) ) {
+        return $formatted_meta;
+    }
+
+    $hidden_keys = array_map( 'strval', wk_rh_get_hidden_order_item_meta_keys() );
+
+    foreach ( $formatted_meta as $meta_id => $meta ) {
+        $meta_key = '';
+
+        if ( is_object( $meta ) && isset( $meta->key ) ) {
+            $meta_key = (string) $meta->key;
+        } elseif ( is_array( $meta ) && isset( $meta['key'] ) ) {
+            $meta_key = (string) $meta['key'];
+        }
+
+        if ( $meta_key !== '' && in_array( $meta_key, $hidden_keys, true ) ) {
+            unset( $formatted_meta[ $meta_id ] );
+        }
+    }
+
+    return $formatted_meta;
+}, 20, 2 );
 
 function racehall_get_connected_products() {
     return wk_rh_get_connected_products();
