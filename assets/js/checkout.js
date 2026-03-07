@@ -295,8 +295,15 @@
             list.classList.toggle('is-updating', !!isLoading);
         }
 
-        document.querySelectorAll('.wk-rh-supplement-card-actions button, .wk-rh-checkout-back-btn').forEach(function (button) {
+        document.querySelectorAll('.wk-rh-addon-card-actions button').forEach(function (button) {
             button.disabled = !!isLoading;
+        });
+
+        document.querySelectorAll('.wk-rh-checkout-back-btn').forEach(function (link) {
+            if (!link) return;
+            link.classList.toggle('is-disabled', !!isLoading);
+            link.setAttribute('aria-disabled', isLoading ? 'true' : 'false');
+            link.tabIndex = isLoading ? -1 : 0;
         });
     }
 
@@ -362,16 +369,6 @@
 
         current.replaceWith(next);
         return next;
-    }
-
-    function revealCustomerInfoStep() {
-        setCheckoutStepState(false);
-        showFlowNotice('', 'success', '.wk-rh-checkout-step-notice--supplements');
-
-        var customerPanel = document.querySelector('#cfw-customer-info') || document.querySelector('.wk-rh-checkout-step-panel--customer');
-        if (customerPanel && typeof customerPanel.scrollIntoView === 'function') {
-            customerPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
     }
 
     function initHoldCountdown() {
@@ -571,8 +568,13 @@
 
             var backButton = event.target.closest('.wk-rh-checkout-back-btn');
             if (backButton) {
-                event.preventDefault();
-                revealCustomerInfoStep();
+                if (backButton.classList.contains('is-disabled')) {
+                    event.preventDefault();
+                    return;
+                }
+
+                setCheckoutStepState(false);
+                showFlowNotice('', 'success', '.wk-rh-checkout-step-notice--supplements');
                 return;
             }
 
@@ -580,7 +582,7 @@
             if (qtyButton) {
                 event.preventDefault();
 
-                var qtyCard = qtyButton.closest('.wk-rh-supplement-card');
+                var qtyCard = qtyButton.closest('.wk-rh-addon-card');
                 if (!qtyCard) return;
 
                 var qtyInput = qtyCard.querySelector('.addon-qty-display');
@@ -610,7 +612,7 @@
 
             event.preventDefault();
 
-            var card = actionButton.closest('.wk-rh-supplement-card');
+            var card = actionButton.closest('.wk-rh-addon-card');
             if (!card) return;
 
             var direction = 'add';

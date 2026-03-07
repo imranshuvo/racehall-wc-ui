@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.54
+ * Version: 1.55
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.54' );
+define( 'RACEHALL_WC_UI_VERSION', '1.55' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -958,7 +958,7 @@ function wk_rh_render_checkout_loading_overlay() {
 
     $already_rendered = true;
 
-    echo '<div id="rh-checkout-loading" class="rh-checkout-loading" aria-hidden="true"><div class="spinner" aria-hidden="true"></div></div>';
+    echo '<div id="rh-checkout-loading" class="rh-checkout-loading loading" aria-hidden="true"><div class="spinner" aria-hidden="true"></div></div>';
 }
 
 add_action( 'cfw_before_checkout_form', 'wk_rh_render_checkout_loading_overlay', 6 );
@@ -1052,7 +1052,10 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                     <h1><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h1>
                     <p><?php esc_html_e( 'Løft din oplevelse til næste niveau. Her får du muligheden for at skræddersy dit race, finjustere detaljerne og sætte dit personlige præg på dagen. Uanset om jagten er fart, præcision eller bare den perfekte oplevelse, er dette stedet, hvor du former dit eget løb.', 'racehall-wc-ui' ); ?></p>
                     <div class="wk-rh-checkout-addon-toolbar">
-                        <button type="button" class="wk-rh-checkout-back-btn"><?php esc_html_e( 'Back', 'racehall-wc-ui' ); ?></button>
+                        <a href="javascript:" data-tab="#cfw-customer-info" class="cfw-prev-tab cfw-return-to-information-btn wk-rh-checkout-back-btn">&laquo; <?php esc_html_e( 'Back', 'racehall-wc-ui' ); ?></a>
+                    </div>
+                    <div class="trophy">
+                        <img src="<?php echo esc_url( plugins_url( 'assets/image/trophy.png', __FILE__ ) ); ?>" alt="<?php echo esc_attr__( 'Trophy illustration', 'racehall-wc-ui' ); ?>" />
                     </div>
                 </section>
                 <div class="center wk-rh-checkout-addons-shell">
@@ -1070,7 +1073,10 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                     <h1><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h1>
                     <p><?php esc_html_e( 'Løft din oplevelse til næste niveau. Her får du muligheden for at skræddersy dit race, finjustere detaljerne og sætte dit personlige præg på dagen. Uanset om jagten er fart, præcision eller bare den perfekte oplevelse, er dette stedet, hvor du former dit eget løb.', 'racehall-wc-ui' ); ?></p>
                     <div class="wk-rh-checkout-addon-toolbar">
-                        <button type="button" class="wk-rh-checkout-back-btn"><?php esc_html_e( 'Back', 'racehall-wc-ui' ); ?></button>
+                        <a href="javascript:" data-tab="#cfw-customer-info" class="cfw-prev-tab cfw-return-to-information-btn wk-rh-checkout-back-btn">&laquo; <?php esc_html_e( 'Back', 'racehall-wc-ui' ); ?></a>
+                    </div>
+                    <div class="trophy">
+                        <img src="<?php echo esc_url( plugins_url( 'assets/image/trophy.png', __FILE__ ) ); ?>" alt="<?php echo esc_attr__( 'Trophy illustration', 'racehall-wc-ui' ); ?>" />
                     </div>
                 </section>
                 <div class="center wk-rh-checkout-addons-shell">
@@ -1100,7 +1106,7 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                         : '';
                     ?>
                     <div
-                        class="addon wk-rh-supplement-card <?php echo $current_qty > 0 ? 'is-selected' : ''; ?>"
+                        class="addon wk-rh-addon-card <?php echo $current_qty > 0 ? 'is-selected' : ''; ?>"
                         data-addon-upstream-id="<?php echo esc_attr( $upstream_id ); ?>"
                         data-current-qty="<?php echo esc_attr( $current_qty ); ?>"
                         data-min-qty="<?php echo esc_attr( $min_qty ); ?>"
@@ -1110,18 +1116,18 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                     >
                         <div class="info-container">
                             <?php if ( $addon_image !== '' ) : ?>
-                                <div class="addon-img wk-rh-supplement-card-media">
-                                    <img src="<?php echo esc_attr( $addon_image ); ?>" alt="<?php echo esc_attr( wp_strip_all_tags( $name ) ); ?>" class="wk-rh-checkout-addon-image" loading="lazy" />
+                                <div class="addon-img">
+                                    <img src="<?php echo esc_attr( $addon_image ); ?>" alt="<?php echo esc_attr( wp_strip_all_tags( $name ) ); ?>" loading="lazy" />
                                 </div>
                             <?php endif; ?>
 
-                            <div class="addon-info wk-rh-supplement-card-body">
+                            <div class="addon-info">
                                 <span class="title"><?php echo esc_html( $name ); ?></span>
-                                <span class="price wk-rh-supplement-card-price"><?php echo wp_kses_post( wc_price( $price_amount ) ); ?></span>
+                                <span class="price"><?php echo wp_kses_post( wc_price( $price_amount ) ); ?></span>
                             </div>
                         </div>
 
-                        <div class="addon-control-row wk-rh-supplement-card-actions">
+                        <div class="addon-control-row wk-rh-addon-card-actions">
                             <button type="button" class="wk-rh-addon-qty-btn" data-direction="decrease" aria-label="<?php echo esc_attr__( 'Decrease', 'racehall-wc-ui' ); ?>">-</button>
                             <input type="number" class="qty-input addon-qty-display" value="<?php echo esc_attr( $display_qty ); ?>" readonly>
                             <button type="button" class="wk-rh-addon-qty-btn" data-direction="increase" aria-label="<?php echo esc_attr__( 'Increase', 'racehall-wc-ui' ); ?>"<?php disabled( $max_qty > 0 && $display_qty >= $max_qty ); ?>>+</button>
@@ -1819,6 +1825,12 @@ add_action('wp_enqueue_scripts', function() {
             'racehall-checkout-css',
             RACEHALL_WC_UI_URL . 'assets/css/checkout.css',
             [],
+            RACEHALL_WC_UI_VERSION
+        );
+        wp_enqueue_style(
+            'racehall-cart-css',
+            RACEHALL_WC_UI_URL . 'assets/css/cart.css',
+            [ 'racehall-checkout-css' ],
             RACEHALL_WC_UI_VERSION
         );
 

@@ -60,29 +60,25 @@ footer{
   display: none;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.5) !important;
   z-index: 9999;
-}
-
-html.rh-checkout-loading-active .wk-rh-checkout-flow,
-html.rh-checkout-loading-active form.checkout,
-html.rh-checkout-loading-active #order_review {
-  visibility: hidden;
 }
 
 html.rh-checkout-loading-active .rh-checkout-loading {
   display: flex;
 }
 
-.rh-checkout-loading.is-visible {
+.rh-checkout-loading.is-visible,
+.rh-checkout-loading.loading {
   display: flex;
 }
 
-.rh-checkout-loading .spinner {
-  width: 50px;
-  height: 50px;
-  border: 5px solid #e5e7eb;
-  border-top: 5px solid #C8102E;
+.rh-checkout-loading .spinner,
+.rh-checkout-loading.loading .spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #e5e7eb;
+  border-top: 3px solid #C8102E;
   border-radius: 50%;
   animation: rh-checkout-spin 0.8s linear infinite;
 }
@@ -534,72 +530,6 @@ body.checkout-wc .wk-rh-checkout-step-notice.is-success {
   background: rgba(31, 143, 82, 0.18);
 }
 
-body.checkout-wc .wk-rh-checkout-addons-layout {
-  display: flex;
-  max-width: 1280px;
-  width: 100%;
-  margin: 0 auto;
-  gap: 25px;
-  padding: 0;
-}
-
-body.checkout-wc .wk-rh-checkout-addons-layout > .left {
-  flex: 0 0 420px;
-}
-
-body.checkout-wc .wk-rh-checkout-addons-layout > .center {
-  flex: 1 1 auto;
-  width: 100%;
-}
-
-body.checkout-wc .wk-rh-checkout-addons-layout .left h1 {
-  font-size: 30px;
-  font-weight: 800;
-  margin-bottom: 20px;
-  color: var(--text);
-}
-
-body.checkout-wc .wk-rh-checkout-addons-layout .left p {
-  max-width: 420px;
-  line-height: 1.6;
-  opacity: 0.8;
-  color: var(--text);
-}
-
-body.checkout-wc .wk-rh-checkout-addon-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 24px;
-}
-
-body.checkout-wc .wk-rh-checkout-addon-intro {
-  margin-bottom: 0;
-}
-
-body.checkout-wc .wk-rh-checkout-addon-intro-title,
-body.checkout-wc .wk-rh-checkout-addon-head .left h1 {
-  font-size: 30px;
-  font-weight: 800;
-  margin: 0 0 20px;
-  color: #FFFFFF;
-}
-
-body.checkout-wc .wk-rh-checkout-addon-intro-copy,
-body.checkout-wc .wk-rh-checkout-addon-head .left p {
-  max-width: 420px;
-  line-height: 1.6;
-  opacity: 0.8;
-  margin: 0;
-  color: #FFFFFF;
-}
-
-body.checkout-wc section.addons .summary-item,
-body.checkout-wc .wk-rh-checkout-addons-list .summary-item {
-  padding-left: 0 !important;
-}
-
 body.checkout-wc .wk-rh-checkout-addon-toolbar {
   display: flex;
   justify-content: flex-end;
@@ -607,6 +537,9 @@ body.checkout-wc .wk-rh-checkout-addon-toolbar {
 }
 
 body.checkout-wc .wk-rh-checkout-back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: auto;
   min-height: 44px;
   padding: 0 18px;
@@ -617,140 +550,18 @@ body.checkout-wc .wk-rh-checkout-back-btn {
   font-weight: 800;
   cursor: pointer;
   margin-top: 24px;
+  text-decoration: none;
 }
 
-body.checkout-wc .wk-rh-checkout-addons-shell {
-  height: fit-content;
-  width: 100%;
-  position: relative;
-  border: 1px solid #C8102E;
-  clip-path: polygon(0% 0%, 100% 0%, 100% calc(100% - 40px), calc(100% - 40px) 100%, 0% 100%, 0% 20px);
-}
-
-body.checkout-wc .wk-rh-checkout-addons-shell::after {
-  content: "";
-  position: absolute;
-  bottom: -1px;
-  right: -1px;
-  width: 40px;
-  height: 40px;
-  background: linear-gradient(135deg, transparent 0, transparent calc(50% - .75px), #C8102E calc(50% - .75px), #C8102E calc(50% + .75px), transparent calc(50% + .75px));
-}
-
-body.checkout-wc .wk-rh-checkout-addons-list {
-  width: 100%;
-  height: 556px;
-  max-height: 556px;
-  overflow-y: scroll;
-  padding: 20px;
-  position: relative;
-  background: var(--panel);
-  clip-path: polygon(0% 0%, 100% 0%, 100% calc(100% - 40px), calc(100% - 40px) 100%, 0% 100%, 0% 20px);
-}
-
-body.checkout-wc .wk-rh-checkout-addons-list h2 {
-  margin-bottom: 24px;
-  color: var(--text);
+body.checkout-wc .wk-rh-checkout-back-btn.is-disabled {
+  pointer-events: none;
+  opacity: 0.6;
 }
 
 body.checkout-wc .wk-rh-checkout-addons-list.is-updating {
   opacity: 0.65;
   pointer-events: none;
 }
-
-body.checkout-wc .wk-rh-checkout-addons-list::-webkit-scrollbar {
-  width: 8px;
-}
-
-body.checkout-wc .wk-rh-checkout-addons-list::-webkit-scrollbar-track {
-  background: var(--panel);
-}
-
-body.checkout-wc .wk-rh-checkout-addons-list::-webkit-scrollbar-thumb {
-  background-color: var(--border);
-  border-radius: 10px;
-  border: 3px solid var(--panel);
-}
-
-body.checkout-wc .wk-rh-checkout-addons-list::-webkit-scrollbar-thumb:hover {
-  background-color: #a70b24;
-}
-
-body.checkout-wc .wk-rh-supplement-card {
-  display: flex;
-  gap: 10px;
-  justify-content: space-between;
-  width: 100%;
-  max-width: 100%;
-  padding: 18px;
-  padding-left: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  margin-bottom: 25px !important;
-  border: 0;
-  background: transparent;
-}
-
-body.checkout-wc .wk-rh-supplement-card.is-selected {
-  box-shadow: none;
-}
-
-body.checkout-wc .wk-rh-checkout-addons-layout .addon,
-body.checkout-wc .wk-rh-checkout-addons-layout .info-container,
-body.checkout-wc .wk-rh-checkout-addons-layout .addon-info,
-body.checkout-wc .wk-rh-checkout-addons-layout .addon-control-row,
-body.checkout-wc .wk-rh-checkout-addons-layout .addon-img,
-body.checkout-wc .wk-rh-checkout-addons-layout .addon-img img,
-body.checkout-wc .wk-rh-checkout-addons-layout .qty-input,
-body.checkout-wc .wk-rh-checkout-addons-layout .addon-add-button {
-  box-sizing: border-box;
-}
-
-body.checkout-wc .wk-rh-supplement-card-media {
-  flex: 0 0 auto;
-  width: 90px;
-}
-
-body.checkout-wc .wk-rh-checkout-addon-image {
-  width: 90px;
-  height: auto;
-  object-fit: fill;
-  display: block;
-}
-
-body.checkout-wc .wk-rh-supplement-card-body {
-  flex: 1 1 auto;
-}
-
-body.checkout-wc .wk-rh-supplement-card .info-container {
-  display: flex;
-  gap: 12px;
-}
-
-body.checkout-wc .wk-rh-supplement-card .addon-info {
-  display: flex;
-  flex-direction: column;
-}
-
-body.checkout-wc .wk-rh-supplement-card .title {
-  font-size: 14px;
-  color: var(--text);
-}
-
-body.checkout-wc .wk-rh-supplement-card .price,
-body.checkout-wc .wk-rh-supplement-card-price {
-  font-size: 13px;
-  opacity: 0.7;
-  color: var(--text);
-}
-
-body.checkout-wc .wk-rh-supplement-card-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: nowrap;
-}
-
 body.checkout-wc .wk-rh-addon-qty-btn,
 body.checkout-wc .wk-rh-addon-add-btn,
 body.checkout-wc .wk-rh-addon-remove-btn {
@@ -774,41 +585,6 @@ body.checkout-wc .wk-rh-addon-qty-btn {
   cursor: pointer;
 }
 
-body.checkout-wc .qty-input {
-  width: 24px !important;
-  text-align: center !important;
-  border-radius: 0 !important;
-  padding: 0 !important;
-  background: transparent !important;
-  color: var(--text) !important;
-  border: none !important;
-  font-family: 'Oxanium', sans-serif;
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 1;
-  height: 20px;
-  outline: none;
-  -moz-appearance: textfield;
-}
-
-body.checkout-wc .qty-input::-webkit-outer-spin-button,
-body.checkout-wc .qty-input::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-body.checkout-wc .qty-input.addon-qty-display {
-  width: 30px !important;
-  height: 20px;
-}
-
-body.checkout-wc .addon-add-button,
-body.checkout-wc .wk-rh-addon-add-btn,
-body.checkout-wc .wk-rh-addon-remove-btn {
-  min-height: auto;
-  padding: 0.25rem 0.75rem;
-}
-
 body.checkout-wc .wk-rh-invalid,
 body.checkout-wc .wk-rh-invalid-wrap input,
 body.checkout-wc .wk-rh-invalid-wrap select,
@@ -818,38 +594,6 @@ body.checkout-wc .wk-rh-invalid-wrap textarea {
 }
 
 @media (max-width: 767px) {
-  body.checkout-wc .wk-rh-checkout-addons-layout {
-    flex-direction: column;
-    gap: 18px;
-  }
-
-  body.checkout-wc .wk-rh-checkout-addons-layout > .left,
-  body.checkout-wc .wk-rh-checkout-addons-layout > .center {
-    flex: 1 1 auto;
-    width: 100%;
-  }
-
-  body.checkout-wc .wk-rh-checkout-addon-head {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  body.checkout-wc .wk-rh-checkout-addon-intro-title {
-    font-size: 24px;
-  }
-
-  body.checkout-wc .wk-rh-supplement-card {
-    flex-direction: column;
-  }
-
-  body.checkout-wc .wk-rh-supplement-card-media {
-    width: 100%;
-  }
-
-  body.checkout-wc .wk-rh-supplement-card-actions {
-    width: 100%;
-  }
-
   body.checkout-wc .wk-rh-checkout-addons-list {
     height: auto;
     max-height: 400px;
