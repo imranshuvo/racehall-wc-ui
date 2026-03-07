@@ -247,6 +247,41 @@ footer{
   color: #FFFFFF;
 }
 
+.wk-rh-checkout-line-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.wk-rh-checkout-line-item-media {
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+}
+
+.wk-rh-checkout-line-image,
+.wk-rh-order-item-image {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  display: block;
+}
+
+.wk-rh-checkout-line-item-name {
+  flex: 1 1 auto;
+}
+
+.wk-rh-order-item-with-image {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wk-rh-order-item-name {
+  display: inline-block;
+}
+
 .closed-text {
   font-weight: 400;
   color: #FFFFFF;

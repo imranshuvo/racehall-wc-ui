@@ -56,7 +56,7 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
         if ( empty( $cart_item['is_addon'] ) ) {
             continue;
         }
-        $addon_upstream_id = isset( $cart_item['addon_upstream_product_id'] ) ? (string) $cart_item['addon_upstream_product_id'] : '';
+        $addon_upstream_id = isset( $cart_item['addon_upstream_id'] ) ? (string) $cart_item['addon_upstream_id'] : '';
         if ( $addon_upstream_id === '' ) {
             continue;
         }
@@ -219,21 +219,31 @@ $continue_shopping_url = function_exists( 'wk_rh_get_main_booking_product_url' )
             $rendered_addons = 0;
             if ( ! empty( $supplement_rows ) ) {
                 foreach ( $supplement_rows as $addon ) {
+                    $addon_row = is_array( $addon ) ? $addon : [];
                     $product = [];
-                    if ( is_array( $addon ) && isset( $addon['product'] ) && is_array( $addon['product'] ) ) {
-                        $product = $addon['product'];
-                    } elseif ( is_array( $addon ) ) {
-                        $product = $addon;
+                    if ( isset( $addon_row['product'] ) && is_array( $addon_row['product'] ) ) {
+                        $product = $addon_row['product'];
+                    } elseif ( ! empty( $addon_row ) ) {
+                        $product = $addon_row;
                     }
                     if ( empty( $product ) ) {
                         continue;
                     }
-                    $upstream_id = isset($product['id']) ? (string) $product['id'] : '';
+
+                    $supplement_row_id = isset( $addon_row['id'] ) ? trim( (string) $addon_row['id'] ) : '';
+                    $upstream_id = $supplement_row_id;
+
                     if ( $upstream_id !== '' && (string) $racehall_product_id === $upstream_id ) {
                         continue;
                     }
                     $rendered_addons++;
-                    $name = isset($product['name']) ? esc_html($product['name']) : '';
+                    $addon_name = '';
+                    if ( isset( $addon_row['name'] ) && trim( (string) $addon_row['name'] ) !== '' ) {
+                        $addon_name = (string) $addon_row['name'];
+                    } elseif ( isset( $product['name'] ) ) {
+                        $addon_name = (string) $product['name'];
+                    }
+                    $name = esc_html( $addon_name );
                     $amount_raw = isset($product['prices'][0]['amount']) && is_numeric($product['prices'][0]['amount']) ? (float) $product['prices'][0]['amount'] : 0.0;
                     $price = number_format($amount_raw, 2, ',', '.');
                     $currency = isset($product['prices'][0]['shortName']) ? esc_html($product['prices'][0]['shortName']) : '';
@@ -286,8 +296,9 @@ $continue_shopping_url = function_exists( 'wk_rh_get_main_booking_product_url' )
                                     <input type="hidden" name="parent_racehall_product" value="<?php echo esc_attr( $main_product_id ); ?>">
                                     <input type="hidden" name="booking_location" value="<?php echo esc_attr( $cart_location ); ?>">
                                     <input type="hidden" name="addon_price" value="<?php echo esc_attr( wc_format_decimal( $amount_raw ) ); ?>">
-                                    <input type="hidden" name="addon_upstream_product_id" value="<?php echo esc_attr( $upstream_id ); ?>">
-                                    <input type="hidden" name="addon_display_name" value="<?php echo esc_attr( wp_strip_all_tags( (string) ( $product['name'] ?? '' ) ) ); ?>">
+                                    <input type="hidden" name="addon_upstream_id" value="<?php echo esc_attr( $upstream_id ); ?>">
+                                    <input type="hidden" name="addon_supplement_id" value="<?php echo esc_attr( $supplement_row_id ); ?>">
+                                    <input type="hidden" name="addon_display_name" value="<?php echo esc_attr( wp_strip_all_tags( $addon_name ) ); ?>">
                                     <input type="hidden" name="addon_min_qty" value="<?php echo esc_attr( $min_qty ); ?>">
                                     <input type="hidden" name="addon_max_qty" value="<?php echo esc_attr( $max_qty !== null ? $max_qty : '' ); ?>">
                                     <button type="button" class="addon-qty-decrease" aria-label="<?php echo esc_attr__( 'Decrease', 'racehall-wc-ui' ); ?>">-</button>

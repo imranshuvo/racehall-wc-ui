@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.41
+ * Version: 1.45
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.41' );
+define( 'RACEHALL_WC_UI_VERSION', '1.45' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -1840,8 +1840,11 @@ function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
     if ( $is_addon_request && isset( $_POST['addon_price'] ) && is_numeric( $_POST['addon_price'] ) ) {
         $cart_item_data['addon_unit_price'] = wc_format_decimal( wp_unslash( $_POST['addon_price'] ) );
     }
-    if ( $is_addon_request && ! empty( $_POST['addon_upstream_product_id'] ) ) {
-        $cart_item_data['addon_upstream_product_id'] = sanitize_text_field( wp_unslash( $_POST['addon_upstream_product_id'] ) );
+    if ( $is_addon_request && ! empty( $_POST['addon_upstream_id'] ) ) {
+        $cart_item_data['addon_upstream_id'] = sanitize_text_field( wp_unslash( $_POST['addon_upstream_id'] ) );
+    }
+    if ( $is_addon_request && isset( $_POST['addon_supplement_id'] ) ) {
+        $cart_item_data['addon_supplement_id'] = sanitize_text_field( wp_unslash( $_POST['addon_supplement_id'] ) );
     }
     if ( $is_addon_request && isset( $_POST['addon_display_name'] ) ) {
         $cart_item_data['addon_display_name'] = sanitize_text_field( wp_unslash( $_POST['addon_display_name'] ) );
@@ -1952,8 +1955,50 @@ add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $val
         return $cart_item;
     }
 
+    $cart_item['is_addon'] = true;
+
+    if ( isset( $values['parent_racehall_product'] ) ) {
+        $cart_item['parent_racehall_product'] = absint( $values['parent_racehall_product'] );
+    }
+
+    if ( isset( $values['booking_location'] ) ) {
+        $cart_item['booking_location'] = sanitize_text_field( (string) $values['booking_location'] );
+    }
+
     if ( isset( $values['addon_unit_price'] ) && is_numeric( $values['addon_unit_price'] ) ) {
         $cart_item['addon_unit_price'] = wc_format_decimal( $values['addon_unit_price'] );
+    }
+
+    if ( isset( $values['addon_upstream_id'] ) ) {
+        $cart_item['addon_upstream_id'] = sanitize_text_field( (string) $values['addon_upstream_id'] );
+    }
+
+    if ( isset( $values['addon_supplement_id'] ) ) {
+        $cart_item['addon_supplement_id'] = sanitize_text_field( (string) $values['addon_supplement_id'] );
+    }
+
+    if ( isset( $values['addon_display_name'] ) ) {
+        $cart_item['addon_display_name'] = sanitize_text_field( (string) $values['addon_display_name'] );
+    }
+
+    if ( isset( $values['addon_min_qty'] ) && is_numeric( $values['addon_min_qty'] ) ) {
+        $cart_item['addon_min_qty'] = max( 1, (int) $values['addon_min_qty'] );
+    }
+
+    if ( isset( $values['addon_max_qty'] ) && is_numeric( $values['addon_max_qty'] ) ) {
+        $cart_item['addon_max_qty'] = max( 1, (int) $values['addon_max_qty'] );
+    }
+
+    if ( isset( $values['bmi_order_id'] ) ) {
+        $cart_item['bmi_order_id'] = sanitize_text_field( (string) $values['bmi_order_id'] );
+    }
+
+    if ( isset( $values['bmi_order_item_id'] ) ) {
+        $cart_item['bmi_order_item_id'] = sanitize_text_field( (string) $values['bmi_order_item_id'] );
+    }
+
+    if ( isset( $values['bmi_sell_response'] ) && is_array( $values['bmi_sell_response'] ) ) {
+        $cart_item['bmi_sell_response'] = $values['bmi_sell_response'];
     }
 
     if ( isset( $cart_item['addon_unit_price'] ) && is_numeric( $cart_item['addon_unit_price'] )
@@ -2121,13 +2166,13 @@ function wk_rh_block_addon_without_parent( $passed, $product_id, $quantity ) {
         return false;
     }
 
-    $addon_upstream_id = isset( $_POST['addon_upstream_product_id'] )
-        ? trim( sanitize_text_field( wp_unslash( (string) $_POST['addon_upstream_product_id'] ) ) )
+    $addon_upstream_id = isset( $_POST['addon_upstream_id'] )
+        ? trim( sanitize_text_field( wp_unslash( (string) $_POST['addon_upstream_id'] ) ) )
         : '';
 
     if ( $addon_upstream_id === '' ) {
-        wk_rh_log_user_event( 'addon.add_blocked', [ 'reason' => 'missing_upstream_product_id', 'productId' => $product_id ], 'warning' );
-        wc_add_notice( __( 'Add-on mangler upstream productId.', 'racehall-wc-ui' ), 'error' );
+        wk_rh_log_user_event( 'addon.add_blocked', [ 'reason' => 'missing_upstream_id', 'productId' => $product_id ], 'warning' );
+        wc_add_notice( __( 'Add-on mangler upstream ID.', 'racehall-wc-ui' ), 'error' );
         return false;
     }
 
@@ -2335,6 +2380,38 @@ function wk_rh_validate_checkout_booking_quantity( array $cart_item, $quantity, 
     }
 
     return true;
+}
+
+function wk_rh_get_booking_supplement_sell_product_id( array $supplement ) {
+    return isset( $supplement['id'] ) ? trim( (string) $supplement['id'] ) : '';
+}
+
+function wk_rh_resolve_checkout_addon_product_id( array $cart_item, array $supplements ) {
+    $stored_upstream_id = isset( $cart_item['addon_upstream_id'] ) ? trim( (string) $cart_item['addon_upstream_id'] ) : '';
+    if ( empty( $supplements ) ) {
+        return $stored_upstream_id;
+    }
+
+    $stored_supplement_id = isset( $cart_item['addon_supplement_id'] ) ? trim( (string) $cart_item['addon_supplement_id'] ) : '';
+    if ( $stored_supplement_id !== '' ) {
+        foreach ( $supplements as $supplement ) {
+            if ( ! is_array( $supplement ) ) {
+                continue;
+            }
+
+            $supplement_id = isset( $supplement['id'] ) ? trim( (string) $supplement['id'] ) : '';
+            if ( $supplement_id === '' || $supplement_id !== $stored_supplement_id ) {
+                continue;
+            }
+
+            $resolved_upstream_id = wk_rh_get_booking_supplement_sell_product_id( $supplement );
+            if ( $resolved_upstream_id !== '' ) {
+                return $resolved_upstream_id;
+            }
+        }
+    }
+
+    return $stored_upstream_id;
 }
 
 function wk_rh_sync_checkout_booking_before_order( $posted_data, $errors ) {
@@ -2589,23 +2666,38 @@ function wk_rh_sync_checkout_booking_before_order( $posted_data, $errors ) {
             continue;
         }
 
-        $addon_product_id = isset( $cart_item['addon_upstream_product_id'] ) ? trim( (string) $cart_item['addon_upstream_product_id'] ) : '';
-        if ( $addon_product_id === '' ) {
-            wk_rh_log_user_event( 'checkout.addon_failed', [ 'reason' => 'missing_upstream_product_id', 'cartItemKey' => $cart_item_key ], 'error' );
-            $errors->add( 'rh_booking_addon_missing_product', __( 'Et add-on mangler upstream produkt-id.', 'racehall-wc-ui' ) );
+        $original_addon_upstream_id = isset( $cart_item['addon_upstream_id'] ) ? trim( (string) $cart_item['addon_upstream_id'] ) : '';
+        $addon_upstream_id = wk_rh_resolve_checkout_addon_product_id( $cart_item, $main_item['bmi_supplements'] ?? [] );
+
+        if ( $addon_upstream_id !== '' && $addon_upstream_id !== $original_addon_upstream_id ) {
+            WC()->cart->cart_contents[ $cart_item_key ]['addon_upstream_id'] = $addon_upstream_id;
+            $cart_item['addon_upstream_id'] = $addon_upstream_id;
+
+            wk_rh_log_user_event( 'checkout.addon_product_remapped', [
+                'cartItemKey' => $cart_item_key,
+                'addonName' => isset( $cart_item['addon_display_name'] ) ? sanitize_text_field( (string) $cart_item['addon_display_name'] ) : '',
+                'fromUpstreamId' => $original_addon_upstream_id,
+                'toUpstreamId' => $addon_upstream_id,
+                'orderId' => $main_order_id,
+            ] );
+        }
+
+        if ( $addon_upstream_id === '' ) {
+            wk_rh_log_user_event( 'checkout.addon_failed', [ 'reason' => 'missing_upstream_id', 'cartItemKey' => $cart_item_key ], 'error' );
+            $errors->add( 'rh_booking_addon_missing_product', __( 'Et add-on mangler upstream ID.', 'racehall-wc-ui' ) );
             return;
         }
 
         $addon_quantity = isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1;
         $sell_result = function_exists( 'wk_rh_post_booking_sell' )
-            ? wk_rh_post_booking_sell( $booking_location, $addon_product_id, $addon_quantity, $main_order_id, $main_order_item_id )
+            ? wk_rh_post_booking_sell( $booking_location, $addon_upstream_id, $addon_quantity, $main_order_id, $main_order_item_id )
             : [ 'success' => false, 'data' => null ];
 
         if ( empty( $sell_result['success'] ) || ! is_array( $sell_result['data'] ?? null ) ) {
             wk_rh_log_user_event( 'checkout.addon_failed', [
                 'reason' => 'sell_failed',
                 'cartItemKey' => $cart_item_key,
-                'productId' => $addon_product_id,
+                'upstreamId' => $addon_upstream_id,
                 'quantity' => $addon_quantity,
                 'orderId' => $main_order_id,
             ], 'error' );
@@ -2618,7 +2710,7 @@ function wk_rh_sync_checkout_booking_before_order( $posted_data, $errors ) {
             wk_rh_log_user_event( 'checkout.addon_failed', [
                 'reason' => 'missing_order_item_id',
                 'cartItemKey' => $cart_item_key,
-                'productId' => $addon_product_id,
+                'upstreamId' => $addon_upstream_id,
                 'orderId' => $main_order_id,
             ], 'error' );
             $errors->add( 'rh_booking_addon_missing_identifier', __( 'Et add-on mangler upstream item-id efter reservation.', 'racehall-wc-ui' ) );
@@ -2744,6 +2836,14 @@ function wk_rh_add_bmi_ids_to_order_item( $item, $cart_item_key, $values, $order
         $item->add_meta_data( 'bmi_order_id', $values['bmi_order_id'], true );
         $item->add_meta_data( 'bmi_order_item_id', $values['bmi_order_item_id'], true );
 
+        if ( $is_addon ) {
+            $item->add_meta_data( 'Type', __( 'Add-on', 'racehall-wc-ui' ), true );
+            $item->add_meta_data( 'Upstream orderId', sanitize_text_field( (string) $values['bmi_order_id'] ), true );
+            if ( ! empty( $values['bmi_order_item_id'] ) ) {
+                $item->add_meta_data( 'Upstream orderItemId', sanitize_text_field( (string) $values['bmi_order_item_id'] ), true );
+            }
+        }
+
         if ( ! $is_addon ) {
             $order->update_meta_data( 'bmi_order_id', $values['bmi_order_id'] );
             $order->update_meta_data( 'bmi_order_item_id', $values['bmi_order_item_id'] );
@@ -2774,8 +2874,9 @@ function wk_rh_add_bmi_ids_to_order_item( $item, $cart_item_key, $values, $order
     if ( $is_addon ) {
         $item->add_meta_data( '_wk_rh_is_addon', 'yes', true );
 
-        if ( isset( $values['addon_upstream_product_id'] ) ) {
-            $item->add_meta_data( '_wk_rh_addon_upstream_product_id', sanitize_text_field( (string) $values['addon_upstream_product_id'] ), true );
+        if ( isset( $values['addon_upstream_id'] ) ) {
+            $item->add_meta_data( '_wk_rh_addon_upstream_id', sanitize_text_field( (string) $values['addon_upstream_id'] ), true );
+            $item->add_meta_data( 'Upstream add-on ID', sanitize_text_field( (string) $values['addon_upstream_id'] ), true );
         }
 
         if ( isset( $values['addon_display_name'] ) ) {
@@ -2798,7 +2899,7 @@ function wk_rh_add_bmi_ids_to_order_item( $item, $cart_item_key, $values, $order
 
                 $existing_responses[] = [
                     'name' => isset( $values['addon_display_name'] ) ? sanitize_text_field( (string) $values['addon_display_name'] ) : '',
-                    'productId' => isset( $values['addon_upstream_product_id'] ) ? sanitize_text_field( (string) $values['addon_upstream_product_id'] ) : '',
+                    'productId' => isset( $values['addon_upstream_id'] ) ? sanitize_text_field( (string) $values['addon_upstream_id'] ) : '',
                     'response' => $values['bmi_sell_response'],
                 ];
                 $order->update_meta_data( 'wk_rh_addon_sell_responses', $existing_responses );

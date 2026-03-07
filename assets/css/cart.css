@@ -252,35 +252,45 @@ input.qty-input.addon-qty-display {
 }
 
 input.qty-input.addon-qty-input {
-    width: 56px !important;
+    width: 36px !important;
 }
 
 .counter button,
 .qty-increase,
 .qty-decrease,
-.addon-qty-increase,
-.addon-qty-decrease {
+.woocommerce-cart .addon-qty-increase,
+.woocommerce-cart .addon-qty-decrease {
     width: 20px;
     height: 20px;
     color: var(--accent);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #ffffff;
+    background: var(--text);
     border-radius: 50%;
     cursor: pointer;
     border: none;
+    line-height: 1;
     padding: 0 !important;
+}
+.woocommerce-cart button.button.addon-add-button {
+    padding: 0.25rem 0.75rem;
 }
 
 .qty-input {
     width: 24px !important;
     text-align: center !important;
-    border-radius: 4px !important;
-    padding: 6px !important;
-    background: var(--bg) !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
     color: var(--text) !important;
     border: none !important;
+    font-family: 'Oxanium', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1;
+    height: 20px;
+    outline: none;
     -moz-appearance: textfield;
 }
 

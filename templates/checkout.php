@@ -205,10 +205,28 @@ window.RH_CHECKOUT_I18N = {
         $product = $cart_item['data'];
         $line_name = ! empty( $cart_item['is_addon'] ) && ! empty( $cart_item['addon_display_name'] )
             ? (string) $cart_item['addon_display_name']
-            : $product->get_name(); ?>
-        <span class="summary-text">
-            <?php echo esc_html( $line_name ); ?>
-        </span>
+            : $product->get_name();
+        $line_image_html = '';
+
+        if ( ! empty( $cart_item['is_addon'] ) && ! empty( $cart_item['addon_upstream_id'] ) && function_exists( 'wk_rh_get_product_image_html' ) ) {
+            $line_image_html = wk_rh_get_product_image_html(
+                $cart_item['booking_location'] ?? $cart_location,
+                (string) $cart_item['addon_upstream_id'],
+                $line_name,
+                'wk-rh-checkout-line-image'
+            );
+        } elseif ( $product && is_object( $product ) && method_exists( $product, 'get_image' ) ) {
+            $line_image_html = $product->get_image( 'woocommerce_thumbnail', [ 'class' => 'wk-rh-checkout-line-image' ] );
+        }
+        ?>
+        <div class="wk-rh-checkout-line-item">
+            <?php if ( $line_image_html !== '' ) : ?>
+                <span class="wk-rh-checkout-line-item-media"><?php echo wp_kses_post( $line_image_html ); ?></span>
+            <?php endif; ?>
+            <span class="summary-text wk-rh-checkout-line-item-name">
+                <?php echo esc_html( $line_name ); ?>
+            </span>
+        </div>
     <?php endforeach; ?>
 </div>
 

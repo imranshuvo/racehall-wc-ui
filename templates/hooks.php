@@ -131,10 +131,6 @@ function wk_rh_get_token( $location = '' ) {
 }
 
 function wk_rh_get_product_image_data_uri( $location, $product_id ) {
-    if ( function_exists( 'is_cart' ) && ! is_cart() ) {
-        return '';
-    }
-
     static $runtime_image_cache = [];
 
     $product_id = trim( (string) $product_id );
@@ -212,6 +208,55 @@ function wk_rh_get_product_image_data_uri( $location, $product_id ) {
     return $data_uri;
 }
 
+function wk_rh_get_product_image_html( $location, $product_id, $alt = '', $class_name = 'wk-rh-product-image' ) {
+    $data_uri = wk_rh_get_product_image_data_uri( $location, $product_id );
+    if ( $data_uri === '' ) {
+        return '';
+    }
+
+    $classes = trim( (string) $class_name );
+
+    return sprintf(
+        '<img src="%1$s" alt="%2$s" class="%3$s" loading="lazy" />',
+        esc_attr( $data_uri ),
+        esc_attr( wp_strip_all_tags( (string) $alt ) ),
+        esc_attr( $classes )
+    );
+}
+
+function wk_rh_get_order_item_upstream_image_html( $item, $class_name = 'wk-rh-order-item-image' ) {
+    if ( ! $item instanceof WC_Order_Item_Product ) {
+        return '';
+    }
+
+    if ( $item->get_meta( '_wk_rh_is_addon', true ) !== 'yes' ) {
+        return '';
+    }
+
+    $product_id = trim( (string) $item->get_meta( '_wk_rh_addon_upstream_id', true ) );
+    if ( $product_id === '' ) {
+        $product_id = trim( (string) $item->get_meta( '_wk_rh_addon_upstream_product_id', true ) );
+    }
+
+    if ( $product_id === '' ) {
+        return '';
+    }
+
+    $location = trim( (string) $item->get_meta( '_wk_rh_booking_location', true ) );
+    if ( $location === '' && method_exists( $item, 'get_order_id' ) ) {
+        $order = wc_get_order( $item->get_order_id() );
+        if ( $order instanceof WC_Order ) {
+            $location = wk_rh_get_order_booking_location( $order );
+        }
+    }
+
+    if ( $location === '' ) {
+        return '';
+    }
+
+    return wk_rh_get_product_image_html( $location, $product_id, $item->get_name(), $class_name );
+}
+
 function wk_rh_post_booking_sell( $location, $product_id, $quantity, $order_id, $parent_order_item_id = '' ) {
     $token = wk_rh_get_token( $location );
     $creds = wk_rh_get_api_credentials( $location );
@@ -269,8 +314,20 @@ function wk_rh_post_booking_sell( $location, $product_id, $quantity, $order_id, 
         ] );
     }
 
+    $body_success = ! is_array( $data ) || ! array_key_exists( 'success', $data ) || $data['success'] !== false;
+    if ( $code >= 200 && $code < 300 && ! $body_success ) {
+        wk_rh_log_upstream_event( 'error', 'Upstream booking/sell returned semantic failure', [
+            'operation' => 'booking_sell',
+            'orderId' => (string) $order_id,
+            'productId' => (string) $product_id,
+            'location' => (string) $location,
+            'httpCode' => $code,
+            'body' => is_array( $data ) ? $data : wp_remote_retrieve_body( $response ),
+        ] );
+    }
+
     return [
-        'success' => $code >= 200 && $code < 300,
+        'success' => $code >= 200 && $code < 300 && $body_success,
         'data'    => is_array( $data ) ? $data : null,
     ];
 }
@@ -390,9 +447,12 @@ function wk_rh_send_order_memo( $order ) {
 
     $code = (int) wp_remote_retrieve_response_code( $response );
     $response_body = wp_remote_retrieve_body( $response );
+    $response_data = json_decode( $response_body, true );
     $order->update_meta_data( 'wk_rh_memo_http_code', $code );
     $order->update_meta_data( 'wk_rh_memo_response', $response_body );
-    if ( $code >= 200 && $code < 300 ) {
+
+    $memo_success = ! is_array( $response_data ) || ! array_key_exists( 'success', $response_data ) || $response_data['success'] !== false;
+    if ( $code >= 200 && $code < 300 && $memo_success ) {
         $order->update_meta_data( '_wk_rh_memo_synced', 'yes' );
         $order->save();
         wk_rh_log_user_event( 'order.memo_synced', [
@@ -406,7 +466,7 @@ function wk_rh_send_order_memo( $order ) {
             'orderId' => (string) $upstream_order_id,
             'location' => (string) $location,
             'httpCode' => $code,
-            'body' => $response_body,
+            'body' => is_array( $response_data ) ? $response_data : $response_body,
         ] );
         $order->save();
     }
@@ -1146,12 +1206,38 @@ function wk_rh_checkout_cart_item_name_with_details( $product_name, $cart_item, 
         return $product_name;
     }
 
+    if ( ! empty( $cart_item['is_addon'] ) && ! empty( $cart_item['addon_display_name'] ) ) {
+        $product_name = esc_html( sanitize_text_field( (string) $cart_item['addon_display_name'] ) );
+    }
+
     $details_text = wk_rh_get_checkout_booking_details_text( $cart_item );
     if ( $details_text === '' ) {
         return $product_name;
     }
 
     return $product_name . '<br><small class="wk-rh-checkout-booking-details">' . esc_html( $details_text ) . '</small>';
+}
+
+add_filter( 'woocommerce_order_item_name', 'wk_rh_prepend_addon_image_to_order_item_name', 10, 3 );
+function wk_rh_prepend_addon_image_to_order_item_name( $item_name, $item, $is_visible ) {
+    if ( ! $item instanceof WC_Order_Item_Product ) {
+        return $item_name;
+    }
+
+    if ( $item->get_meta( '_wk_rh_is_addon', true ) !== 'yes' ) {
+        return $item_name;
+    }
+
+    if ( strpos( (string) $item_name, 'wk-rh-order-item-image' ) !== false ) {
+        return $item_name;
+    }
+
+    $image_html = wk_rh_get_order_item_upstream_image_html( $item );
+    if ( $image_html === '' ) {
+        return $item_name;
+    }
+
+    return '<span class="wk-rh-order-item-with-image">' . $image_html . '<span class="wk-rh-order-item-name">' . $item_name . '</span></span>';
 }
 
 add_action( 'woocommerce_checkout_create_order_line_item', 'wk_rh_add_booking_data_to_order_items', 10, 4 );
@@ -1359,14 +1445,26 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
     }
 
     $code = (int) wp_remote_retrieve_response_code( $response );
-    if ( $code >= 200 && $code < 300 ) {
-        wk_rh_mark_payment_confirmed( $order, wp_remote_retrieve_body( $response ) );
+    $response_body = wp_remote_retrieve_body( $response );
+    $response_data = json_decode( $response_body, true );
+    $payment_success = ! is_array( $response_data ) || ! array_key_exists( 'success', $response_data ) || $response_data['success'] !== false;
+
+    if ( $code >= 200 && $code < 300 && $payment_success ) {
+        wk_rh_mark_payment_confirmed( $order, $response_body );
     } else {
+        $error_message = 'Onsite booking payment/confirm failed';
+        if ( is_array( $response_data ) && ! empty( $response_data['errormessage'] ) ) {
+            $error_message .= ': ' . sanitize_text_field( (string) $response_data['errormessage'] );
+        } else {
+            $error_message .= ' with HTTP ' . $code;
+        }
+
         wk_rh_log_user_event( 'order.payment_confirm_failed', [
             'wcOrderId' => (string) $order->get_id(),
             'orderId' => (string) $upstream_order_id,
             'location' => (string) $location,
             'httpCode' => $code,
+            'body' => is_array( $response_data ) ? $response_data : $response_body,
         ], 'error' );
         wk_rh_log_upstream_event( 'error', 'Upstream payment/confirm failed', [
             'operation' => 'payment_confirm',
@@ -1374,9 +1472,9 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
             'wcOrderId' => (string) $order->get_id(),
             'location' => (string) $location,
             'httpCode' => $code,
-            'body' => wp_remote_retrieve_body( $response ),
+            'body' => is_array( $response_data ) ? $response_data : $response_body,
         ] );
-        $order->add_order_note( 'Onsite booking payment/confirm failed with HTTP ' . $code );
+        $order->add_order_note( $error_message );
     }
 }
 
