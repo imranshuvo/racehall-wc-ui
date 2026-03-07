@@ -324,6 +324,21 @@
         });
     }
 
+    function replaceStepPanel(selector, html) {
+        if (!selector || !html) return null;
+
+        var current = document.querySelector(selector);
+        if (!current) return null;
+
+        var wrapper = document.createElement('div');
+        wrapper.innerHTML = String(html).trim();
+        var next = wrapper.firstElementChild;
+        if (!next) return null;
+
+        current.replaceWith(next);
+        return next;
+    }
+
     function revealCustomerInfoStep() {
         setCheckoutStepState(false);
         showFlowNotice('', 'success', '.wk-rh-checkout-step-notice--supplements');
@@ -493,11 +508,17 @@
                 postCheckoutAction(payload)
                     .then(function (data) {
                         logBookingClientEvent('checkout_step_prepared', {});
+                        var supplementsPanel = null;
+
+                        if (data && data.supplementsHtml) {
+                            supplementsPanel = replaceStepPanel('.wk-rh-checkout-step-panel--supplements', data.supplementsHtml);
+                        }
+
                         return refreshCheckoutFragments().then(function () {
                             setCheckoutStepState(true);
                             showFlowNotice(data.message || '', 'success', '.wk-rh-checkout-step-notice--supplements');
 
-                            var supplementsPanel = document.querySelector('.wk-rh-checkout-step-panel--supplements');
+                            supplementsPanel = supplementsPanel || document.querySelector('.wk-rh-checkout-step-panel--supplements');
                             if (supplementsPanel && typeof supplementsPanel.scrollIntoView === 'function') {
                                 supplementsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
                             }

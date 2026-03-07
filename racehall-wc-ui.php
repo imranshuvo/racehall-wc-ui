@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.51
+ * Version: 1.52
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.51' );
+define( 'RACEHALL_WC_UI_VERSION', '1.52' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -411,7 +411,7 @@ function wk_rh_is_logging_enabled() {
     return ! isset( $settings['logging_enabled'] ) || $settings['logging_enabled'] === 'yes';
 }
 
-function wk_rh_expire_current_cart_reservation( $source = 'manual' ) {
+function wk_rh_expire_current_cart_reservation( $source = 'manual', $add_notice = true ) {
     if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
         return [
             'success' => false,
@@ -468,7 +468,9 @@ function wk_rh_expire_current_cart_reservation( $source = 'manual' ) {
     wk_rh_clear_booking_session_state();
 
     $notice = __( 'Din reservation er udløbet. Start venligst bookingprocessen igen.', 'racehall-wc-ui' );
-    wc_add_notice( $notice, 'error' );
+    if ( $add_notice ) {
+        wc_add_notice( $notice, 'error' );
+    }
 
     return [
         'success' => true,
@@ -972,7 +974,13 @@ function wk_rh_render_checkout_step_customer_gate() {
         return;
     }
 
-    $is_ready = wk_rh_is_checkout_booking_step_ready();
+    echo wk_rh_get_checkout_step_customer_gate_markup( wk_rh_is_checkout_booking_step_ready() );
+}
+
+function wk_rh_get_checkout_step_customer_gate_markup( $is_ready = false ) {
+    $is_ready = (bool) $is_ready;
+
+    ob_start();
     ?>
     <div class="wk-rh-checkout-step-panel wk-rh-checkout-step-panel--customer <?php echo $is_ready ? 'is-ready' : 'is-pending'; ?>" data-step="customer">
         <div class="wk-rh-checkout-step-actions">
@@ -989,6 +997,8 @@ function wk_rh_render_checkout_step_customer_gate() {
         <div class="wk-rh-checkout-step-notice" aria-live="polite"></div>
     </div>
     <?php
+
+    return (string) ob_get_clean();
 }
 
 add_action( 'cfw_checkout_customer_info_tab', 'wk_rh_render_checkout_step_customer_gate', 58 );
@@ -1003,9 +1013,15 @@ function wk_rh_render_checkout_step_supplements() {
         return;
     }
 
-    $is_ready = wk_rh_is_checkout_booking_step_ready();
+    echo wk_rh_get_checkout_step_supplements_markup( $main_context, wk_rh_is_checkout_booking_step_ready() );
+}
+
+function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_ready = false ) {
+    $is_ready = (bool) $is_ready;
     $location = isset( $main_context['location'] ) ? (string) $main_context['location'] : '';
     $supplements = isset( $main_context['supplements'] ) && is_array( $main_context['supplements'] ) ? $main_context['supplements'] : [];
+
+    ob_start();
     ?>
     <div class="wk-rh-checkout-step-panel wk-rh-checkout-step-panel--supplements <?php echo $is_ready ? 'is-ready' : 'is-locked'; ?>" data-step="supplements">
         <?php if ( ! $is_ready ) : ?>
@@ -1035,6 +1051,8 @@ function wk_rh_render_checkout_step_supplements() {
             </div>
             <div class="center wk-rh-checkout-addons-shell">
             <div class="addons wk-rh-checkout-addons-list">
+                <h2><?php esc_html_e( 'ADD ONS', 'racehall-wc-ui' ); ?></h2>
+                <div class="summary-item">
                 <?php foreach ( $supplements as $supplement_row ) :
                     if ( ! is_array( $supplement_row ) ) {
                         continue;
@@ -1087,12 +1105,15 @@ function wk_rh_render_checkout_step_supplements() {
                         </div>
                     </div>
                 <?php endforeach; ?>
+                </div>
             </div>
             </div>
             <div class="wk-rh-checkout-step-notice wk-rh-checkout-step-notice--supplements" aria-live="polite"></div>
         <?php endif; ?>
     </div>
     <?php
+
+    return (string) ob_get_clean();
 }
 
 add_action( 'cfw_checkout_payment_method_tab', 'wk_rh_render_checkout_step_supplements', 1 );
@@ -3617,7 +3638,12 @@ function wk_rh_prepare_checkout_booking_step() {
 
     $main_context = wk_rh_get_main_booking_context();
     if ( empty( $main_context['cartItemKey'] ) ) {
-        wp_send_json_error( [ 'message' => __( 'Bookinglinjen blev ikke fundet i kurven. Vælg tidspunkt igen.', 'racehall-wc-ui' ) ], 400 );
+        $expired = wk_rh_expire_current_cart_reservation( 'checkout_step_missing_main_item', false );
+        wp_send_json_error( [
+            'message' => __( 'Bookinglinjen blev ikke fundet i kurven. Vælg tidspunkt igen.', 'racehall-wc-ui' ),
+            'redirectToProduct' => true,
+            'redirectUrl' => isset( $expired['redirect_url'] ) ? (string) $expired['redirect_url'] : wk_rh_get_checkout_booking_redirect_url(),
+        ], 400 );
     }
 
     $contact_person = wk_rh_get_checkout_contact_person( $posted_data );
@@ -3625,16 +3651,21 @@ function wk_rh_prepare_checkout_booking_step() {
 
     $booking_sync = wk_rh_ensure_main_cart_booking_hold( $main_context['cartItemKey'], $contact_person, 'checkout_step', $force_refresh );
     if ( empty( $booking_sync['success'] ) ) {
+        $redirect_url = ! empty( $booking_sync['redirectToProduct'] )
+            ? (string) ( wk_rh_expire_current_cart_reservation( 'checkout_step_redirect_to_product', false )['redirect_url'] ?? wk_rh_get_checkout_booking_redirect_url() )
+            : '';
+
         wp_send_json_error( [
             'message' => isset( $booking_sync['userMessage'] ) ? (string) $booking_sync['userMessage'] : __( 'Booking kunne ikke klargøres. Prøv igen.', 'racehall-wc-ui' ),
             'redirectToProduct' => ! empty( $booking_sync['redirectToProduct'] ),
-            'redirectUrl' => ! empty( $booking_sync['redirectToProduct'] ) ? wk_rh_get_checkout_booking_redirect_url() : '',
+            'redirectUrl' => $redirect_url,
         ], 400 );
     }
 
     wp_send_json_success( [
         'reload' => true,
         'message' => __( 'Booking klargjort. Vælg nu add-ons og bekræft ordren.', 'racehall-wc-ui' ),
+        'supplementsHtml' => wk_rh_get_checkout_step_supplements_markup( wk_rh_get_main_booking_context(), true ),
     ] );
 }
 
