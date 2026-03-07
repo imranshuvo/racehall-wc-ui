@@ -57,6 +57,9 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
             continue;
         }
         $addon_upstream_id = isset( $cart_item['addon_upstream_id'] ) ? (string) $cart_item['addon_upstream_id'] : '';
+        if ( $addon_upstream_id === '' && isset( $cart_item['addon_upstream_product_id'] ) ) {
+            $addon_upstream_id = (string) $cart_item['addon_upstream_product_id'];
+        }
         if ( $addon_upstream_id === '' ) {
             continue;
         }

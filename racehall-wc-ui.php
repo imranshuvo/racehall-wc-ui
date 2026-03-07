@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.45
+ * Version: 1.46
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.45' );
+define( 'RACEHALL_WC_UI_VERSION', '1.46' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -1971,6 +1971,8 @@ add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $val
 
     if ( isset( $values['addon_upstream_id'] ) ) {
         $cart_item['addon_upstream_id'] = sanitize_text_field( (string) $values['addon_upstream_id'] );
+    } elseif ( isset( $values['addon_upstream_product_id'] ) ) {
+        $cart_item['addon_upstream_id'] = sanitize_text_field( (string) $values['addon_upstream_product_id'] );
     }
 
     if ( isset( $values['addon_supplement_id'] ) ) {
@@ -2386,32 +2388,42 @@ function wk_rh_get_booking_supplement_sell_product_id( array $supplement ) {
     return isset( $supplement['id'] ) ? trim( (string) $supplement['id'] ) : '';
 }
 
-function wk_rh_resolve_checkout_addon_product_id( array $cart_item, array $supplements ) {
+function wk_rh_get_cart_item_addon_upstream_id( array $cart_item, array $supplements = [] ) {
     $stored_upstream_id = isset( $cart_item['addon_upstream_id'] ) ? trim( (string) $cart_item['addon_upstream_id'] ) : '';
-    if ( empty( $supplements ) ) {
+    if ( $stored_upstream_id === '' && isset( $cart_item['addon_upstream_product_id'] ) ) {
+        $stored_upstream_id = trim( (string) $cart_item['addon_upstream_product_id'] );
+    }
+
+    if ( $stored_upstream_id !== '' || empty( $supplements ) ) {
         return $stored_upstream_id;
     }
 
     $stored_supplement_id = isset( $cart_item['addon_supplement_id'] ) ? trim( (string) $cart_item['addon_supplement_id'] ) : '';
-    if ( $stored_supplement_id !== '' ) {
-        foreach ( $supplements as $supplement ) {
-            if ( ! is_array( $supplement ) ) {
-                continue;
-            }
+    if ( $stored_supplement_id === '' ) {
+        return '';
+    }
 
-            $supplement_id = isset( $supplement['id'] ) ? trim( (string) $supplement['id'] ) : '';
-            if ( $supplement_id === '' || $supplement_id !== $stored_supplement_id ) {
-                continue;
-            }
+    foreach ( $supplements as $supplement ) {
+        if ( ! is_array( $supplement ) ) {
+            continue;
+        }
 
-            $resolved_upstream_id = wk_rh_get_booking_supplement_sell_product_id( $supplement );
-            if ( $resolved_upstream_id !== '' ) {
-                return $resolved_upstream_id;
-            }
+        $supplement_id = isset( $supplement['id'] ) ? trim( (string) $supplement['id'] ) : '';
+        if ( $supplement_id === '' || $supplement_id !== $stored_supplement_id ) {
+            continue;
+        }
+
+        $resolved_upstream_id = wk_rh_get_booking_supplement_sell_product_id( $supplement );
+        if ( $resolved_upstream_id !== '' ) {
+            return $resolved_upstream_id;
         }
     }
 
-    return $stored_upstream_id;
+    return '';
+}
+
+function wk_rh_resolve_checkout_addon_product_id( array $cart_item, array $supplements ) {
+    return wk_rh_get_cart_item_addon_upstream_id( $cart_item, $supplements );
 }
 
 function wk_rh_sync_checkout_booking_before_order( $posted_data, $errors ) {
@@ -2700,6 +2712,8 @@ function wk_rh_sync_checkout_booking_before_order( $posted_data, $errors ) {
                 'upstreamId' => $addon_upstream_id,
                 'quantity' => $addon_quantity,
                 'orderId' => $main_order_id,
+                'httpCode' => isset( $sell_result['httpCode'] ) ? (int) $sell_result['httpCode'] : 0,
+                'body' => isset( $sell_result['rawBody'] ) ? (string) $sell_result['rawBody'] : '',
             ], 'error' );
             $errors->add( 'rh_booking_addon_sell_failed', __( 'Et add-on kunne ikke reserveres under checkout. Prøv igen.', 'racehall-wc-ui' ) );
             return;
@@ -2874,9 +2888,16 @@ function wk_rh_add_bmi_ids_to_order_item( $item, $cart_item_key, $values, $order
     if ( $is_addon ) {
         $item->add_meta_data( '_wk_rh_is_addon', 'yes', true );
 
+        $addon_upstream_id = '';
         if ( isset( $values['addon_upstream_id'] ) ) {
-            $item->add_meta_data( '_wk_rh_addon_upstream_id', sanitize_text_field( (string) $values['addon_upstream_id'] ), true );
-            $item->add_meta_data( 'Upstream add-on ID', sanitize_text_field( (string) $values['addon_upstream_id'] ), true );
+            $addon_upstream_id = sanitize_text_field( (string) $values['addon_upstream_id'] );
+        } elseif ( isset( $values['addon_upstream_product_id'] ) ) {
+            $addon_upstream_id = sanitize_text_field( (string) $values['addon_upstream_product_id'] );
+        }
+
+        if ( $addon_upstream_id !== '' ) {
+            $item->add_meta_data( '_wk_rh_addon_upstream_id', $addon_upstream_id, true );
+            $item->add_meta_data( 'Upstream add-on ID', $addon_upstream_id, true );
         }
 
         if ( isset( $values['addon_display_name'] ) ) {

@@ -261,7 +261,7 @@ function wk_rh_post_booking_sell( $location, $product_id, $quantity, $order_id, 
     $token = wk_rh_get_token( $location );
     $creds = wk_rh_get_api_credentials( $location );
     if ( ! $token || empty( $creds['client_key'] ) || empty( $creds['subscription_key'] ) ) {
-        return [ 'success' => false, 'data' => null ];
+        return [ 'success' => false, 'data' => null, 'httpCode' => 0, 'rawBody' => '' ];
     }
 
     $body = [
@@ -298,11 +298,12 @@ function wk_rh_post_booking_sell( $location, $product_id, $quantity, $order_id, 
     );
 
     if ( is_wp_error( $response ) ) {
-        return [ 'success' => false, 'data' => null ];
+        return [ 'success' => false, 'data' => null, 'httpCode' => 0, 'rawBody' => $response->get_error_message() ];
     }
 
     $code = (int) wp_remote_retrieve_response_code( $response );
-    $data = json_decode( wp_remote_retrieve_body( $response ), true );
+    $raw_body = wp_remote_retrieve_body( $response );
+    $data = json_decode( $raw_body, true );
     if ( ! ( $code >= 200 && $code < 300 ) ) {
         wk_rh_log_upstream_event( 'error', 'Upstream booking/sell failed', [
             'operation' => 'booking_sell',
@@ -310,7 +311,7 @@ function wk_rh_post_booking_sell( $location, $product_id, $quantity, $order_id, 
             'productId' => (string) $product_id,
             'location' => (string) $location,
             'httpCode' => $code,
-            'body' => wp_remote_retrieve_body( $response ),
+            'body' => $raw_body,
         ] );
     }
 
@@ -329,6 +330,8 @@ function wk_rh_post_booking_sell( $location, $product_id, $quantity, $order_id, 
     return [
         'success' => $code >= 200 && $code < 300 && $body_success,
         'data'    => is_array( $data ) ? $data : null,
+        'httpCode' => $code,
+        'rawBody' => is_string( $raw_body ) ? $raw_body : '',
     ];
 }
 

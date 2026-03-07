@@ -9,6 +9,7 @@ $cart_items = WC()->cart->get_cart();
 $cart_location = '';
 $date = '';
 $time = '';
+$checkout_supplements = [];
 
 if ( ! WC()->cart->is_empty() ) {
     foreach ( $cart_items as $cart_item ) {
@@ -20,6 +21,9 @@ if ( ! WC()->cart->is_empty() ) {
         }
         if ( isset( $cart_item['booking_time'] ) ) {
             $time = $cart_item['booking_time'];
+        }
+        if ( empty( $cart_item['is_addon'] ) && ! empty( $cart_item['bmi_supplements'] ) && is_array( $cart_item['bmi_supplements'] ) ) {
+            $checkout_supplements = $cart_item['bmi_supplements'];
         }
     }
 }
@@ -207,11 +211,15 @@ window.RH_CHECKOUT_I18N = {
             ? (string) $cart_item['addon_display_name']
             : $product->get_name();
         $line_image_html = '';
+        $image_location = ! empty( $cart_item['booking_location'] ) ? (string) $cart_item['booking_location'] : (string) $cart_location;
+        $addon_upstream_id = function_exists( 'wk_rh_get_cart_item_addon_upstream_id' )
+            ? wk_rh_get_cart_item_addon_upstream_id( $cart_item, $checkout_supplements )
+            : ( isset( $cart_item['addon_upstream_id'] ) ? (string) $cart_item['addon_upstream_id'] : '' );
 
-        if ( ! empty( $cart_item['is_addon'] ) && ! empty( $cart_item['addon_upstream_id'] ) && function_exists( 'wk_rh_get_product_image_html' ) ) {
+        if ( ! empty( $cart_item['is_addon'] ) && $addon_upstream_id !== '' && function_exists( 'wk_rh_get_product_image_html' ) ) {
             $line_image_html = wk_rh_get_product_image_html(
-                $cart_item['booking_location'] ?? $cart_location,
-                (string) $cart_item['addon_upstream_id'],
+                $image_location,
+                $addon_upstream_id,
                 $line_name,
                 'wk-rh-checkout-line-image'
             );
