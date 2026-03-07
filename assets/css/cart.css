@@ -240,13 +240,26 @@ html.rh-cart-loading-active .rh-cart-loading {
     gap: 8px;
 }
 
+.addon-control-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+
 input.qty-input.addon-qty-display {
     width: 30px !important;
 }
 
+input.qty-input.addon-qty-input {
+    width: 56px !important;
+}
+
 .counter button,
 .qty-increase,
-.qty-decrease {
+.qty-decrease,
+.addon-qty-increase,
+.addon-qty-decrease {
     width: 20px;
     height: 20px;
     color: var(--accent);
@@ -549,6 +562,14 @@ input.qty-input.addon-qty-display {
 
 .racehall-cart a.remove-item {
     display: none;
+}
+
+.racehall-cart a.clear-cart-link {
+    display: inline-block;
+    color: var(--text);
+    margin-top: 6px;
+    text-decoration: none;
+    font-weight: bold;
 }
 
 .summary-section h4 {
