@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.66
+ * Version: 1.67
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.66' );
+define( 'RACEHALL_WC_UI_VERSION', '1.67' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -4097,9 +4097,17 @@ function wk_rh_get_hidden_order_item_meta_keys() {
     ];
 }
 
+function wk_rh_should_hide_customer_order_item_meta() {
+    return ! is_admin();
+}
+
 add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden_meta ) {
     if ( ! is_array( $hidden_meta ) ) {
         $hidden_meta = [];
+    }
+
+    if ( ! wk_rh_should_hide_customer_order_item_meta() ) {
+        return $hidden_meta;
     }
 
     return array_values( array_unique( array_merge( $hidden_meta, wk_rh_get_hidden_order_item_meta_keys() ) ) );
@@ -4107,6 +4115,10 @@ add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden_meta ) {
 
 add_filter( 'woocommerce_order_item_get_formatted_meta_data', function( $formatted_meta, $item ) {
     if ( empty( $formatted_meta ) || ! is_array( $formatted_meta ) ) {
+        return $formatted_meta;
+    }
+
+    if ( ! wk_rh_should_hide_customer_order_item_meta() ) {
         return $formatted_meta;
     }
 
