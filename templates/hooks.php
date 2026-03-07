@@ -257,6 +257,41 @@ function wk_rh_get_order_item_upstream_image_html( $item, $class_name = 'wk-rh-o
     return wk_rh_get_product_image_html( $location, $product_id, $item->get_name(), $class_name );
 }
 
+function wk_rh_get_cart_item_upstream_image_html( array $cart_item, $class_name = 'wk-rh-order-item-image' ) {
+    if ( empty( $cart_item['is_addon'] ) ) {
+        return '';
+    }
+
+    $product_id = function_exists( 'wk_rh_get_cart_item_addon_upstream_id' )
+        ? wk_rh_get_cart_item_addon_upstream_id( $cart_item )
+        : ( isset( $cart_item['addon_upstream_id'] ) ? trim( (string) $cart_item['addon_upstream_id'] ) : '' );
+
+    if ( $product_id === '' ) {
+        return '';
+    }
+
+    $location = isset( $cart_item['booking_location'] ) ? trim( (string) $cart_item['booking_location'] ) : '';
+    if ( $location === '' ) {
+        return '';
+    }
+
+    $alt = isset( $cart_item['addon_display_name'] ) ? (string) $cart_item['addon_display_name'] : '';
+
+    return wk_rh_get_product_image_html( $location, $product_id, $alt, $class_name );
+}
+
+add_filter( 'woocommerce_cart_item_thumbnail', function( $thumbnail, $cart_item, $cart_item_key ) {
+    $image_html = wk_rh_get_cart_item_upstream_image_html( is_array( $cart_item ) ? $cart_item : [], 'wk-rh-order-item-image' );
+
+    return $image_html !== '' ? $image_html : $thumbnail;
+}, 20, 3 );
+
+add_filter( 'cfw_order_item_thumbnail', function( $thumbnail, $item ) {
+    $image_html = wk_rh_get_order_item_upstream_image_html( $item, 'wk-rh-order-item-image' );
+
+    return $image_html !== '' ? $image_html : $thumbnail;
+}, 20, 2 );
+
 function wk_rh_post_booking_sell( $location, $product_id, $quantity, $order_id, $parent_order_item_id = '' ) {
     $token = wk_rh_get_token( $location );
     $creds = wk_rh_get_api_credentials( $location );

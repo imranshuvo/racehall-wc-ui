@@ -224,9 +224,10 @@ html.rh-cart-loading-active .rh-cart-loading {
 .addon-img,
 .addon-img img {
     height: auto;
-    width: 90px;
+    width: 85px;
+    height: 85px;
     display: block;
-    object-fit: fill;
+    object-fit: cover;
 }
 
 .info-container {
