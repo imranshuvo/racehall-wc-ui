@@ -4,9 +4,6 @@ do_action( 'woocommerce_check_cart_items' );
 wc_print_notices();
 
 ?>
-<script>
-document.documentElement.classList.add('rh-cart-loading-active');
-</script>
 <?php
 
 
@@ -35,6 +32,8 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
 $cart_location = '';
 $main_product_id = 0;
 $addon_cart_index = [];
+$addon_carrier_product_id = function_exists( 'wk_rh_get_configured_addon_product_id' ) ? wk_rh_get_configured_addon_product_id() : 0;
+$addon_carrier_error = function_exists( 'wk_rh_get_addon_carrier_validation_error' ) ? wk_rh_get_addon_carrier_validation_error( $addon_carrier_product_id ) : '';
 
 if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
     foreach ( WC()->cart->get_cart() as $cart_item ) {
@@ -90,6 +89,18 @@ if ( function_exists( 'WC' ) && WC()->cart && ! WC()->cart->is_empty() ) {
 
 if ( empty( $supplement_rows ) && is_array( $supplement ) && ! empty( $supplement['supplements'] ) && is_array( $supplement['supplements'] ) ) {
     $supplement_rows = $supplement['supplements'];
+}
+
+if ( empty( $supplement_rows ) && function_exists( 'WC' ) && WC()->cart && ! WC()->cart->is_empty() ) {
+    foreach ( WC()->cart->get_cart() as $cart_item ) {
+        if ( ! empty( $cart_item['is_addon'] ) ) {
+            continue;
+        }
+        if ( ! empty( $cart_item['bmi_page_products'] ) && is_array( $cart_item['bmi_page_products'] ) ) {
+            $supplement_rows = $cart_item['bmi_page_products'];
+            break;
+        }
+    }
 }
 
 $rh_pick_qty_rule = static function ( $source, array $keys, $fallback = null ) {
@@ -238,11 +249,10 @@ $continue_shopping_url = function_exists( 'wk_rh_get_main_booking_product_url' )
                         $max_qty = max( $min_qty, (int) $max_qty );
                     }
 
-                    $add_to_cart_product_id = $main_product_id > 0 ? $main_product_id : 0;
+                    $add_to_cart_product_id = $addon_carrier_product_id > 0 ? $addon_carrier_product_id : 0;
                     $existing_addon_qty = isset( $addon_cart_index[ $upstream_id ]['qty'] ) ? (int) $addon_cart_index[ $upstream_id ]['qty'] : 0;
                     $existing_addon_key = isset( $addon_cart_index[ $upstream_id ]['key'] ) ? (string) $addon_cart_index[ $upstream_id ]['key'] : '';
                     $add_step_qty = $existing_addon_qty > 0 ? 1 : $min_qty;
-                    $display_addon_qty = $existing_addon_qty > 0 ? $existing_addon_qty : $min_qty;
                     $decrease_target_qty = 0;
                     if ( $existing_addon_qty > 0 ) {
                         $decrease_target_qty = ( $existing_addon_qty <= $min_qty )
@@ -261,7 +271,7 @@ $continue_shopping_url = function_exists( 'wk_rh_get_main_booking_product_url' )
                                 <span class="price"><?php echo $price . ' ' . $currency; ?></span>
                             </div>
                         </div>
-                        <?php if ( $add_to_cart_product_id > 0 && $upstream_id !== '' ) : ?>
+                        <?php if ( $add_to_cart_product_id > 0 && $upstream_id !== '' && $main_product_id > 0 && $addon_carrier_error === '' ) : ?>
                             <div class="counter" style="margin:8px 0;">
                                 <?php if ( $existing_addon_qty > 0 && $existing_addon_key !== '' ) : ?>
                                     <form method="post" action="<?php echo esc_url( wc_get_cart_url() ); ?>" style="display:inline;">
@@ -270,20 +280,31 @@ $continue_shopping_url = function_exists( 'wk_rh_get_main_booking_product_url' )
                                         <?php wp_nonce_field( 'woocommerce-cart' ); ?>
                                         <button type="submit" class="addon-action-remove" aria-label="<?php echo esc_attr__( 'Decrease', 'racehall-wc-ui' ); ?>">-</button>
                                     </form>
-                                <?php else : ?>
-                                    <button type="button" class="addon-action-remove" aria-label="<?php echo esc_attr__( 'Decrease', 'racehall-wc-ui' ); ?>" disabled>-</button>
-                                <?php endif; ?>
+                                    <input type="number"
+                                           class="qty-input addon-qty-display"
+                                           value="<?php echo esc_attr( $existing_addon_qty ); ?>"
+                                           min="<?php echo esc_attr( $min_qty ); ?>"
+                                           <?php if ( $max_qty !== null ) : ?>max="<?php echo esc_attr( $max_qty ); ?>"<?php endif; ?>
+                                           step="1"
+                                           readonly>
 
-                                <input type="number"
-                                       class="qty-input addon-qty-display"
-                                        value="<?php echo esc_attr( $display_addon_qty ); ?>"
-                                        min="<?php echo esc_attr( $min_qty ); ?>"
-                                       <?php if ( $max_qty !== null ) : ?>max="<?php echo esc_attr( $max_qty ); ?>"<?php endif; ?>
-                                       step="1"
-                                       readonly>
-
-                                <?php if ( $max_qty !== null && $existing_addon_qty >= $max_qty ) : ?>
-                                    <button type="button" class="addon-action-add" aria-label="<?php echo esc_attr__( 'Increase', 'racehall-wc-ui' ); ?>" disabled>+</button>
+                                    <?php if ( $max_qty !== null && $existing_addon_qty >= $max_qty ) : ?>
+                                        <button type="button" class="addon-action-add" aria-label="<?php echo esc_attr__( 'Increase', 'racehall-wc-ui' ); ?>" disabled>+</button>
+                                    <?php else : ?>
+                                        <form method="post" action="<?php echo esc_url( wc_get_cart_url() ); ?>" style="display:inline;">
+                                            <input type="hidden" name="add-to-cart" value="<?php echo esc_attr( $add_to_cart_product_id ); ?>">
+                                            <input type="hidden" name="quantity" value="1">
+                                            <input type="hidden" name="is_addon" value="1">
+                                            <input type="hidden" name="parent_racehall_product" value="<?php echo esc_attr( $main_product_id ); ?>">
+                                            <input type="hidden" name="booking_location" value="<?php echo esc_attr( $cart_location ); ?>">
+                                            <input type="hidden" name="addon_price" value="<?php echo esc_attr( wc_format_decimal( $amount_raw ) ); ?>">
+                                            <input type="hidden" name="addon_upstream_product_id" value="<?php echo esc_attr( $upstream_id ); ?>">
+                                            <input type="hidden" name="addon_display_name" value="<?php echo esc_attr( wp_strip_all_tags( (string) ( $product['name'] ?? '' ) ) ); ?>">
+                                            <input type="hidden" name="addon_min_qty" value="<?php echo esc_attr( $min_qty ); ?>">
+                                            <input type="hidden" name="addon_max_qty" value="<?php echo esc_attr( $max_qty !== null ? $max_qty : '' ); ?>">
+                                            <button type="submit" class="addon-action-add" aria-label="<?php echo esc_attr__( 'Increase', 'racehall-wc-ui' ); ?>">+</button>
+                                        </form>
+                                    <?php endif; ?>
                                 <?php else : ?>
                                     <form method="post" action="<?php echo esc_url( wc_get_cart_url() ); ?>" style="display:inline;">
                                         <input type="hidden" name="add-to-cart" value="<?php echo esc_attr( $add_to_cart_product_id ); ?>">
@@ -296,12 +317,12 @@ $continue_shopping_url = function_exists( 'wk_rh_get_main_booking_product_url' )
                                         <input type="hidden" name="addon_display_name" value="<?php echo esc_attr( wp_strip_all_tags( (string) ( $product['name'] ?? '' ) ) ); ?>">
                                         <input type="hidden" name="addon_min_qty" value="<?php echo esc_attr( $min_qty ); ?>">
                                         <input type="hidden" name="addon_max_qty" value="<?php echo esc_attr( $max_qty !== null ? $max_qty : '' ); ?>">
-                                        <button type="submit" class="addon-action-add" aria-label="<?php echo esc_attr__( 'Increase', 'racehall-wc-ui' ); ?>">+</button>
+                                        <button type="submit" class="button addon-add-button"><?php esc_html_e( 'Tilføj', 'racehall-wc-ui' ); ?></button>
                                     </form>
                                 <?php endif; ?>
                             </div>
                         <?php else : ?>
-                            <span class="summary-label" style="display:block;margin-top:6px;"><?php esc_html_e( 'Add-on kan ikke tilføjes lige nu', 'racehall-wc-ui' ); ?></span>
+                            <span class="summary-label" style="display:block;margin-top:6px;"><?php echo esc_html( $addon_carrier_error !== '' ? $addon_carrier_error : __( 'Add-on kan ikke tilføjes lige nu. Kontrollér at add-on produktet er valgt i plugin-indstillingerne.', 'racehall-wc-ui' ) ); ?></span>
                         <?php endif; ?>
                     </div>
                 <?php }

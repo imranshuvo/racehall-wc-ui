@@ -1,4 +1,33 @@
 (function(){
+  function logBookingClientEvent(eventName, context) {
+    var logger = window.RH_LOGGER || null;
+    if (!logger || !logger.ajax_url || !logger.nonce || !eventName) return;
+
+    var payload = new URLSearchParams({
+      action: 'rh_log_client_event',
+      nonce: logger.nonce,
+      event: String(eventName),
+      context: JSON.stringify(context || {})
+    });
+
+    try {
+      if (navigator.sendBeacon) {
+        var blob = new Blob([payload.toString()], { type: 'application/x-www-form-urlencoded; charset=UTF-8' });
+        navigator.sendBeacon(logger.ajax_url, blob);
+        return;
+      }
+    } catch (e) {}
+
+    try {
+      fetch(logger.ajax_url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: payload
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
   function showCartLoading() {
     var overlay = document.getElementById('rh-cart-loading');
     if (!overlay) return;
@@ -71,6 +100,7 @@
     function redirectAfterExpiry() {
       if (hasReloaded) return;
       hasReloaded = true;
+      logBookingClientEvent('cart_hold_expired', { fallbackRedirect: fallbackRedirect });
 
       if (!ajaxUrl || !nonce || typeof fetch !== 'function') {
         window.setTimeout(function () {
@@ -137,6 +167,7 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     initHoldCountdown();
+    logBookingClientEvent('cart_page_ready', {});
     window.setTimeout(hideCartLoading, 50);
   });
 
@@ -163,6 +194,7 @@
     if (clicked && clicked.classList.contains('addon-action-add')) {
       e.preventDefault();
       if (clicked.disabled) return;
+      logBookingClientEvent('cart_addon_add_clicked', {});
       submitFormWithLoader(clicked.closest('form'), clicked);
       return;
     }
@@ -170,6 +202,7 @@
     if (clicked && clicked.classList.contains('addon-action-remove')) {
       e.preventDefault();
       if (clicked.disabled) return;
+      logBookingClientEvent('cart_addon_remove_clicked', {});
       submitFormWithLoader(clicked.closest('form'), clicked);
       return;
     }
@@ -177,6 +210,7 @@
     if (clicked && clicked.classList.contains('update-cart-button')) {
       e.preventDefault();
       if (clicked.disabled) return;
+      logBookingClientEvent('cart_update_clicked', {});
       var formId = clicked.getAttribute('form');
       var form = formId ? document.getElementById(formId) : clicked.closest('form');
       submitFormWithLoader(form, clicked);
@@ -185,6 +219,7 @@
 
     if (clicked && clicked.classList.contains('remove-item')) {
       e.preventDefault();
+      logBookingClientEvent('cart_remove_clicked', { href: clicked.getAttribute('href') || '' });
       showCartLoading();
       var href = clicked.getAttribute('href');
       window.setTimeout(function () {

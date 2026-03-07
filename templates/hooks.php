@@ -1,40 +1,23 @@
 <?php
 
-function wk_rh_log_upstream_event( $level, $message, array $context = [] ) {
-    $entry = [
-        'time'    => gmdate( 'c' ),
-        'level'   => (string) $level,
-        'message' => (string) $message,
-        'context' => $context,
-    ];
-
-    $existing = get_option( 'wk_rh_upstream_logs', [] );
-    if ( ! is_array( $existing ) ) {
-        $existing = [];
-    }
-
-    $existing[] = $entry;
-    if ( count( $existing ) > 200 ) {
-        $existing = array_slice( $existing, -200 );
-    }
-
-    update_option( 'wk_rh_upstream_logs', $existing, false );
-
-    $payload = [
-        'level'   => (string) $level,
-        'message' => (string) $message,
-        'context' => $context,
-    ];
-
-    error_log( 'OnsiteBookingUpstream ' . wp_json_encode( $payload ) );
-}
-
 function wk_rh_remote_request_with_retry( $method, $url, array $args = [], $attempts = 1, array $context = [] ) {
     $attempts = max( 1, (int) $attempts );
     $retryable_codes = [ 408, 429, 500, 502, 503, 504 ];
     $last_response = null;
+    $request_context = [
+        'headers' => function_exists( 'wk_rh_prepare_log_http_headers' ) ? wk_rh_prepare_log_http_headers( $args['headers'] ?? [] ) : [],
+        'body'    => function_exists( 'wk_rh_prepare_log_http_body' ) ? wk_rh_prepare_log_http_body( $args['body'] ?? '' ) : '',
+        'timeout' => isset( $args['timeout'] ) ? (int) $args['timeout'] : 0,
+    ];
 
     for ( $attempt = 1; $attempt <= $attempts; $attempt++ ) {
+        wk_rh_log_upstream_event( 'info', 'Upstream request started', array_merge( $context, [
+            'attempt' => $attempt,
+            'method' => strtoupper( (string) $method ),
+            'url' => $url,
+            'request' => $request_context,
+        ] ) );
+
         $response = wp_remote_request( $url, array_merge( $args, [ 'method' => strtoupper( (string) $method ) ] ) );
         $last_response = $response;
 
@@ -43,6 +26,7 @@ function wk_rh_remote_request_with_retry( $method, $url, array $args = [], $atte
                 'attempt' => $attempt,
                 'url' => $url,
                 'error' => $response->get_error_message(),
+                'request' => $request_context,
             ] ) );
 
             if ( $attempt < $attempts ) {
@@ -59,10 +43,27 @@ function wk_rh_remote_request_with_retry( $method, $url, array $args = [], $atte
                 'attempt' => $attempt,
                 'url' => $url,
                 'httpCode' => $code,
+                'request' => $request_context,
+                'response' => [
+                    'headers' => function_exists( 'wk_rh_prepare_log_http_headers' ) ? wk_rh_prepare_log_http_headers( wp_remote_retrieve_headers( $response ) ) : [],
+                    'body' => function_exists( 'wk_rh_prepare_log_http_body' ) ? wk_rh_prepare_log_http_body( wp_remote_retrieve_body( $response ) ) : '',
+                ],
             ] ) );
             usleep( 250000 * $attempt );
             continue;
         }
+
+        wk_rh_log_upstream_event( $code >= 200 && $code < 300 ? 'info' : 'warning', 'Upstream response received', array_merge( $context, [
+            'attempt' => $attempt,
+            'method' => strtoupper( (string) $method ),
+            'url' => $url,
+            'httpCode' => $code,
+            'request' => $request_context,
+            'response' => [
+                'headers' => function_exists( 'wk_rh_prepare_log_http_headers' ) ? wk_rh_prepare_log_http_headers( wp_remote_retrieve_headers( $response ) ) : [],
+                'body' => function_exists( 'wk_rh_prepare_log_http_body' ) ? wk_rh_prepare_log_http_body( wp_remote_retrieve_body( $response ) ) : '',
+            ],
+        ] ) );
 
         return $response;
     }
@@ -325,7 +326,15 @@ function wk_rh_remove_upstream_order_item( $location, $order_id, $order_item_id 
     return $code >= 200 && $code < 300;
 }
 
-function wk_rh_send_order_memo( WC_Order $order ) {
+function wk_rh_send_order_memo( $order ) {
+    if ( is_numeric( $order ) ) {
+        $order = wc_get_order( absint( $order ) );
+    }
+
+    if ( ! $order instanceof WC_Order ) {
+        return;
+    }
+
     $memo = trim( (string) $order->get_customer_note() );
     if ( $memo === '' || $order->get_meta( '_wk_rh_memo_synced', true ) === 'yes' ) {
         return;
@@ -344,6 +353,14 @@ function wk_rh_send_order_memo( WC_Order $order ) {
     }
 
     $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/booking/memo';
+    $payload = [
+        'orderId' => ctype_digit( (string) $upstream_order_id ) ? (int) $upstream_order_id : (string) $upstream_order_id,
+        'memo'    => $memo,
+    ];
+
+    $order->update_meta_data( 'wk_rh_memo_payload', wp_json_encode( $payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
+    $order->save();
+
     $response = wk_rh_remote_request_with_retry(
         'POST',
         $url,
@@ -354,10 +371,7 @@ function wk_rh_send_order_memo( WC_Order $order ) {
                 'Accept-Language'      => $creds['accept_language'],
                 'Bmi-Subscription-Key' => $creds['subscription_key'],
             ],
-            'body'    => wp_json_encode([
-                'orderId' => ctype_digit( (string) $upstream_order_id ) ? (int) $upstream_order_id : (string) $upstream_order_id,
-                'memo'    => $memo,
-            ]),
+            'body'    => wp_json_encode( $payload ),
             'timeout' => 20,
         ],
         3,
@@ -369,21 +383,32 @@ function wk_rh_send_order_memo( WC_Order $order ) {
     );
 
     if ( is_wp_error( $response ) ) {
+        $order->update_meta_data( 'wk_rh_memo_response', $response->get_error_message() );
+        $order->save();
         return;
     }
 
     $code = (int) wp_remote_retrieve_response_code( $response );
+    $response_body = wp_remote_retrieve_body( $response );
+    $order->update_meta_data( 'wk_rh_memo_http_code', $code );
+    $order->update_meta_data( 'wk_rh_memo_response', $response_body );
     if ( $code >= 200 && $code < 300 ) {
         $order->update_meta_data( '_wk_rh_memo_synced', 'yes' );
         $order->save();
+        wk_rh_log_user_event( 'order.memo_synced', [
+            'wcOrderId' => (string) $order->get_id(),
+            'orderId' => (string) $upstream_order_id,
+            'location' => (string) $location,
+        ] );
     } else {
         wk_rh_log_upstream_event( 'error', 'Upstream booking/memo failed', [
             'operation' => 'booking_memo',
             'orderId' => (string) $upstream_order_id,
             'location' => (string) $location,
             'httpCode' => $code,
-            'body' => wp_remote_retrieve_body( $response ),
+            'body' => $response_body,
         ] );
+        $order->save();
     }
 }
 
@@ -393,8 +418,11 @@ function wk_rh_get_products( $token, $location = '' ) {
         return [];
     }
 
-    $response = wp_remote_get(
-        $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/products',
+    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/products';
+
+    $response = wk_rh_remote_request_with_retry(
+        'GET',
+        $url,
         [
             'headers' => [
                 'Authorization'        => 'Bearer ' . $token,
@@ -403,13 +431,24 @@ function wk_rh_get_products( $token, $location = '' ) {
                 'Accept-Language'      => $creds['accept_language'],
             ],
             'timeout' => 15,
+        ],
+        1,
+        [
+            'operation' => 'products_get',
+            'location' => (string) $location,
         ]
     );
 
     if ( is_wp_error( $response ) ) {
+        wk_rh_log_upstream_event( 'error', 'Upstream products request failed', [
+            'operation' => 'products_get',
+            'method' => 'GET',
+            'url' => $url,
+            'location' => (string) $location,
+            'error' => $response->get_error_message(),
+        ] );
         return [];
     }
-
     return json_decode( wp_remote_retrieve_body( $response ), true );
 }
 
@@ -425,8 +464,11 @@ function wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $l
         'dateTill'  => (string) $date_till,
     ]);
 
-    $response = wp_remote_get(
-        $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/availability?' . $query,
+    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/availability?' . $query;
+
+    $response = wk_rh_remote_request_with_retry(
+        'GET',
+        $url,
         [
             'headers' => [
                 'Authorization'        => 'Bearer ' . $token,
@@ -435,18 +477,32 @@ function wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $l
                 'Accept-Language'      => $creds['accept_language'],
             ],
             'timeout' => 15,
+        ],
+        1,
+        [
+            'operation' => 'availability_get',
+            'location' => (string) $location,
+            'productId' => (int) $product_id,
         ]
     );
 
     if ( is_wp_error( $response ) ) {
+        wk_rh_log_upstream_event( 'error', 'Upstream availability request failed', [
+            'operation' => 'availability_get',
+            'method' => 'GET',
+            'url' => $url,
+            'location' => (string) $location,
+            'productId' => (int) $product_id,
+            'error' => $response->get_error_message(),
+        ] );
         return [];
     }
-
     return json_decode( wp_remote_retrieve_body( $response ), true );
 }
 
 function wk_rh_ajax_get_availability() {
     if ( ! isset( $_POST['nonce'] ) || ! wp_verify_nonce( $_POST['nonce'], 'my_ajax_nonce' ) ) {
+        wk_rh_log_user_event( 'availability.request_rejected', [ 'reason' => 'invalid_nonce' ], 'warning' );
         wp_send_json_error( 'Invalid nonce', 403 );
     }
 
@@ -455,6 +511,12 @@ function wk_rh_ajax_get_availability() {
     $date_till  = isset( $_POST['dateTill'] ) ? sanitize_text_field( $_POST['dateTill'] ) : '';
 
     if ( ! $product_id || ! $date_from || ! $date_till ) {
+        wk_rh_log_user_event( 'availability.request_rejected', [
+            'reason' => 'missing_required_fields',
+            'productId' => $product_id,
+            'dateFrom' => $date_from,
+            'dateTill' => $date_till,
+        ], 'warning' );
         wp_send_json_error( 'Missing productId/dateFrom/dateTill', 400 );
     }
 
@@ -462,10 +524,24 @@ function wk_rh_ajax_get_availability() {
 
     $token = wk_rh_get_token( $booking_location );
     if ( ! $token ) {
+        wk_rh_log_user_event( 'availability.request_failed', [
+            'reason' => 'missing_token',
+            'productId' => $product_id,
+            'dateFrom' => $date_from,
+            'dateTill' => $date_till,
+            'bookingLocation' => $booking_location,
+        ], 'error' );
         wp_send_json_error( 'No token', 401 );
     }
 
     $result = wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $booking_location );
+    wk_rh_log_user_event( 'availability.request_succeeded', [
+        'productId' => $product_id,
+        'dateFrom' => $date_from,
+        'dateTill' => $date_till,
+        'bookingLocation' => $booking_location,
+        'resultCount' => is_array( $result ) ? count( $result ) : 0,
+    ] );
     wp_send_json( $result );
 }
 
@@ -478,8 +554,11 @@ function wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity = 
         return [];
     }
 
-    $response = wp_remote_post(
-        $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/availability?date=' . rawurlencode( $date ),
+    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/availability?date=' . rawurlencode( $date );
+
+    $response = wk_rh_remote_request_with_retry(
+        'POST',
+        $url,
         [
             'headers' => [
                 'Authorization'        => 'Bearer ' . $token,
@@ -493,18 +572,36 @@ function wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity = 
                 'quantity'  => (int) $quantity,
             ]),
             'timeout' => 15,
+        ],
+        1,
+        [
+            'operation' => 'timeslots_post',
+            'location' => (string) $location,
+            'productId' => (int) $product_id,
+            'pageId' => (int) $page_id,
+            'quantity' => (int) $quantity,
         ]
     );
 
     if ( is_wp_error( $response ) ) {
+        wk_rh_log_upstream_event( 'error', 'Upstream timeslots request failed', [
+            'operation' => 'timeslots_post',
+            'method' => 'POST',
+            'url' => $url,
+            'location' => (string) $location,
+            'productId' => (int) $product_id,
+            'pageId' => (int) $page_id,
+            'quantity' => (int) $quantity,
+            'error' => $response->get_error_message(),
+        ] );
         return [];
     }
-
     return json_decode( wp_remote_retrieve_body( $response ), true );
 }
 
 function wk_rh_ajax_get_timeslots() {
     if ( ! isset( $_POST['nonce'] ) || ! wp_verify_nonce( $_POST['nonce'], 'my_ajax_nonce' ) ) {
+        wk_rh_log_user_event( 'timeslots.request_rejected', [ 'reason' => 'invalid_nonce' ], 'warning' );
         wp_send_json_error( 'Invalid nonce', 403 );
     }
 
@@ -513,17 +610,33 @@ function wk_rh_ajax_get_timeslots() {
     $quantity   = isset( $_POST['quantity'] ) ? max( 1, intval( $_POST['quantity'] ) ) : 1;
     $booking_location = isset( $_POST['bookingLocation'] ) ? sanitize_text_field( $_POST['bookingLocation'] ) : '';
     if ( ! $product_id || ! $date ) {
+        wk_rh_log_user_event( 'timeslots.request_rejected', [
+            'reason' => 'missing_required_fields',
+            'productId' => $product_id,
+            'date' => $date,
+            'quantity' => $quantity,
+        ], 'warning' );
         wp_send_json_error( 'Missing productId or date', 400 );
     }
 
     $token = wk_rh_get_token( $booking_location );
     if ( ! $token ) {
+        wk_rh_log_user_event( 'timeslots.request_failed', [
+            'reason' => 'missing_token',
+            'productId' => $product_id,
+            'date' => $date,
+            'quantity' => $quantity,
+            'bookingLocation' => $booking_location,
+        ], 'error' );
         wp_send_json_error( 'No token', 401 );
     }
 
     $creds = wk_rh_get_api_credentials( $booking_location );
-    $pages_response = wp_remote_get(
-        $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/page?date=' . rawurlencode( $date . 'T00:00:00.000Z' ),
+    $pages_url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/page?date=' . rawurlencode( $date . 'T00:00:00.000Z' );
+
+    $pages_response = wk_rh_remote_request_with_retry(
+        'GET',
+        $pages_url,
         [
             'headers' => [
                 'Authorization'        => 'Bearer ' . $token,
@@ -531,20 +644,51 @@ function wk_rh_ajax_get_timeslots() {
                 'Content-Type'         => 'application/json',
                 'Accept-Language'      => $creds['accept_language'],
             ],
+        ],
+        1,
+        [
+            'operation' => 'page_get',
+            'location' => (string) $booking_location,
+            'productId' => (int) $product_id,
+            'quantity' => (int) $quantity,
         ]
     );
 
     if ( is_wp_error( $pages_response ) ) {
+        wk_rh_log_upstream_event( 'error', 'Upstream page lookup failed', [
+            'operation' => 'page_get',
+            'method' => 'GET',
+            'url' => $pages_url,
+            'location' => (string) $booking_location,
+            'productId' => (int) $product_id,
+            'quantity' => (int) $quantity,
+            'error' => $pages_response->get_error_message(),
+        ] );
+        wk_rh_log_user_event( 'timeslots.request_failed', [
+            'reason' => 'page_lookup_error',
+            'productId' => $product_id,
+            'date' => $date,
+            'quantity' => $quantity,
+            'bookingLocation' => $booking_location,
+            'error' => $pages_response->get_error_message(),
+        ], 'error' );
         wp_send_json_error( 'API error: ' . $pages_response->get_error_message(), 500 );
     }
-
     $pages = json_decode( wp_remote_retrieve_body( $pages_response ), true );
     if ( ! is_array( $pages ) ) {
+        wk_rh_log_user_event( 'timeslots.request_failed', [
+            'reason' => 'invalid_page_response',
+            'productId' => $product_id,
+            'date' => $date,
+            'quantity' => $quantity,
+            'bookingLocation' => $booking_location,
+        ], 'error' );
         wp_send_json_error( 'Invalid API response', 500 );
     }
 
     $page_id = null;
     $matched_product = null;
+    $matched_page_products = [];
     foreach ( $pages as $page ) {
         if ( empty( $page['products'] ) || ! is_array( $page['products'] ) ) {
             continue;
@@ -553,22 +697,40 @@ function wk_rh_ajax_get_timeslots() {
             if ( isset( $prod['id'] ) && (int) $prod['id'] === $product_id ) {
                 $page_id = $page['id'];
                 $matched_product = is_array( $prod ) ? $prod : null;
+                $matched_page_products = $page['products'];
                 break 2;
             }
         }
     }
 
     if ( ! $page_id ) {
+        wk_rh_log_user_event( 'timeslots.request_failed', [
+            'reason' => 'page_not_found',
+            'productId' => $product_id,
+            'date' => $date,
+            'quantity' => $quantity,
+            'bookingLocation' => $booking_location,
+        ], 'warning' );
         wp_send_json_error( 'No page found for product/date', 404 );
     }
 
     $timeslots = wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity, $booking_location );
     if ( is_array( $timeslots ) ) {
+        $timeslots['pageId'] = (string) $page_id;
         $timeslots['pageProductLimits'] = [
             'minAmount' => isset( $matched_product['minAmount'] ) ? $matched_product['minAmount'] : null,
             'maxAmount' => isset( $matched_product['maxAmount'] ) ? $matched_product['maxAmount'] : null,
         ];
+        $timeslots['pageProducts'] = is_array( $matched_page_products ) ? array_values( $matched_page_products ) : [];
     }
+    wk_rh_log_user_event( 'timeslots.request_succeeded', [
+        'productId' => $product_id,
+        'date' => $date,
+        'quantity' => $quantity,
+        'bookingLocation' => $booking_location,
+        'pageId' => $page_id,
+        'proposalCount' => isset( $timeslots['proposals'] ) && is_array( $timeslots['proposals'] ) ? count( $timeslots['proposals'] ) : 0,
+    ] );
     wp_send_json( $timeslots );
 }
 
@@ -730,6 +892,9 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
     }
 
     $rules = wk_rh_extract_quantity_rules_from_proposal( $session_booking['proposal'] );
+    if ( function_exists( 'wk_rh_apply_page_product_limits_to_rules' ) ) {
+        $rules = wk_rh_apply_page_product_limits_to_rules( $rules, $session_booking['pageProductLimits'] ?? null );
+    }
 
     $adults = isset( $_POST['booking_adults'] ) ? max( 0, (int) $_POST['booking_adults'] ) : null;
     $kids   = isset( $_POST['booking_children'] ) ? max( 0, (int) $_POST['booking_children'] ) : null;
@@ -756,14 +921,17 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
         $step = (int) $check['rules']['step'];
 
         if ( $check['value'] < $min ) {
+            wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'group' => $check['name'], 'reason' => 'below_min', 'value' => $check['value'], 'min' => $min, 'productId' => $product_id ] , 'warning' );
             wc_add_notice( sprintf( __( '%s must be at least %d.', 'onsite-booking-system' ), $check['name'], $min ), 'error' );
             return false;
         }
         if ( $max !== null && $check['value'] > (int) $max ) {
+            wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'group' => $check['name'], 'reason' => 'above_max', 'value' => $check['value'], 'max' => (int) $max, 'productId' => $product_id ], 'warning' );
             wc_add_notice( sprintf( __( '%s cannot exceed %d.', 'onsite-booking-system' ), $check['name'], (int) $max ), 'error' );
             return false;
         }
         if ( ! wk_rh_rule_value_matches_step( $check['value'], $min, $step ) ) {
+            wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'group' => $check['name'], 'reason' => 'step_mismatch', 'value' => $check['value'], 'min' => $min, 'step' => $step, 'productId' => $product_id ], 'warning' );
             wc_add_notice( sprintf( __( '%s quantity must follow step %d starting from %d.', 'onsite-booking-system' ), $check['name'], max( 1, $step ), $min ), 'error' );
             return false;
         }
@@ -771,6 +939,7 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
 
     $total = $adults + $kids;
     if ( $total !== $qty ) {
+        wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'reason' => 'total_quantity_mismatch', 'total' => $total, 'quantity' => $qty, 'productId' => $product_id ], 'warning' );
         wc_add_notice( __( 'Participant quantities do not match selected booking quantity.', 'onsite-booking-system' ), 'error' );
         return false;
     }
@@ -780,14 +949,17 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
     $total_step = (int) $rules['total']['step'];
 
     if ( $total < $total_min ) {
+        wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'reason' => 'total_below_min', 'total' => $total, 'min' => $total_min, 'productId' => $product_id ], 'warning' );
         wc_add_notice( sprintf( __( 'Total participants must be at least %d.', 'onsite-booking-system' ), $total_min ), 'error' );
         return false;
     }
     if ( $total_max !== null && $total > (int) $total_max ) {
+        wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'reason' => 'total_above_max', 'total' => $total, 'max' => (int) $total_max, 'productId' => $product_id ], 'warning' );
         wc_add_notice( sprintf( __( 'Total participants cannot exceed %d.', 'onsite-booking-system' ), (int) $total_max ), 'error' );
         return false;
     }
     if ( ! wk_rh_rule_value_matches_step( $total, $total_min, $total_step ) ) {
+        wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'reason' => 'total_step_mismatch', 'total' => $total, 'min' => $total_min, 'step' => $total_step, 'productId' => $product_id ], 'warning' );
         wc_add_notice( sprintf( __( 'Total participants must follow step %d starting from %d.', 'onsite-booking-system' ), max( 1, $total_step ), $total_min ), 'error' );
         return false;
     }
@@ -796,6 +968,62 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
 }
 
 add_filter( 'woocommerce_add_to_cart_validation', 'wk_rh_validate_main_booking_selection', 25, 3 );
+function wk_rh_restore_booking_session_from_post( $bm_id ) {
+    if ( ! function_exists( 'WC' ) || ! WC()->session ) {
+        return null;
+    }
+
+    $proposal_json = isset( $_POST['booking_proposal'] ) ? wp_unslash( (string) $_POST['booking_proposal'] ) : '';
+    if ( $proposal_json === '' ) {
+        return null;
+    }
+
+    $proposal = json_decode( $proposal_json, true );
+    if ( ! is_array( $proposal ) || empty( $proposal ) ) {
+        return null;
+    }
+
+    $page_id = isset( $_POST['booking_page_id'] ) ? sanitize_text_field( (string) wp_unslash( $_POST['booking_page_id'] ) ) : '';
+    $resource_id = isset( $_POST['booking_resource_id'] ) ? sanitize_text_field( (string) wp_unslash( $_POST['booking_resource_id'] ) ) : '';
+    $product_id = isset( $_POST['booking_product_id'] ) ? sanitize_text_field( (string) wp_unslash( $_POST['booking_product_id'] ) ) : '';
+    $page_product_limits = isset( $_POST['booking_page_product_limits'] ) ? json_decode( wp_unslash( (string) $_POST['booking_page_product_limits'] ), true ) : null;
+    $page_products = isset( $_POST['booking_page_products'] ) ? json_decode( wp_unslash( (string) $_POST['booking_page_products'] ), true ) : null;
+    $booking_location = isset( $_POST['booking_location'] ) ? sanitize_text_field( (string) wp_unslash( $_POST['booking_location'] ) ) : '';
+    $quantity = isset( $_POST['booking_quantity'] ) ? max( 1, intval( $_POST['booking_quantity'] ) ) : 1;
+
+    if ( $product_id === '' ) {
+        $product_id = (string) $bm_id;
+    }
+
+    if ( $page_id === '' || $resource_id === '' ) {
+        return null;
+    }
+
+    $session_booking = [
+        'proposal'        => $proposal,
+        'pageId'          => $page_id,
+        'resourceId'      => $resource_id,
+        'productId'       => $product_id,
+        'quantity'        => $quantity,
+        'pageProductLimits' => is_array( $page_product_limits ) ? $page_product_limits : null,
+        'pageProducts'    => is_array( $page_products ) ? array_values( $page_products ) : [],
+        'bookingLocation' => $booking_location,
+        'orderId'         => '',
+        'orderItemId'     => '',
+        'expiresAt'       => '',
+    ];
+
+    WC()->session->set( 'rh_bmi_booking', $session_booking );
+
+    if ( ! WC()->session->get( 'booking_supplement' ) ) {
+        WC()->session->set( 'booking_supplement', [
+            'supplements' => [],
+        ] );
+    }
+
+    return $session_booking;
+}
+
 function wk_rh_validate_main_booking_selection( $passed, $product_id, $quantity ) {
     if ( ! $passed ) {
         return false;
@@ -817,26 +1045,48 @@ function wk_rh_validate_main_booking_selection( $passed, $product_id, $quantity 
     $booking_time = isset( $_POST['booking_time'] ) ? sanitize_text_field( (string) $_POST['booking_time'] ) : '';
 
     if ( $booking_date === '' || $booking_time === '' ) {
+        wk_rh_log_user_event( 'booking.selection_validation_failed', [ 'reason' => 'missing_date_or_time', 'productId' => $product_id ], 'warning' );
         wc_add_notice( __( 'Vælg venligst både dato og tidspunkt før du tilføjer til kurv.', 'racehall-wc-ui' ), 'error' );
         return false;
     }
 
     if ( ! function_exists( 'WC' ) || ! WC()->session ) {
+        wk_rh_log_user_event( 'booking.selection_validation_failed', [ 'reason' => 'missing_session', 'productId' => $product_id ], 'error' );
         wc_add_notice( __( 'Booking session mangler. Opdater siden og prøv igen.', 'racehall-wc-ui' ), 'error' );
         return false;
     }
 
     $session_booking = WC()->session->get( 'rh_bmi_booking' );
     if ( ! is_array( $session_booking ) || empty( $session_booking['proposal'] ) ) {
-        wc_add_notice( __( 'Vælg et gyldigt tidspunkt før du tilføjer til kurv.', 'racehall-wc-ui' ), 'error' );
+        $session_booking = wk_rh_restore_booking_session_from_post( $bm_id );
+        if ( ! is_array( $session_booking ) || empty( $session_booking['proposal'] ) ) {
+            wk_rh_log_user_event( 'booking.selection_validation_failed', [ 'reason' => 'missing_proposal', 'productId' => $product_id, 'bmProductId' => $bm_id ], 'warning' );
+            wc_add_notice( __( 'Vælg et gyldigt tidspunkt før du tilføjer til kurv.', 'racehall-wc-ui' ), 'error' );
+            return false;
+        }
+    }
+
+    $session_page_id = isset( $session_booking['pageId'] ) ? trim( (string) $session_booking['pageId'] ) : '';
+    $session_resource_id = isset( $session_booking['resourceId'] ) ? trim( (string) $session_booking['resourceId'] ) : '';
+    if ( $session_page_id === '' || $session_resource_id === '' ) {
+        wk_rh_log_user_event( 'booking.selection_validation_failed', [ 'reason' => 'missing_page_or_resource_id', 'productId' => $product_id, 'bmProductId' => $bm_id ], 'warning' );
+        wc_add_notice( __( 'Bookingdata mangler. Vælg tidspunkt igen før du tilføjer til kurv.', 'racehall-wc-ui' ), 'error' );
         return false;
     }
 
     $session_product_id = isset( $session_booking['productId'] ) ? (string) $session_booking['productId'] : '';
     if ( $session_product_id !== '' && $session_product_id !== (string) $bm_id ) {
+        wk_rh_log_user_event( 'booking.selection_validation_failed', [ 'reason' => 'product_mismatch', 'productId' => $product_id, 'sessionProductId' => $session_product_id, 'bmProductId' => (string) $bm_id ], 'warning' );
         wc_add_notice( __( 'Den valgte tid matcher ikke produktet. Vælg tidspunkt igen.', 'racehall-wc-ui' ), 'error' );
         return false;
     }
+
+    wk_rh_log_user_event( 'booking.selection_validated', [
+        'productId' => $product_id,
+        'bmProductId' => (string) $bm_id,
+        'bookingDate' => $booking_date,
+        'bookingTime' => $booking_time,
+    ] );
 
     return $passed;
 }
@@ -928,6 +1178,7 @@ add_action( 'wp_ajax_rh_save_proposal', 'wk_rh_save_proposal' );
 add_action( 'wp_ajax_nopriv_rh_save_proposal', 'wk_rh_save_proposal' );
 function wk_rh_save_proposal() {
     if ( ! isset( $_POST['nonce'] ) || ! wp_verify_nonce( $_POST['nonce'], 'my_ajax_nonce' ) ) {
+        wk_rh_log_user_event( 'proposal.save_rejected', [ 'reason' => 'invalid_nonce' ], 'warning' );
         wp_send_json_error( 'Invalid nonce', 403 );
     }
 
@@ -936,10 +1187,18 @@ function wk_rh_save_proposal() {
     $resource_id = isset( $_POST['resourceId'] ) ? sanitize_text_field( $_POST['resourceId'] ) : '';
     $product_id  = isset( $_POST['productId'] ) ? sanitize_text_field( $_POST['productId'] ) : '';
     $quantity    = isset( $_POST['quantity'] ) ? max( 1, intval( $_POST['quantity'] ) ) : 1;
+    $page_product_limits = isset( $_POST['pageProductLimits'] ) ? json_decode( stripslashes( (string) $_POST['pageProductLimits'] ), true ) : null;
+    $page_products = isset( $_POST['pageProducts'] ) ? json_decode( stripslashes( (string) $_POST['pageProducts'] ), true ) : null;
     $booking_location = isset( $_POST['bookingLocation'] ) ? sanitize_text_field( $_POST['bookingLocation'] ) : '';
 
     if ( empty( $proposal ) ) {
+        wk_rh_log_user_event( 'proposal.save_rejected', [ 'reason' => 'missing_proposal', 'productId' => $product_id, 'pageId' => $page_id, 'resourceId' => $resource_id ], 'warning' );
         wp_send_json_error( 'Missing proposal', 400 );
+    }
+
+    if ( $page_id === '' || $resource_id === '' ) {
+        wk_rh_log_user_event( 'proposal.save_rejected', [ 'reason' => 'missing_page_or_resource_id', 'productId' => $product_id, 'pageId' => $page_id, 'resourceId' => $resource_id ], 'warning' );
+        wp_send_json_error( 'Missing pageId or resourceId', 400 );
     }
 
     if ( WC()->session ) {
@@ -949,6 +1208,8 @@ function wk_rh_save_proposal() {
             'resourceId'      => $resource_id,
             'productId'       => $product_id,
             'quantity'        => $quantity,
+            'pageProductLimits' => is_array( $page_product_limits ) ? $page_product_limits : null,
+            'pageProducts'    => is_array( $page_products ) ? array_values( $page_products ) : [],
             'bookingLocation' => $booking_location,
             'orderId'         => '',
             'orderItemId'     => '',
@@ -959,6 +1220,15 @@ function wk_rh_save_proposal() {
             'supplements' => [],
         ] );
     }
+
+    wk_rh_log_user_event( 'proposal.saved', [
+        'productId' => $product_id,
+        'pageId' => $page_id,
+        'resourceId' => $resource_id,
+        'quantity' => $quantity,
+        'bookingLocation' => $booking_location,
+        'pageProductsCount' => is_array( $page_products ) ? count( $page_products ) : 0,
+    ] );
 
     wp_send_json_success( [
         'stored' => true,
@@ -999,6 +1269,11 @@ function wk_rh_mark_payment_confirmed( WC_Order $order, $response_body = '' ) {
     $order->update_meta_data( '_wk_rh_payment_confirmed', 'yes' );
     $order->save();
     $order->add_order_note( 'Onsite booking: payment/confirm synced to upstream.' );
+    wk_rh_log_user_event( 'order.payment_confirmed', [
+        'wcOrderId' => (string) $order->get_id(),
+        'orderId' => (string) wk_rh_get_order_upstream_order_id( $order ),
+        'location' => (string) wk_rh_get_order_booking_location( $order ),
+    ] );
 
     if ( function_exists( 'wk_rh_release_active_hold' ) ) {
         $upstream_order_id = wk_rh_get_order_upstream_order_id( $order );
@@ -1074,6 +1349,12 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
 
     if ( is_wp_error( $response ) ) {
         $order->add_order_note( 'Onsite booking payment/confirm failed: ' . $response->get_error_message() );
+        wk_rh_log_user_event( 'order.payment_confirm_failed', [
+            'wcOrderId' => (string) $order->get_id(),
+            'orderId' => (string) $upstream_order_id,
+            'location' => (string) $location,
+            'error' => $response->get_error_message(),
+        ], 'error' );
         return;
     }
 
@@ -1081,6 +1362,12 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
     if ( $code >= 200 && $code < 300 ) {
         wk_rh_mark_payment_confirmed( $order, wp_remote_retrieve_body( $response ) );
     } else {
+        wk_rh_log_user_event( 'order.payment_confirm_failed', [
+            'wcOrderId' => (string) $order->get_id(),
+            'orderId' => (string) $upstream_order_id,
+            'location' => (string) $location,
+            'httpCode' => $code,
+        ], 'error' );
         wk_rh_log_upstream_event( 'error', 'Upstream payment/confirm failed', [
             'operation' => 'payment_confirm',
             'orderId' => (string) $upstream_order_id,
@@ -1145,6 +1432,12 @@ function wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location = '', 
             if ( function_exists( 'wk_rh_release_active_hold' ) ) {
                 wk_rh_release_active_hold( $upstream_order_id );
             }
+            wk_rh_log_user_event( 'order.cancel_synced', [
+                'orderId' => (string) $upstream_order_id,
+                'location' => (string) $location,
+                'path' => (string) $path,
+                'extra' => $extra_context,
+            ] );
             return true;
         }
     }

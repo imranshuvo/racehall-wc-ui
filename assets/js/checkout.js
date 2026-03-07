@@ -1,6 +1,37 @@
 (function () {
     'use strict';
 
+    function logBookingClientEvent(eventName, context) {
+        var logger = window.RH_LOGGER || null;
+        if (!logger || !logger.ajax_url || !logger.nonce || !eventName) return;
+
+        var payload = new URLSearchParams({
+            action: 'rh_log_client_event',
+            nonce: logger.nonce,
+            event: String(eventName),
+            context: JSON.stringify(context || {})
+        });
+
+        try {
+            if (navigator.sendBeacon) {
+                var blob = new Blob([payload.toString()], { type: 'application/x-www-form-urlencoded; charset=UTF-8' });
+                navigator.sendBeacon(logger.ajax_url, blob);
+                return;
+            }
+        } catch (e) {
+        }
+
+        try {
+            fetch(logger.ajax_url, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: payload
+            }).catch(function () {});
+        } catch (e) {
+        }
+    }
+
     function pad2(value) {
         return String(value).padStart(2, '0');
     }
@@ -39,6 +70,7 @@
         function redirectAfterExpiry() {
             if (redirected) return;
             redirected = true;
+            logBookingClientEvent('checkout_hold_expired', { fallbackRedirect: fallbackRedirect });
 
             if (!ajaxUrl || !nonce || typeof fetch !== 'function') {
                 window.setTimeout(function () {
@@ -106,6 +138,7 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         initHoldCountdown();
+        logBookingClientEvent('checkout_page_ready', {});
 
         const i18n = window.RH_CHECKOUT_I18N || {};
         const requiredNotice = i18n.requiredNotice || '';
@@ -114,9 +147,35 @@
         const payLaterText = i18n.payLater || '';
 
         const payLaterBtn = document.querySelector('.payment-button.payment-later');
+
+        function redirectToProductIfNeeded() {
+            const redirectLink = document.querySelector('.rh-booking-slot-unavailable-link');
+            if (!redirectLink || !redirectLink.href) return;
+
+            logBookingClientEvent('checkout_redirecting_to_product', { href: redirectLink.href });
+
+            window.setTimeout(function () {
+                window.location.href = redirectLink.href;
+            }, 1600);
+        }
+
+        redirectToProductIfNeeded();
+
+        if (window.jQuery && typeof window.jQuery === 'function') {
+            window.jQuery(document.body).on('checkout_error', function () {
+                logBookingClientEvent('checkout_error', {});
+                if (payLaterBtn) {
+                    payLaterBtn.disabled = false;
+                    payLaterBtn.textContent = payLaterText;
+                }
+                redirectToProductIfNeeded();
+            });
+        }
+
         if (!payLaterBtn) return;
 
         payLaterBtn.addEventListener('click', function () {
+            logBookingClientEvent('checkout_pay_later_clicked', {});
             const form = document.querySelector('form.checkout.woocommerce-checkout');
             if (!form) return;
 
@@ -141,6 +200,7 @@
             }
 
             if (!valid) {
+                logBookingClientEvent('checkout_validation_blocked', { reason: 'required_fields_missing' });
                 showNotice(requiredNotice, 'error');
                 return;
             }
@@ -151,11 +211,14 @@
 
             const codInput = form.querySelector('input[name="payment_method"][value="cod"]');
             if (!codInput) {
+                logBookingClientEvent('checkout_validation_blocked', { reason: 'cod_missing' });
                 showNotice(codMissingNotice, 'error');
                 payLaterBtn.disabled = false;
                 payLaterBtn.textContent = payLaterText;
                 return;
             }
+
+            logBookingClientEvent('checkout_place_order_triggered', { paymentMethod: 'cod' });
 
             codInput.checked = true;
             codInput.dispatchEvent(new Event('change', { bubbles: true }));

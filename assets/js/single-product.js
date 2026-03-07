@@ -17,9 +17,45 @@ let currentQuantityRules = {
     total: { min: 1, max: null, step: 1 }
 }
 let currentPageProductLimits = null
+let currentPageProducts = []
+
+function logBookingClientEvent(eventName, context = {}) {
+    const logger = window.RH_LOGGER || null
+    if (!logger || !logger.ajax_url || !logger.nonce || !eventName) return
+
+    const payload = new URLSearchParams({
+        action: 'rh_log_client_event',
+        nonce: logger.nonce,
+        event: String(eventName),
+        context: JSON.stringify(context || {})
+    })
+
+    try {
+        if (navigator.sendBeacon) {
+            const blob = new Blob([payload.toString()], { type: 'application/x-www-form-urlencoded; charset=UTF-8' })
+            navigator.sendBeacon(logger.ajax_url, blob)
+            return
+        }
+    } catch (e) {
+    }
+
+    try {
+        fetch(logger.ajax_url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: payload
+        }).catch(() => {})
+    } catch (e) {
+    }
+}
 
 function getBookingSubmitButton() {
     return document.querySelector('.booking-s form.cart .single_add_to_cart_button')
+}
+
+function isBookingProductAvailable() {
+    return Boolean(window.RH_PRODUCT_AVAILABLE) && Boolean(window.RH_PRODUCT_ID)
 }
 
 function setBookingSubmitEnabled(isEnabled) {
@@ -591,6 +627,47 @@ function updateSummaryTime(timeStr) {
     }
 }
 
+function setBookingProposalState(options = {}) {
+    const proposalInput = document.getElementById('booking_proposal')
+    const pageIdInput = document.getElementById('booking_page_id')
+    const resourceIdInput = document.getElementById('booking_resource_id')
+    const productIdInput = document.getElementById('booking_product_id')
+    const pageProductLimitsInput = document.getElementById('booking_page_product_limits')
+    const pageProductsInput = document.getElementById('booking_page_products')
+
+    const proposal = options.proposal && typeof options.proposal === 'object'
+        ? JSON.stringify(options.proposal)
+        : ''
+    const pageProductLimits = options.pageProductLimits && typeof options.pageProductLimits === 'object'
+        ? JSON.stringify(options.pageProductLimits)
+        : ''
+    const pageProducts = Array.isArray(options.pageProducts)
+        ? JSON.stringify(options.pageProducts)
+        : ''
+
+    if (proposalInput) proposalInput.value = proposal
+    if (pageIdInput) pageIdInput.value = options.pageId ? String(options.pageId) : ''
+    if (resourceIdInput) resourceIdInput.value = options.resourceId ? String(options.resourceId) : ''
+    if (productIdInput && options.productId) productIdInput.value = String(options.productId)
+    if (pageProductLimitsInput) pageProductLimitsInput.value = pageProductLimits
+    if (pageProductsInput) pageProductsInput.value = pageProducts
+}
+
+function resetBookingTimeSelection(options = {}) {
+    const shouldKeepMessage = options.keepMessage === true
+    const container = document.getElementById('booking-time-slots-section') || document.querySelector('.time-slots')
+    if (container) {
+        container.querySelectorAll('.time-slot.selected').forEach(slot => slot.classList.remove('selected'))
+    }
+
+    updateSummaryTime('')
+    setBookingProposalState()
+
+    if (!shouldKeepMessage) {
+        setBookingValidationMessage('time', '')
+    }
+}
+
 function getBookingValidationMessageElement(type) {
     if (type === 'date') return document.getElementById('booking-date-error')
     if (type === 'time') return document.getElementById('booking-time-error')
@@ -666,6 +743,20 @@ function hasSelectedBookingTime() {
     return !!(input && String(input.value || '').trim())
 }
 
+function hasSelectedBookingProposal() {
+    const input = document.getElementById('booking_proposal')
+    return !!(input && String(input.value || '').trim())
+}
+
+function hasRequiredBookingContext() {
+    const pageIdInput = document.getElementById('booking_page_id')
+    const resourceIdInput = document.getElementById('booking_resource_id')
+    return !!(
+        pageIdInput && String(pageIdInput.value || '').trim() &&
+        resourceIdInput && String(resourceIdInput.value || '').trim()
+    )
+}
+
 function validateBookingSelection(options = {}) {
     const shouldFocus = options.shouldFocus !== false
 
@@ -680,6 +771,18 @@ function validateBookingSelection(options = {}) {
 
     if (!hasSelectedBookingTime()) {
         setBookingValidationMessage('time', 'Vælg venligst et tidspunkt for at fortsætte.')
+        if (shouldFocus) focusTimeSlotsSection()
+        return false
+    }
+
+    if (!hasSelectedBookingProposal()) {
+        setBookingValidationMessage('time', 'Vælg venligst tidspunktet igen for at fortsætte.')
+        if (shouldFocus) focusTimeSlotsSection()
+        return false
+    }
+
+    if (!hasRequiredBookingContext()) {
+        setBookingValidationMessage('time', 'Bookingdata mangler. Vælg tidspunktet igen for at fortsætte.')
         if (shouldFocus) focusTimeSlotsSection()
         return false
     }
@@ -705,12 +808,21 @@ function getBookingLocation() {
 }
 
 async function fetchAvailabilityForMonth(month, year) {
+    if (!isBookingProductAvailable()) {
+        availabilityState = 'error'
+        availabilityMap = {}
+        const daysContainer = document.getElementById('calendarDays')
+        if (daysContainer) {
+            daysContainer.innerHTML = ''
+        }
+        return {}
+    }
+
     // Show spinner in calendar UI
     const daysContainer = document.getElementById('calendarDays')
     if (daysContainer) {
         daysContainer.innerHTML = `<span class="calendar-loading"><div class="spinner"></div></span>`
     }
-    if (!window.RH_PRODUCT_ID) return {}
     const yyyy = year
     const mm = String(month + 1).padStart(2, '0')
     const firstDay = `${yyyy}-${mm}-01`
@@ -842,6 +954,7 @@ function renderCalendar(month, year) {
                 selectedDate = new Date(year, month, d)
                 renderCalendar(currentMonth, currentYear)
                 updateSummaryDate(selectedDate)
+                logBookingClientEvent('date_selected', { date: dateKey, productId: window.RH_PRODUCT_ID || 0 })
                 fetchAndRenderTimeslots(dateKey)
             })
         }
@@ -867,8 +980,15 @@ function renderCalendar(month, year) {
 }
 
 async function fetchAndRenderTimeslots(dateStr) {
-    if (!window.RH_PRODUCT_ID) return
-    updateSummaryTime('')
+    if (!isBookingProductAvailable()) {
+        const container = document.querySelector('.time-slots')
+        if (container) {
+            container.innerHTML = ''
+        }
+        setBookingSubmitEnabled(false)
+        return
+    }
+    resetBookingTimeSelection()
     setBookingSubmitEnabled(false)
     const container = document.querySelector('.time-slots')
     if (container) {
@@ -899,11 +1019,20 @@ async function fetchAndRenderTimeslots(dateStr) {
         if (!container) return
         container.innerHTML = ''
         if (data.success === false || data.data === false) {
+            logBookingClientEvent('timeslots_render_failed', { date: dateStr, productId, quantity: getTotalQuantity() })
             container.innerHTML = `<span class="calendar-error">${data.message || 'Ingen tider tilgængelige.'}</span>`
             setBookingSubmitEnabled(true)
             return
         }
+        logBookingClientEvent('timeslots_loaded', {
+            date: dateStr,
+            productId,
+            quantity: getTotalQuantity(),
+            proposalCount: data.proposals && Array.isArray(data.proposals) ? data.proposals.length : 0
+        })
+        const responsePageId = data && data.pageId ? String(data.pageId) : ''
         currentPageProductLimits = (data && typeof data.pageProductLimits === 'object') ? data.pageProductLimits : null
+        currentPageProducts = (data && Array.isArray(data.pageProducts)) ? data.pageProducts : []
         if (data.proposals && data.proposals.length) {
             data.proposals.forEach(proposal => {
                 const blocks = Array.isArray(proposal.blocks) ? proposal.blocks : []
@@ -928,14 +1057,46 @@ async function fetchAndRenderTimeslots(dateStr) {
                         container.querySelectorAll('.time-slot').forEach(s => s.classList.remove('selected'))
                         this.classList.add('selected')
                         updateSummaryTime(this.getAttribute('data-time'))
+                        const proposalPageId = responsePageId || (proposal && proposal.pageId ? String(proposal.pageId) : '')
+                        setBookingProposalState({
+                            proposal,
+                            pageId: proposalPageId,
+                            resourceId,
+                            productId,
+                            pageProductLimits: currentPageProductLimits,
+                            pageProducts: currentPageProducts
+                        })
                         applyProposalQuantityRules(proposal, currentPageProductLimits)
+                        logBookingClientEvent('timeslot_selected', {
+                            date: dateStr,
+                            productId,
+                            resourceId,
+                            time: this.getAttribute('data-time') || ''
+                        })
 
                         // Show spinner while saving proposal
                         // container.innerHTML = `<span class="calendar-loading"><div class="spinner"></div></span>`
 
                         // Await the saveProposalToSession call
-                        await saveProposalToSession(proposal, resourceId, productId)
-                        setBookingSubmitEnabled(true)
+                        const saveSucceeded = await saveProposalToSession(proposal, proposalPageId, resourceId, productId)
+                        if (saveSucceeded) {
+                            logBookingClientEvent('proposal_saved', {
+                                productId,
+                                resourceId,
+                                date: dateStr,
+                                quantity: getTotalQuantity()
+                            })
+                            setBookingSubmitEnabled(true)
+                        } else {
+                            logBookingClientEvent('proposal_save_failed', {
+                                productId,
+                                resourceId,
+                                date: dateStr,
+                                quantity: getTotalQuantity()
+                            })
+                            console.warn('Continuing with posted proposal fallback after session save failed.')
+                            setBookingSubmitEnabled(true)
+                        }
 
                         // Re-render the time slots for the same date to remove spinner and restore UI
                         // fetchAndRenderTimeslots(
@@ -1060,6 +1221,18 @@ async function fetchAndRenderTimeslots(dateStr) {
 async function initCalendar() {
     const prevBtn = document.getElementById('prevMonthBtn')
     const nextBtn = document.getElementById('nextMonthBtn')
+    if (!isBookingProductAvailable()) {
+        setBookingSubmitEnabled(false)
+        const daysContainer = document.getElementById('calendarDays')
+        if (daysContainer) {
+            daysContainer.innerHTML = ''
+        }
+        const container = document.querySelector('.time-slots')
+        if (container) {
+            container.innerHTML = ''
+        }
+        return
+    }
     await fetchAvailabilityForMonth(currentMonth, currentYear)
     renderCalendar(currentMonth, currentYear)
     updateMonthNav()
@@ -1118,9 +1291,15 @@ if (document.readyState === 'loading') {
 }
 
 
-async function saveProposalToSession(block, resourceId, productId) {
+async function saveProposalToSession(block, pageId, resourceId, productId) {
     console.log('Saving proposal to session:', block)
-    if (!window.my_ajax_object) return
+    if (!window.my_ajax_object) return false
+    const pageProductLimits = (currentPageProductLimits && typeof currentPageProductLimits === 'object')
+        ? JSON.stringify(currentPageProductLimits)
+        : ''
+    const pageProducts = Array.isArray(currentPageProducts)
+        ? JSON.stringify(currentPageProducts)
+        : ''
     try {
         const res = await fetch(window.my_ajax_object.ajax_url, {
             method: 'POST',
@@ -1129,9 +1308,12 @@ async function saveProposalToSession(block, resourceId, productId) {
             body: new URLSearchParams({
                 action: 'rh_save_proposal',
                 proposal: JSON.stringify(block),
+                pageId: pageId || (block && block.pageId ? String(block.pageId) : ''),
                 resourceId: resourceId || '',
                 productId: productId || '',
                 quantity: String(getTotalQuantity()),
+                pageProductLimits,
+                pageProducts,
                 bookingLocation: getBookingLocation(),
                 nonce: window.my_ajax_object.nonce || ''
             })
@@ -1141,7 +1323,8 @@ async function saveProposalToSession(block, resourceId, productId) {
         console.log('Save proposal response text:', responseText)
         console.log('Save proposal response status:', result)
         if (!result.success) {
-            alert(result.errorMessage || 'Fejl ved lagring af booking. Prøv igen.')
+            console.warn('Could not save proposal to session:', result)
+            return false
         }
         else {
             const addonItems = document.getElementById('addonSummaryItems')
@@ -1151,7 +1334,7 @@ async function saveProposalToSession(block, resourceId, productId) {
                 const supplements = Array.isArray(payload.supplements) ? payload.supplements : []
                 if (!supplements.length) {
                     addonItems.innerHTML = '<span class="summary-label">—</span>'
-                    return
+                    return true
                 }
                 supplements.forEach(supplement => {
                     if (!supplement || !supplement.product) return
@@ -1172,10 +1355,16 @@ async function saveProposalToSession(block, resourceId, productId) {
                     addonItems.appendChild(div)
                 })
             }
+            return true
         }
     } catch (e) {
-        // Non-critical — booking will still work if session already has data
+        logBookingClientEvent('proposal_save_exception', {
+            productId: productId || '',
+            resourceId: resourceId || '',
+            message: e && e.message ? e.message : 'unknown'
+        })
         console.warn('Could not save proposal to session:', e)
+        return false
     }
 }
 
@@ -1184,12 +1373,22 @@ function initBookingAddToCartSubmitGuard() {
     if (!form) return
 
     setBookingSubmitEnabled(true)
+    logBookingClientEvent('product_page_ready', { productId: window.RH_PRODUCT_ID || 0 })
 
     form.addEventListener('submit', function (event) {
         if (!validateBookingSelection({ shouldFocus: true })) {
+            logBookingClientEvent('add_to_cart_blocked', {
+                productId: window.RH_PRODUCT_ID || 0,
+                quantity: getTotalQuantity()
+            })
             event.preventDefault()
             return false
         }
+
+        logBookingClientEvent('add_to_cart_submitted', {
+            productId: window.RH_PRODUCT_ID || 0,
+            quantity: getTotalQuantity()
+        })
 
         return true
     })

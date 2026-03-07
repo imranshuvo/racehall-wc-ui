@@ -240,6 +240,10 @@ html.rh-cart-loading-active .rh-cart-loading {
     gap: 8px;
 }
 
+input.qty-input.addon-qty-display {
+    width: 30px !important;
+}
+
 .counter button,
 .qty-increase,
 .qty-decrease {

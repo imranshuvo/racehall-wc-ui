@@ -36,6 +36,9 @@ if ( ! empty( $racehall_products ) && is_array( $racehall_products ) ) {
     }
 }
 
+$booking_product_available = ! empty( $bm_id ) && is_array( $current_rh_product );
+$booking_unavailable_message = __( 'Dette bookingprodukt findes ikke i det aktive BMI-miljø. Kontrollér bmileisure_id eller skift miljø.', 'racehall-wc-ui' );
+
 
 
 
@@ -44,7 +47,9 @@ if ( ! empty( $racehall_products ) && is_array( $racehall_products ) ) {
 
 <script>
 window.RH_AJAX_URL = "<?php echo admin_url('admin-ajax.php'); ?>";
-window.RH_PRODUCT_ID = <?php echo $bm_id?>;
+window.RH_PRODUCT_ID = <?php echo wp_json_encode( $booking_product_available ? (string) $bm_id : '' ); ?>;
+window.RH_PRODUCT_AVAILABLE = <?php echo wp_json_encode( $booking_product_available ); ?>;
+window.RH_PRODUCT_UNAVAILABLE_MESSAGE = <?php echo wp_json_encode( $booking_unavailable_message ); ?>;
 window.RH_BOOKING_LOCATION = "<?php echo esc_js( $lokation ); ?>";
 window.RH_PRICE_CONFIG = {
     unitPrice: <?php echo wp_json_encode( (float) $product->get_price() ); ?>,
@@ -249,6 +254,9 @@ window.RH_I18N = {
                     </div>
 
                     <div class="accordion-content">
+                        <?php if ( ! $booking_product_available ) : ?>
+                            <p class="booking-validation-message" style="display:block;" aria-live="polite"><?php echo esc_html( $booking_unavailable_message ); ?></p>
+                        <?php endif; ?>
                         <div class="calendar" id="booking-calendar-section" tabindex="-1" role="group" aria-label="<?php esc_attr_e( 'Vælg dato', 'racehall-wc-ui' ); ?>">
                             <div class="month-nav">
                                 <button id="prevMonthBtn" aria-label="Previous month">
@@ -403,6 +411,12 @@ window.RH_I18N = {
                                      <form class="cart" action="<?php echo esc_url( wc_get_cart_url() ); ?>" method="post" enctype="multipart/form-data">
                                         <input type="hidden" name="booking_date" id="booking_date">
                                         <input type="hidden" name="booking_time" id="booking_time">
+                                                     <input type="hidden" name="booking_proposal" id="booking_proposal">
+                                                     <input type="hidden" name="booking_page_id" id="booking_page_id">
+                                                     <input type="hidden" name="booking_resource_id" id="booking_resource_id">
+                                                     <input type="hidden" name="booking_product_id" id="booking_product_id" value="<?php echo esc_attr( $bm_id ); ?>">
+                                                    <input type="hidden" name="booking_page_product_limits" id="booking_page_product_limits">
+                                                    <input type="hidden" name="booking_page_products" id="booking_page_products">
                                         <input type="hidden" name="booking_adults" id="booking_adults" value="1">
                                         <input type="hidden" name="booking_children" id="booking_children" value="0">
                                         <input type="hidden" name="booking_quantity" id="booking_quantity" value="1">
@@ -412,7 +426,7 @@ window.RH_I18N = {
                                         <input type="hidden" name="quantity" id="cart_quantity" value="1" />
                                         <!-- Optional booking meta (populated by JS) -->
 
-                                        <button type="submit" class="single_add_to_cart_button button alt add-to-cart-button" aria-disabled="false"><?php esc_html_e( 'Tilføj til kurv', 'racehall-wc-ui' ); ?></button>
+                                        <button type="submit" class="single_add_to_cart_button button alt add-to-cart-button" aria-disabled="<?php echo $booking_product_available ? 'false' : 'true'; ?>"<?php disabled( ! $booking_product_available ); ?>><?php esc_html_e( 'Tilføj til kurv', 'racehall-wc-ui' ); ?></button>
                                     </form>
                             <!-- <button class="add-to-cart-button">Tilføj til kurv</button> -->
                         </div>
