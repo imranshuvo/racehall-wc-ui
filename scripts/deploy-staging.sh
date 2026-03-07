@@ -36,6 +36,7 @@ set ftp:passive-mode true
 mkdir -p "$FTP_REMOTE_PATH"
 mirror -R --delete --verbose \
   --exclude-glob AGENT-INSTRUCTIONS.md \
+  --exclude-glob *.log \
   --exclude-glob .git/ \
   --exclude-glob .github/ \
   --exclude-glob .gitignore \

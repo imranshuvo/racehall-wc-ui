@@ -94,18 +94,6 @@ if ( empty( $supplement_rows ) && is_array( $supplement ) && ! empty( $supplemen
     $supplement_rows = $supplement['supplements'];
 }
 
-if ( empty( $supplement_rows ) && function_exists( 'WC' ) && WC()->cart && ! WC()->cart->is_empty() ) {
-    foreach ( WC()->cart->get_cart() as $cart_item ) {
-        if ( ! empty( $cart_item['is_addon'] ) ) {
-            continue;
-        }
-        if ( ! empty( $cart_item['bmi_page_products'] ) && is_array( $cart_item['bmi_page_products'] ) ) {
-            $supplement_rows = $cart_item['bmi_page_products'];
-            break;
-        }
-    }
-}
-
 $rh_pick_qty_rule = static function ( $source, array $keys, $fallback = null ) {
     if ( ! is_array( $source ) ) {
         return $fallback;
@@ -223,12 +211,10 @@ $continue_shopping_url = function_exists( 'wk_rh_get_main_booking_product_url' )
             if ( ! empty( $supplement_rows ) ) {
                 foreach ( $supplement_rows as $addon ) {
                     $addon_row = is_array( $addon ) ? $addon : [];
-                    $product = [];
-                    if ( isset( $addon_row['product'] ) && is_array( $addon_row['product'] ) ) {
-                        $product = $addon_row['product'];
-                    } elseif ( ! empty( $addon_row ) ) {
-                        $product = $addon_row;
+                    if ( function_exists( 'wk_rh_normalize_booking_supplement_row' ) ) {
+                        $addon_row = wk_rh_normalize_booking_supplement_row( $addon_row );
                     }
+                    $product = ! empty( $addon_row ) ? $addon_row : [];
                     if ( empty( $product ) ) {
                         continue;
                     }
@@ -249,9 +235,9 @@ $continue_shopping_url = function_exists( 'wk_rh_get_main_booking_product_url' )
                     $name = esc_html( $addon_name );
                     $amount_raw = isset($product['prices'][0]['amount']) && is_numeric($product['prices'][0]['amount']) ? (float) $product['prices'][0]['amount'] : 0.0;
                     $price = number_format($amount_raw, 2, ',', '.');
-                    $currency = isset($product['prices'][0]['shortName']) ? esc_html($product['prices'][0]['shortName']) : '';
+                    $currency = isset($product['prices'][0]['shortName']) ? esc_html($product['prices'][0]['shortName']) : ( isset( $product['prices'][0]['shortname'] ) ? esc_html( $product['prices'][0]['shortname'] ) : '' );
                     $addon_image = '';
-                    if ( ! empty( $product['hasPicture'] ) && function_exists( 'wk_rh_get_product_image_data_uri' ) ) {
+                    if ( $upstream_id !== '' && function_exists( 'wk_rh_get_product_image_data_uri' ) ) {
                         $addon_image = wk_rh_get_product_image_data_uri( $cart_location, $upstream_id );
                     }
 

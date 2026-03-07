@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.47
+ * Version: 1.48
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.47' );
+define( 'RACEHALL_WC_UI_VERSION', '1.48' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -2168,8 +2168,19 @@ function wk_rh_block_addon_without_parent( $passed, $product_id, $quantity ) {
         return false;
     }
 
+    $main_cart_item_key = wk_rh_get_main_booking_cart_item_key();
+    $hold_sync = wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, [], 'addon_add_validation' );
+    if ( empty( $hold_sync['success'] ) ) {
+        $message = isset( $hold_sync['userMessage'] ) ? (string) $hold_sync['userMessage'] : __( 'Booking kunne ikke klargøres til add-ons. Vælg tidspunkt igen.', 'racehall-wc-ui' );
+        wc_add_notice( $message, 'error' );
+        return false;
+    }
+
     $addon_upstream_id = isset( $_POST['addon_upstream_id'] )
         ? trim( sanitize_text_field( wp_unslash( (string) $_POST['addon_upstream_id'] ) ) )
+        : '';
+    $addon_supplement_id = isset( $_POST['addon_supplement_id'] )
+        ? trim( sanitize_text_field( wp_unslash( (string) $_POST['addon_supplement_id'] ) ) )
         : '';
 
     if ( $addon_upstream_id === '' ) {
@@ -2177,6 +2188,25 @@ function wk_rh_block_addon_without_parent( $passed, $product_id, $quantity ) {
         wc_add_notice( __( 'Add-on mangler upstream ID.', 'racehall-wc-ui' ), 'error' );
         return false;
     }
+
+    $resolved_addon_upstream_id = wk_rh_get_cart_item_addon_upstream_id( [
+        'addon_upstream_id' => $addon_upstream_id,
+        'addon_supplement_id' => $addon_supplement_id,
+        'addon_display_name' => isset( $_POST['addon_display_name'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['addon_display_name'] ) ) : '',
+    ], isset( $hold_sync['supplements'] ) && is_array( $hold_sync['supplements'] ) ? $hold_sync['supplements'] : [] );
+
+    if ( $resolved_addon_upstream_id === '' ) {
+        wk_rh_log_user_event( 'addon.add_blocked', [
+            'reason' => 'supplement_not_available_for_booking',
+            'productId' => $product_id,
+            'requestedUpstreamId' => $addon_upstream_id,
+            'requestedSupplementId' => $addon_supplement_id,
+        ], 'warning' );
+        wc_add_notice( __( 'Det valgte add-on er ikke tilgængeligt for den aktuelle booking.', 'racehall-wc-ui' ), 'error' );
+        return false;
+    }
+
+    $_POST['addon_upstream_id'] = $resolved_addon_upstream_id;
 
     return $passed;
 }
@@ -2384,7 +2414,110 @@ function wk_rh_validate_checkout_booking_quantity( array $cart_item, $quantity, 
     return true;
 }
 
+function wk_rh_get_case_insensitive_array_value( array $source, array $keys, $default = null ) {
+    foreach ( $keys as $key ) {
+        if ( array_key_exists( $key, $source ) ) {
+            return $source[ $key ];
+        }
+    }
+
+    $lower_map = [];
+    foreach ( $source as $key => $value ) {
+        if ( is_string( $key ) ) {
+            $lower_map[ strtolower( $key ) ] = $value;
+        }
+    }
+
+    foreach ( $keys as $key ) {
+        $lookup = strtolower( (string) $key );
+        if ( array_key_exists( $lookup, $lower_map ) ) {
+            return $lower_map[ $lookup ];
+        }
+    }
+
+    return $default;
+}
+
+function wk_rh_normalize_upstream_prices( $prices ) {
+    if ( ! is_array( $prices ) ) {
+        return [];
+    }
+
+    $normalized_prices = [];
+    foreach ( $prices as $price ) {
+        if ( ! is_array( $price ) ) {
+            continue;
+        }
+
+        $normalized_price = $price;
+        $short_name = wk_rh_get_case_insensitive_array_value( $price, [ 'shortName', 'shortname' ], null );
+        if ( $short_name !== null ) {
+            $normalized_price['shortName'] = $short_name;
+            $normalized_price['shortname'] = $short_name;
+        }
+
+        $amount = wk_rh_get_case_insensitive_array_value( $price, [ 'amount' ], null );
+        if ( $amount !== null ) {
+            $normalized_price['amount'] = $amount;
+        }
+
+        $normalized_prices[] = $normalized_price;
+    }
+
+    return $normalized_prices;
+}
+
+function wk_rh_normalize_booking_supplement_row( array $supplement ) {
+    $product = isset( $supplement['product'] ) && is_array( $supplement['product'] ) ? $supplement['product'] : [];
+    $source = ! empty( $product ) ? $product : $supplement;
+    $normalized = $supplement;
+
+    $field_map = [
+        'id' => [ 'id' ],
+        'name' => [ 'name' ],
+        'info' => [ 'info' ],
+        'hasPicture' => [ 'hasPicture', 'haspicture' ],
+        'minAmount' => [ 'minAmount', 'minamount' ],
+        'maxAmount' => [ 'maxAmount', 'maxamount' ],
+        'resourceId' => [ 'resourceId', 'resourceid' ],
+        'resourceKind' => [ 'resourceKind', 'resourcekind' ],
+        'kind' => [ 'kind' ],
+        'saleMode' => [ 'saleMode', 'salemode' ],
+        'bookingMode' => [ 'bookingMode', 'bookingmode' ],
+        'productGroup' => [ 'productGroup', 'productgroup' ],
+        'dynamicGroups' => [ 'dynamicGroups', 'dynamicgroups' ],
+        'isEntry' => [ 'isEntry', 'isentry' ],
+        'isCombo' => [ 'isCombo', 'iscombo' ],
+        'minAge' => [ 'minAge', 'minage' ],
+        'maxAge' => [ 'maxAge', 'maxage' ],
+        'isMembersOnly' => [ 'isMembersOnly', 'ismembersonly' ],
+        'pageId' => [ 'pageId', 'pageid' ],
+    ];
+
+    foreach ( $field_map as $target_key => $candidate_keys ) {
+        $value = wk_rh_get_case_insensitive_array_value( $normalized, $candidate_keys, null );
+        if ( $value === null ) {
+            $value = wk_rh_get_case_insensitive_array_value( $source, $candidate_keys, null );
+        }
+
+        if ( $value !== null ) {
+            $normalized[ $target_key ] = $value;
+        }
+    }
+
+    $prices = wk_rh_get_case_insensitive_array_value( $normalized, [ 'prices' ], null );
+    if ( $prices === null ) {
+        $prices = wk_rh_get_case_insensitive_array_value( $source, [ 'prices', 'price' ], null );
+    }
+    if ( $prices !== null ) {
+        $normalized['prices'] = wk_rh_normalize_upstream_prices( $prices );
+    }
+
+    return $normalized;
+}
+
 function wk_rh_get_booking_supplement_sell_product_id( array $supplement ) {
+    $supplement = wk_rh_normalize_booking_supplement_row( $supplement );
     return isset( $supplement['id'] ) ? trim( (string) $supplement['id'] ) : '';
 }
 
@@ -2394,27 +2527,32 @@ function wk_rh_get_cart_item_addon_upstream_id( array $cart_item, array $supplem
         $stored_upstream_id = trim( (string) $cart_item['addon_upstream_product_id'] );
     }
 
-    if ( $stored_upstream_id !== '' || empty( $supplements ) ) {
+    if ( empty( $supplements ) ) {
         return $stored_upstream_id;
     }
 
     $stored_supplement_id = isset( $cart_item['addon_supplement_id'] ) ? trim( (string) $cart_item['addon_supplement_id'] ) : '';
-    if ( $stored_supplement_id === '' ) {
-        return '';
-    }
-
     $available_supplement_ids = [];
+    $available_upstream_ids = [];
 
     foreach ( $supplements as $supplement ) {
         if ( ! is_array( $supplement ) ) {
             continue;
         }
 
+        $supplement = wk_rh_normalize_booking_supplement_row( $supplement );
+
         $supplement_id = isset( $supplement['id'] ) ? trim( (string) $supplement['id'] ) : '';
         if ( $supplement_id !== '' ) {
             $available_supplement_ids[] = $supplement_id;
+            $available_upstream_ids[] = $supplement_id;
         }
-        if ( $supplement_id === '' || $supplement_id !== $stored_supplement_id ) {
+
+        if ( $stored_upstream_id !== '' && $supplement_id !== '' && $supplement_id === $stored_upstream_id ) {
+            return $supplement_id;
+        }
+
+        if ( $stored_supplement_id === '' || $supplement_id === '' || $supplement_id !== $stored_supplement_id ) {
             continue;
         }
 
@@ -2430,6 +2568,7 @@ function wk_rh_get_cart_item_addon_upstream_id( array $cart_item, array $supplem
             'storedSupplementId' => $stored_supplement_id,
             'storedUpstreamId' => $stored_upstream_id,
             'availableSupplementIds' => $available_supplement_ids,
+            'availableUpstreamIds' => $available_upstream_ids,
         ], 'error' );
     }
 
@@ -2438,6 +2577,263 @@ function wk_rh_get_cart_item_addon_upstream_id( array $cart_item, array $supplem
 
 function wk_rh_resolve_checkout_addon_product_id( array $cart_item, array $supplements ) {
     return wk_rh_get_cart_item_addon_upstream_id( $cart_item, $supplements );
+}
+
+function wk_rh_prepare_booking_contact_person( array $contact_person ) {
+    $prepared = [];
+
+    foreach ( [ 'firstName', 'lastName', 'email', 'phone' ] as $key ) {
+        if ( empty( $contact_person[ $key ] ) ) {
+            continue;
+        }
+
+        $value = (string) $contact_person[ $key ];
+        $value = $key === 'email' ? sanitize_email( $value ) : sanitize_text_field( $value );
+        if ( $value !== '' ) {
+            $prepared[ $key ] = $value;
+        }
+    }
+
+    return $prepared;
+}
+
+function wk_rh_store_main_cart_booking_hold( $main_cart_item_key, array $main_item, array $result, $expires_at, $proposal, $page_id, $resource_id, $booking_location, $product_id, $bm_id, $main_quantity, $source ) {
+    $normalized_supplements = wk_rh_extract_booking_supplements( $result );
+    $main_order_id = isset( $result['orderId'] ) ? (string) $result['orderId'] : '';
+    $main_order_item_id = isset( $result['orderItemId'] ) ? (string) $result['orderItemId'] : '';
+
+    WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_order_id'] = $main_order_id;
+    WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_order_item_id'] = $main_order_item_id;
+    WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_hold_expires_at'] = $expires_at;
+    WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_supplements'] = $normalized_supplements;
+    WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_booking_response'] = $result;
+
+    if ( function_exists( 'WC' ) && WC()->session ) {
+        $session_booking = WC()->session->get( 'rh_bmi_booking' );
+        if ( ! is_array( $session_booking ) ) {
+            $session_booking = [];
+        }
+        $session_booking['proposal'] = $proposal;
+        $session_booking['pageId'] = $page_id;
+        $session_booking['resourceId'] = $resource_id;
+        $session_booking['productId'] = (string) $bm_id;
+        $session_booking['quantity'] = $main_quantity;
+        $session_booking['pageProductLimits'] = $main_item['bmi_page_product_limits'] ?? null;
+        $session_booking['pageProducts'] = $main_item['bmi_page_products'] ?? [];
+        $session_booking['bookingLocation'] = $booking_location;
+        $session_booking['orderId'] = $main_order_id;
+        $session_booking['orderItemId'] = $main_order_item_id;
+        $session_booking['expiresAt'] = $expires_at;
+        WC()->session->set( 'rh_bmi_booking', $session_booking );
+        WC()->session->set( 'booking_supplement', [
+            'supplements' => $normalized_supplements,
+            'orderId'     => $main_order_id,
+            'expiresAt'   => $expires_at,
+        ] );
+    }
+
+    if ( function_exists( 'wk_rh_register_active_hold' ) ) {
+        wk_rh_register_active_hold( $main_order_id, $booking_location, $expires_at, [
+            'source'      => (string) $source,
+            'wcProductId' => (string) $product_id,
+        ] );
+    }
+
+    WC()->cart->set_session();
+
+    return [
+        'orderId' => $main_order_id,
+        'orderItemId' => $main_order_item_id,
+        'supplements' => $normalized_supplements,
+        'expiresAt' => $expires_at,
+    ];
+}
+
+function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contact_person = [], $source = 'cart_prepare' ) {
+    if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
+        return [
+            'success' => false,
+            'userMessage' => __( 'Booking session mangler. Opdater siden og prøv igen.', 'racehall-wc-ui' ),
+            'redirectToProduct' => false,
+        ];
+    }
+
+    $cart_contents = WC()->cart->get_cart();
+    if ( empty( $cart_contents[ $main_cart_item_key ] ) || ! is_array( $cart_contents[ $main_cart_item_key ] ) ) {
+        return [
+            'success' => false,
+            'userMessage' => __( 'Bookinglinjen blev ikke fundet i kurven. Vælg tidspunkt igen.', 'racehall-wc-ui' ),
+            'redirectToProduct' => true,
+        ];
+    }
+
+    $main_item = $cart_contents[ $main_cart_item_key ];
+    $product_id = isset( $main_item['product_id'] ) ? (int) $main_item['product_id'] : 0;
+    $bm_id = function_exists( 'get_field' )
+        ? get_field( 'bmileisure_id', $product_id )
+        : get_post_meta( $product_id, 'bmileisure_id', true );
+    $proposal = isset( $main_item['bmi_proposal'] ) ? $main_item['bmi_proposal'] : null;
+    $page_id = isset( $main_item['bmi_page_id'] ) ? trim( (string) $main_item['bmi_page_id'] ) : '';
+    $resource_id = isset( $main_item['bmi_resource_id'] ) ? trim( (string) $main_item['bmi_resource_id'] ) : '';
+    $booking_location = isset( $main_item['booking_location'] ) ? sanitize_text_field( (string) $main_item['booking_location'] ) : '';
+    $main_quantity = isset( $main_item['quantity'] ) ? max( 1, (int) $main_item['quantity'] ) : 1;
+    $main_order_id = isset( $main_item['bmi_order_id'] ) ? trim( (string) $main_item['bmi_order_id'] ) : '';
+    $main_order_item_id = isset( $main_item['bmi_order_item_id'] ) ? trim( (string) $main_item['bmi_order_item_id'] ) : '';
+
+    if ( $main_order_id !== '' && $main_order_item_id !== '' ) {
+        if ( empty( $main_item['bmi_supplements'] ) && function_exists( 'WC' ) && WC()->session ) {
+            $session_supplements = WC()->session->get( 'booking_supplement' );
+            if ( is_array( $session_supplements ) && ! empty( $session_supplements['supplements'] ) && is_array( $session_supplements['supplements'] ) ) {
+                WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_supplements'] = array_values( $session_supplements['supplements'] );
+                WC()->cart->set_session();
+                $main_item['bmi_supplements'] = WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_supplements'];
+            }
+        }
+
+        return [
+            'success' => true,
+            'orderId' => $main_order_id,
+            'orderItemId' => $main_order_item_id,
+            'supplements' => isset( $main_item['bmi_supplements'] ) && is_array( $main_item['bmi_supplements'] ) ? $main_item['bmi_supplements'] : [],
+            'expiresAt' => isset( $main_item['bmi_hold_expires_at'] ) ? (int) $main_item['bmi_hold_expires_at'] : 0,
+        ];
+    }
+
+    if ( empty( $bm_id ) || ! is_array( $proposal ) || empty( $proposal ) || $page_id === '' || $resource_id === '' ) {
+        return [
+            'success' => false,
+            'userMessage' => __( 'Bookingforslaget mangler på kurven. Vælg tidspunkt igen.', 'racehall-wc-ui' ),
+            'redirectToProduct' => true,
+        ];
+    }
+
+    $prepared_contact_person = wk_rh_prepare_booking_contact_person( $contact_person );
+    $body = [
+        'productId'  => (string) $bm_id,
+        'pageId'     => (string) $page_id,
+        'quantity'   => $main_quantity,
+        'resourceId' => (string) $resource_id,
+        'proposal'   => $proposal,
+    ];
+    if ( ! empty( $prepared_contact_person ) ) {
+        $body['contactPerson'] = $prepared_contact_person;
+    }
+
+    wk_rh_log_user_event( 'booking.hold_started', [
+        'source' => (string) $source,
+        'productId' => $product_id,
+        'bmProductId' => (string) $bm_id,
+        'pageId' => (string) $page_id,
+        'resourceId' => (string) $resource_id,
+        'quantity' => $main_quantity,
+        'bookingLocation' => $booking_location,
+    ] );
+
+    $token = wk_rh_get_token( $booking_location );
+    $creds = wk_rh_get_api_credentials( $booking_location );
+    if ( ! $token || empty( $creds['client_key'] ) || empty( $creds['subscription_key'] ) ) {
+        return [
+            'success' => false,
+            'userMessage' => __( 'Tidslot kunne ikke reserveres lige nu. Prøv igen.', 'racehall-wc-ui' ),
+            'redirectToProduct' => false,
+        ];
+    }
+
+    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/booking/book';
+    $response = wk_rh_remote_request_with_retry(
+        'POST',
+        $url,
+        [
+            'headers' => [
+                'Authorization'        => 'Bearer ' . $token,
+                'Content-Type'         => 'application/json',
+                'Accept-Language'      => $creds['accept_language'],
+                'Bmi-Subscription-Key' => $creds['subscription_key'],
+            ],
+            'body'    => wp_json_encode( $body ),
+            'timeout' => 60,
+        ],
+        1,
+        [
+            'operation' => 'booking_book_' . sanitize_key( (string) $source ),
+            'productId' => (string) $bm_id,
+            'location'  => $booking_location,
+        ]
+    );
+
+    if ( is_wp_error( $response ) ) {
+        return [
+            'success' => false,
+            'userMessage' => __( 'Tidslot kunne ikke reserveres lige nu. Prøv igen.', 'racehall-wc-ui' ),
+            'redirectToProduct' => false,
+        ];
+    }
+
+    $code = (int) wp_remote_retrieve_response_code( $response );
+    $result = json_decode( wp_remote_retrieve_body( $response ), true );
+    if ( ! ( $code >= 200 && $code < 300 ) ) {
+        wk_rh_log_user_event( 'booking.hold_failed', [
+            'source' => (string) $source,
+            'reason' => 'upstream_booking_rejected',
+            'productId' => $product_id,
+            'bmProductId' => (string) $bm_id,
+            'bookingLocation' => $booking_location,
+            'httpCode' => $code,
+        ], 'warning' );
+        return [
+            'success' => false,
+            'userMessage' => __( 'Det valgte tidspunkt er ikke længere tilgængeligt. Vælg venligst et nyt tidspunkt.', 'racehall-wc-ui' ),
+            'redirectToProduct' => true,
+        ];
+    }
+
+    if ( empty( $result['orderId'] ) || empty( $result['orderItemId'] ) ) {
+        wk_rh_log_user_event( 'booking.hold_failed', [
+            'source' => (string) $source,
+            'reason' => 'missing_upstream_identifiers',
+            'productId' => $product_id,
+            'bmProductId' => (string) $bm_id,
+            'bookingLocation' => $booking_location,
+        ], 'error' );
+        return [
+            'success' => false,
+            'userMessage' => __( 'Reservationen mangler nødvendige upstream id’er. Prøv igen.', 'racehall-wc-ui' ),
+            'redirectToProduct' => false,
+        ];
+    }
+
+    $hold_timeout_minutes = function_exists( 'wk_rh_get_booking_hold_timeout_minutes' )
+        ? wk_rh_get_booking_hold_timeout_minutes()
+        : 15;
+    $expires_at = time() + ( max( 5, (int) $hold_timeout_minutes ) * 60 );
+
+    $stored = wk_rh_store_main_cart_booking_hold(
+        $main_cart_item_key,
+        $main_item,
+        $result,
+        $expires_at,
+        $proposal,
+        $page_id,
+        $resource_id,
+        $booking_location,
+        $product_id,
+        $bm_id,
+        $main_quantity,
+        $source
+    );
+
+    wk_rh_log_user_event( 'booking.hold_confirmed', [
+        'source' => (string) $source,
+        'productId' => $product_id,
+        'bmProductId' => (string) $bm_id,
+        'bookingLocation' => $booking_location,
+        'orderId' => $stored['orderId'],
+        'orderItemId' => $stored['orderItemId'],
+        'expiresAt' => $stored['expiresAt'],
+        'supplementsCount' => is_array( $stored['supplements'] ) ? count( $stored['supplements'] ) : 0,
+    ] );
+
+    return array_merge( [ 'success' => true ], $stored );
 }
 
 function wk_rh_sync_checkout_booking_before_order( $posted_data, $errors ) {
@@ -2515,172 +2911,21 @@ function wk_rh_sync_checkout_booking_before_order( $posted_data, $errors ) {
         return;
     }
 
-    $creds = wk_rh_get_api_credentials( $booking_location );
-    if ( empty( $creds['client_key'] ) || empty( $creds['subscription_key'] ) ) {
-        wk_rh_log_user_event( 'checkout.booking_failed', [ 'reason' => 'missing_api_credentials', 'bookingLocation' => $booking_location ], 'error' );
-        $errors->add( 'rh_booking_missing_credentials', __( 'Booking kunne ikke gennemføres pga. manglende API-adgang.', 'racehall-wc-ui' ) );
+    $booking_sync = wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, $contact_person, 'checkout_validation' );
+    if ( empty( $booking_sync['success'] ) ) {
+        $message = isset( $booking_sync['userMessage'] ) ? (string) $booking_sync['userMessage'] : __( 'Tidslot kunne ikke reserveres under checkout. Prøv igen.', 'racehall-wc-ui' );
+        if ( ! empty( $booking_sync['redirectToProduct'] ) ) {
+            wk_rh_add_checkout_booking_error( $errors, $message, true );
+        } else {
+            $errors->add( 'rh_booking_transport_error', $message );
+        }
         return;
     }
 
-    $token = function_exists( 'wk_rh_get_token' ) ? wk_rh_get_token( $booking_location ) : false;
-    if ( ! $token ) {
-        wk_rh_log_user_event( 'checkout.booking_failed', [ 'reason' => 'missing_api_token', 'bookingLocation' => $booking_location ], 'error' );
-        $errors->add( 'rh_booking_missing_token', __( 'Booking kunne ikke gennemføres. Kunne ikke hente adgangstoken.', 'racehall-wc-ui' ) );
-        return;
-    }
-
-    $main_order_id = isset( $main_item['bmi_order_id'] ) ? trim( (string) $main_item['bmi_order_id'] ) : '';
-    $main_order_item_id = isset( $main_item['bmi_order_item_id'] ) ? trim( (string) $main_item['bmi_order_item_id'] ) : '';
-
-    if ( $main_order_id === '' || $main_order_item_id === '' ) {
-        wk_rh_log_user_event( 'checkout.booking_started', [
-            'productId' => $product_id,
-            'bmProductId' => (string) $bm_id,
-            'pageId' => (string) $page_id,
-            'resourceId' => (string) $resource_id,
-            'quantity' => $main_quantity,
-            'bookingDate' => $booking_date,
-            'bookingTime' => $booking_time,
-            'bookingLocation' => $booking_location,
-        ] );
-
-        $body = [
-            'productId'     => (string) $bm_id,
-            'pageId'        => (string) $page_id,
-            'quantity'      => $main_quantity,
-            'resourceId'    => (string) $resource_id,
-            'proposal'      => $proposal,
-            'contactPerson' => $contact_person,
-        ];
-
-        $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/booking/book';
-        $response = function_exists( 'wk_rh_remote_request_with_retry' )
-            ? wk_rh_remote_request_with_retry(
-                'POST',
-                $url,
-                [
-                    'headers' => [
-                        'Authorization'        => 'Bearer ' . $token,
-                        'Content-Type'         => 'application/json',
-                        'Accept-Language'      => $creds['accept_language'],
-                        'Bmi-Subscription-Key' => $creds['subscription_key'],
-                    ],
-                    'body'    => wp_json_encode( $body ),
-                    'timeout' => 60,
-                ],
-                1,
-                [
-                    'operation' => 'booking_book_checkout',
-                    'productId' => (string) $bm_id,
-                    'location'  => (string) $booking_location,
-                ]
-            )
-            : wp_remote_post(
-                $url,
-                [
-                    'headers' => [
-                        'Authorization'        => 'Bearer ' . $token,
-                        'Content-Type'         => 'application/json',
-                        'Accept-Language'      => $creds['accept_language'],
-                        'Bmi-Subscription-Key' => $creds['subscription_key'],
-                    ],
-                    'body'    => wp_json_encode( $body ),
-                    'timeout' => 60,
-                ]
-            );
-
-        if ( is_wp_error( $response ) ) {
-            wk_rh_log_user_event( 'checkout.booking_failed', [
-                'reason' => 'transport_error',
-                'productId' => $product_id,
-                'bmProductId' => (string) $bm_id,
-                'bookingLocation' => $booking_location,
-                'error' => $response->get_error_message(),
-            ], 'error' );
-            $errors->add( 'rh_booking_transport_error', __( 'Tidslot kunne ikke reserveres under checkout. Prøv igen.', 'racehall-wc-ui' ) );
-            return;
-        }
-
-        $code = (int) wp_remote_retrieve_response_code( $response );
-        $result = json_decode( wp_remote_retrieve_body( $response ), true );
-        if ( ! ( $code >= 200 && $code < 300 ) ) {
-            wk_rh_log_user_event( 'checkout.booking_failed', [
-                'reason' => 'upstream_booking_rejected',
-                'productId' => $product_id,
-                'bmProductId' => (string) $bm_id,
-                'bookingLocation' => $booking_location,
-                'httpCode' => $code,
-            ], 'warning' );
-            wk_rh_add_checkout_booking_error( $errors, __( 'Det valgte tidspunkt er ikke længere tilgængeligt. Vælg venligst et nyt tidspunkt.', 'racehall-wc-ui' ), true );
-            return;
-        }
-
-        if ( empty( $result['orderId'] ) || empty( $result['orderItemId'] ) ) {
-            wk_rh_log_user_event( 'checkout.booking_failed', [
-                'reason' => 'missing_upstream_identifiers',
-                'productId' => $product_id,
-                'bmProductId' => (string) $bm_id,
-                'bookingLocation' => $booking_location,
-            ], 'error' );
-            $errors->add( 'rh_booking_missing_identifiers', __( 'Reservationen mangler nødvendige upstream id’er. Prøv igen.', 'racehall-wc-ui' ) );
-            return;
-        }
-
-        $hold_timeout_minutes = function_exists( 'wk_rh_get_booking_hold_timeout_minutes' )
-            ? wk_rh_get_booking_hold_timeout_minutes()
-            : 15;
-        $expires_at = time() + ( max( 5, (int) $hold_timeout_minutes ) * 60 );
-        $normalized_supplements = wk_rh_extract_booking_supplements( $result );
-
-        WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_order_id'] = (string) $result['orderId'];
-        WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_order_item_id'] = (string) $result['orderItemId'];
-        WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_hold_expires_at'] = $expires_at;
-        WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_supplements'] = $normalized_supplements;
-        WC()->cart->cart_contents[ $main_cart_item_key ]['bmi_booking_response'] = $result;
-
-        $main_order_id = (string) $result['orderId'];
-        $main_order_item_id = (string) $result['orderItemId'];
-
-        if ( function_exists( 'WC' ) && WC()->session ) {
-            $session_booking = WC()->session->get( 'rh_bmi_booking' );
-            if ( ! is_array( $session_booking ) ) {
-                $session_booking = [];
-            }
-            $session_booking['proposal'] = $proposal;
-            $session_booking['pageId'] = $page_id;
-            $session_booking['resourceId'] = $resource_id;
-            $session_booking['productId'] = (string) $bm_id;
-            $session_booking['quantity'] = $main_quantity;
-            $session_booking['pageProductLimits'] = $main_item['bmi_page_product_limits'] ?? null;
-            $session_booking['pageProducts'] = $main_item['bmi_page_products'] ?? [];
-            $session_booking['bookingLocation'] = $booking_location;
-            $session_booking['orderId'] = $main_order_id;
-            $session_booking['orderItemId'] = $main_order_item_id;
-            $session_booking['expiresAt'] = $expires_at;
-            WC()->session->set( 'rh_bmi_booking', $session_booking );
-            WC()->session->set( 'booking_supplement', [
-                'supplements' => $normalized_supplements,
-                'orderId'     => $main_order_id,
-                'expiresAt'   => $expires_at,
-            ] );
-        }
-
-        if ( function_exists( 'wk_rh_register_active_hold' ) ) {
-            wk_rh_register_active_hold( $main_order_id, $booking_location, $expires_at, [
-                'source'      => 'checkout_validation',
-                'wcProductId' => (string) $product_id,
-            ] );
-        }
-
-        wk_rh_log_user_event( 'checkout.booking_confirmed', [
-            'productId' => $product_id,
-            'bmProductId' => (string) $bm_id,
-            'bookingLocation' => $booking_location,
-            'orderId' => $main_order_id,
-            'orderItemId' => $main_order_item_id,
-            'expiresAt' => $expires_at,
-        ] );
-    }
+    $cart_contents = WC()->cart->get_cart();
+    $main_item = $cart_contents[ $main_cart_item_key ];
+    $main_order_id = isset( $booking_sync['orderId'] ) ? (string) $booking_sync['orderId'] : '';
+    $main_order_item_id = isset( $booking_sync['orderItemId'] ) ? (string) $booking_sync['orderItemId'] : '';
 
     foreach ( WC()->cart->get_cart() as $cart_item_key => $cart_item ) {
         if ( empty( $cart_item['is_addon'] ) ) {
@@ -2763,6 +3008,39 @@ function wk_rh_sync_checkout_booking_before_order( $posted_data, $errors ) {
 
 add_action( 'woocommerce_after_checkout_validation', 'wk_rh_sync_checkout_booking_before_order', 20, 2 );
 
+add_action( 'woocommerce_check_cart_items', function() {
+    static $already_checked = false;
+
+    if ( $already_checked ) {
+        return;
+    }
+
+    $already_checked = true;
+
+    if ( is_admin() || ! function_exists( 'is_cart' ) || ! is_cart() ) {
+        return;
+    }
+
+    if ( ! function_exists( 'WC' ) || ! WC()->cart || WC()->cart->is_empty() ) {
+        return;
+    }
+
+    $main_cart_item_key = wk_rh_get_main_booking_cart_item_key();
+    if ( $main_cart_item_key === '' ) {
+        return;
+    }
+
+    $sync_result = wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, [], 'cart_prepare' );
+    if ( ! empty( $sync_result['success'] ) ) {
+        return;
+    }
+
+    $message = isset( $sync_result['userMessage'] ) ? (string) $sync_result['userMessage'] : '';
+    if ( $message !== '' ) {
+        wc_add_notice( $message, 'error' );
+    }
+}, 6 );
+
 add_action( 'woocommerce_checkout_order_processed', function() {
     if ( function_exists( 'wk_rh_clear_booking_session_state' ) ) {
         wk_rh_clear_booking_session_state();
@@ -2782,22 +3060,7 @@ function wk_rh_extract_booking_supplements( $result ) {
                 continue;
             }
 
-            $product = isset( $supplement['product'] ) && is_array( $supplement['product'] ) ? $supplement['product'] : [];
-            $normalized = $supplement;
-
-            if ( ! empty( $product ) ) {
-                foreach ( [ 'id', 'name', 'info', 'hasPicture', 'prices', 'minAmount', 'maxAmount', 'resourceId', 'resourceKind', 'kind', 'saleMode', 'bookingMode', 'productGroup', 'dynamicGroups', 'isEntry', 'isCombo', 'minAge', 'maxAge', 'isMembersOnly' ] as $key ) {
-                    if ( ! array_key_exists( $key, $normalized ) && array_key_exists( $key, $product ) ) {
-                        $normalized[ $key ] = $product[ $key ];
-                    }
-                }
-
-                if ( ! isset( $normalized['id'] ) && isset( $product['id'] ) ) {
-                    $normalized['id'] = $product['id'];
-                }
-            }
-
-            $normalized_supplements[] = $normalized;
+            $normalized_supplements[] = wk_rh_normalize_booking_supplement_row( $supplement );
         }
 
         return $normalized_supplements;
