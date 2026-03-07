@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.71
+ * Version: 1.72
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.71' );
+define( 'RACEHALL_WC_UI_VERSION', '1.72' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -988,19 +988,65 @@ function wk_rh_get_checkout_previous_back_link_markup() {
     );
 }
 
-add_filter( 'cfw_return_to_cart_link', function( $link ) {
+function wk_rh_customize_checkout_previous_link_markup( $link ) {
+    if ( is_admin() || ! function_exists( 'is_checkout' ) || ! is_checkout() ) {
+        return $link;
+    }
+
+    $main_context = wk_rh_get_main_booking_context();
+    if ( empty( $main_context['cartItemKey'] ) ) {
+        return $link;
+    }
+
     $custom_link = wk_rh_get_checkout_previous_back_link_markup();
-    return $custom_link !== '' ? $custom_link : $link;
+    if ( $custom_link !== '' ) {
+        return $custom_link;
+    }
+
+    if ( ! is_string( $link ) || $link === '' ) {
+        return $link;
+    }
+
+    $back_label = '&laquo; ' . esc_html__( 'Back', 'racehall-wc-ui' );
+
+    if ( preg_match( '/class="([^"]*)"/', $link, $class_matches ) ) {
+        $classes = preg_split( '/\s+/', trim( (string) $class_matches[1] ) );
+        $classes = is_array( $classes ) ? $classes : [];
+
+        if ( ! in_array( 'wk-rh-checkout-back-btn', $classes, true ) ) {
+            $classes[] = 'wk-rh-checkout-back-btn';
+        }
+
+        $link = preg_replace(
+            '/class="([^"]*)"/',
+            'class="' . esc_attr( trim( implode( ' ', array_filter( $classes ) ) ) ) . '"',
+            $link,
+            1
+        );
+    } else {
+        $link = preg_replace( '/<a\b/', '<a class="wk-rh-checkout-back-btn"', $link, 1 ) ?: $link;
+    }
+
+    return preg_replace_callback(
+        '/<a\b([^>]*)>(.*?)<\/a>/is',
+        static function( $matches ) use ( $back_label ) {
+            return '<a' . $matches[1] . '>' . $back_label . '</a>';
+        },
+        $link,
+        1
+    ) ?: $link;
+}
+
+add_filter( 'cfw_return_to_cart_link', function( $link ) {
+    return wk_rh_customize_checkout_previous_link_markup( $link );
 }, 20 );
 
 add_filter( 'cfw_return_to_customer_information_link', function( $link ) {
-    $custom_link = wk_rh_get_checkout_previous_back_link_markup();
-    return $custom_link !== '' ? $custom_link : $link;
+    return wk_rh_customize_checkout_previous_link_markup( $link );
 }, 20 );
 
 add_filter( 'cfw_return_to_shipping_method_link', function( $link ) {
-    $custom_link = wk_rh_get_checkout_previous_back_link_markup();
-    return $custom_link !== '' ? $custom_link : $link;
+    return wk_rh_customize_checkout_previous_link_markup( $link );
 }, 20 );
 
 function wk_rh_render_checkout_step_customer_gate() {
