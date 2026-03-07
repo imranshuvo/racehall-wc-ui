@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.72
+ * Version: 1.73
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.72' );
+define( 'RACEHALL_WC_UI_VERSION', '1.73' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -984,7 +984,7 @@ function wk_rh_get_checkout_previous_back_link_markup() {
 
     return sprintf(
         '<a href="javascript:" data-tab="#cfw-customer-info" class="cfw-prev-tab cfw-return-to-information-btn wk-rh-checkout-back-btn">&laquo; %s</a>',
-        esc_html__( 'Back', 'racehall-wc-ui' )
+        esc_html__( 'Tilbage', 'racehall-wc-ui' )
     );
 }
 
@@ -1007,7 +1007,7 @@ function wk_rh_customize_checkout_previous_link_markup( $link ) {
         return $link;
     }
 
-    $back_label = '&laquo; ' . esc_html__( 'Back', 'racehall-wc-ui' );
+    $back_label = '&laquo; ' . esc_html__( 'Tilbage', 'racehall-wc-ui' );
 
     if ( preg_match( '/class="([^"]*)"/', $link, $class_matches ) ) {
         $classes = preg_split( '/\s+/', trim( (string) $class_matches[1] ) );
@@ -1072,11 +1072,11 @@ function wk_rh_get_checkout_step_customer_gate_markup( $is_ready = false ) {
             <button
                 type="button"
                 class="cfw-primary-btn cfw-next-tab validate wk-rh-checkout-next-btn"
-                data-label-default="<?php echo esc_attr__( 'Next', 'racehall-wc-ui' ); ?>"
-                data-label-ready="<?php echo esc_attr__( 'Next', 'racehall-wc-ui' ); ?>"
+                data-label-default="<?php echo esc_attr__( 'Næste', 'racehall-wc-ui' ); ?>"
+                data-label-ready="<?php echo esc_attr__( 'Næste', 'racehall-wc-ui' ); ?>"
                 data-label-loading="<?php echo esc_attr__( 'Behandler...', 'racehall-wc-ui' ); ?>"
             >
-                <?php esc_html_e( 'Next', 'racehall-wc-ui' ); ?>
+                <?php esc_html_e( 'Næste', 'racehall-wc-ui' ); ?>
             </button>
         </div>
         <div class="wk-rh-checkout-step-notice" aria-live="polite"></div>
