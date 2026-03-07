@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.61
+ * Version: 1.62
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.61' );
+define( 'RACEHALL_WC_UI_VERSION', '1.62' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -1081,7 +1081,7 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
         <?php else : ?>
             <div class="racehall-cart cart-page wk-rh-checkout-addons-layout">
                 <section class="left">
-                    <h1><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h1>
+                    <h2 style="color: #fff;"><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h2>
                     <p><?php esc_html_e( 'Løft din oplevelse til næste niveau. Her får du muligheden for at skræddersy dit race, finjustere detaljerne og sætte dit personlige præg på dagen. Uanset om jagten er fart, præcision eller bare den perfekte oplevelse, er dette stedet, hvor du former dit eget løb.', 'racehall-wc-ui' ); ?></p>
                     <div class="trophy">
                         <img src="<?php echo esc_url( plugins_url( 'assets/image/trophy.png', __FILE__ ) ); ?>" alt="<?php echo esc_attr__( 'Trophy illustration', 'racehall-wc-ui' ); ?>" />
