@@ -645,8 +645,15 @@
                     return refreshCheckoutFragments();
                 })
                 .catch(function (error) {
+                    var payload = error && error.payload ? error.payload : {};
                     logBookingClientEvent('checkout_addon_quantity_failed', { addonId: addonId, quantity: nextQty, message: error.message || '' });
                     showFlowNotice(error.message || (flow.messages && flow.messages.genericError) || '', 'error', '.wk-rh-checkout-step-notice--supplements');
+
+                    if (payload.redirectToProduct && payload.redirectUrl) {
+                        window.setTimeout(function () {
+                            window.location.href = payload.redirectUrl;
+                        }, 1200);
+                    }
                 })
                 .finally(function () {
                     setSupplementsLoading(false);

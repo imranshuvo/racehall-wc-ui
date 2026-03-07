@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.57
+ * Version: 1.58
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.57' );
+define( 'RACEHALL_WC_UI_VERSION', '1.58' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -2331,6 +2331,7 @@ function wk_rh_cancel_and_clear_expired_cart_holds() {
         return;
     }
 
+    $redirect_url = wk_rh_get_main_booking_product_url();
     $now = time();
     $expired_orders = [];
     foreach ( WC()->cart->get_cart() as $item ) {
@@ -2380,6 +2381,11 @@ function wk_rh_cancel_and_clear_expired_cart_holds() {
         __( 'Din reservation er udløbet. Kurven er nulstillet, så du kan vælge tidspunkt og booke igen.', 'racehall-wc-ui' ),
         'error'
     );
+
+    if ( ! wp_doing_ajax() && function_exists( 'is_checkout' ) && is_checkout() && is_string( $redirect_url ) && $redirect_url !== '' ) {
+        wp_safe_redirect( $redirect_url );
+        exit;
+    }
 }
 
 add_action( 'woocommerce_check_cart_items', function() {
@@ -3739,8 +3745,22 @@ function wk_rh_set_checkout_addon_quantity() {
     }
 
     $main_context = wk_rh_get_main_booking_context();
+    if ( empty( $main_context['cartItemKey'] ) ) {
+        $expired = wk_rh_expire_current_cart_reservation( 'checkout_addon_missing_main_item', false );
+        wp_send_json_error( [
+            'message' => __( 'Bookinglinjen blev ikke fundet i kurven. Vælg tidspunkt igen.', 'racehall-wc-ui' ),
+            'redirectToProduct' => true,
+            'redirectUrl' => isset( $expired['redirect_url'] ) ? (string) $expired['redirect_url'] : wk_rh_get_checkout_booking_redirect_url(),
+        ], 400 );
+    }
+
     if ( empty( $main_context['orderId'] ) || empty( $main_context['orderItemId'] ) ) {
-        wp_send_json_error( [ 'message' => __( 'Du skal først gå videre til add-on step i checkout.', 'racehall-wc-ui' ) ], 400 );
+        $expired = wk_rh_expire_current_cart_reservation( 'checkout_addon_missing_hold', false );
+        wp_send_json_error( [
+            'message' => __( 'Din reservation er udløbet. Vælg tidspunkt igen.', 'racehall-wc-ui' ),
+            'redirectToProduct' => true,
+            'redirectUrl' => isset( $expired['redirect_url'] ) ? (string) $expired['redirect_url'] : wk_rh_get_checkout_booking_redirect_url(),
+        ], 400 );
     }
 
     $upstream_id = isset( $_POST['addon_upstream_id'] ) ? sanitize_text_field( wp_unslash( (string) $_POST['addon_upstream_id'] ) ) : '';
