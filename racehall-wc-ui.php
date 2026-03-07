@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.62
+ * Version: 1.63
  * Author: Webkonsulenterne ApS
  */
 
@@ -43,7 +43,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.62' );
+define( 'RACEHALL_WC_UI_VERSION', '1.63' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -2322,32 +2322,18 @@ function wk_rh_clear_booking_session_state() {
     WC()->session->set( 'rh_bmi_booking', null );
     WC()->session->set( 'booking_supplement', null );
     WC()->session->set( 'rh_checkout_prefill', null );
+    WC()->session->set( 'rh_checkout_redirect_url', null );
     WC()->session->set( 'rh_last_product_url', null );
 }
 
-add_action( 'template_redirect', function() {
-    if ( is_admin() || ! function_exists( 'is_checkout' ) || ! is_checkout() || ! function_exists( 'WC' ) || ! WC()->session ) {
-        return;
-    }
-
-    $redirect_url = WC()->session->get( 'rh_checkout_redirect_url' );
-    if ( ! is_string( $redirect_url ) || $redirect_url === '' ) {
-        return;
-    }
-
-    WC()->session->set( 'rh_checkout_redirect_url', null );
-    wp_safe_redirect( $redirect_url );
-    exit;
-}, 1 );
-
-function wk_rh_cancel_and_clear_expired_cart_holds() {
-    if ( ! function_exists( 'WC' ) || ! WC()->cart || WC()->cart->is_empty() ) {
-        return;
-    }
-
-    $redirect_url = wk_rh_get_main_booking_product_url();
-    $now = time();
+function wk_rh_get_expired_main_cart_holds() {
     $expired_orders = [];
+
+    if ( ! function_exists( 'WC' ) || ! WC()->cart || WC()->cart->is_empty() ) {
+        return $expired_orders;
+    }
+
+    $now = time();
     foreach ( WC()->cart->get_cart() as $item ) {
         if ( ! empty( $item['is_addon'] ) ) {
             continue;
@@ -2363,8 +2349,25 @@ function wk_rh_cancel_and_clear_expired_cart_holds() {
         $expired_orders[ $upstream_order_id ] = $location;
     }
 
+    return $expired_orders;
+}
+
+function wk_rh_cancel_and_clear_expired_cart_holds( $add_notice = true ) {
+    if ( ! function_exists( 'WC' ) || ! WC()->cart || WC()->cart->is_empty() ) {
+        return [
+            'success' => false,
+            'redirect_url' => wk_rh_get_checkout_booking_redirect_url(),
+        ];
+    }
+
+    $redirect_url = wk_rh_get_main_booking_product_url();
+    $expired_orders = wk_rh_get_expired_main_cart_holds();
+
     if ( empty( $expired_orders ) ) {
-        return;
+        return [
+            'success' => false,
+            'redirect_url' => $redirect_url,
+        ];
     }
 
     foreach ( $expired_orders as $upstream_order_id => $location ) {
@@ -2391,20 +2394,61 @@ function wk_rh_cancel_and_clear_expired_cart_holds() {
     WC()->cart->empty_cart();
     wk_rh_clear_booking_session_state();
 
-    wc_add_notice(
-        __( 'Din reservation er udløbet. Kurven er nulstillet, så du kan vælge tidspunkt og booke igen.', 'racehall-wc-ui' ),
-        'error'
-    );
-
-    if ( ! wp_doing_ajax() && function_exists( 'is_checkout' ) && is_checkout() && is_string( $redirect_url ) && $redirect_url !== '' && function_exists( 'WC' ) && WC()->session ) {
-        WC()->session->set( 'rh_checkout_redirect_url', $redirect_url );
+    $notice = __( 'Din reservation er udløbet. Kurven er nulstillet, så du kan vælge tidspunkt og booke igen.', 'racehall-wc-ui' );
+    if ( $add_notice ) {
+        wc_add_notice( $notice, 'error' );
     }
+
+    return [
+        'success' => true,
+        'redirect_url' => $redirect_url,
+        'notice' => $notice,
+    ];
 }
 
 add_action( 'woocommerce_check_cart_items', function() {
     wk_rh_process_expired_active_holds( 'checkout_guard' );
     wk_rh_cancel_and_clear_expired_cart_holds();
 }, 5 );
+
+add_action( 'template_redirect', function() {
+    if ( is_admin() || ! function_exists( 'is_checkout' ) || ! is_checkout() || ( function_exists( 'is_order_received_page' ) && is_order_received_page() ) ) {
+        return;
+    }
+
+    if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
+        return;
+    }
+
+    wk_rh_process_expired_active_holds( 'checkout_template_guard' );
+
+    $expired = wk_rh_cancel_and_clear_expired_cart_holds( true );
+    if ( ! empty( $expired['success'] ) ) {
+        $redirect_url = isset( $expired['redirect_url'] ) ? (string) $expired['redirect_url'] : '';
+        if ( $redirect_url !== '' ) {
+            wp_safe_redirect( $redirect_url );
+            exit;
+        }
+
+        return;
+    }
+
+    if ( WC()->cart->is_empty() ) {
+        return;
+    }
+
+    $main_context = wk_rh_get_main_booking_context();
+    if ( ! empty( $main_context['cartItemKey'] ) ) {
+        return;
+    }
+
+    $expired = wk_rh_expire_current_cart_reservation( 'checkout_missing_main_item', true );
+    $redirect_url = isset( $expired['redirect_url'] ) ? (string) $expired['redirect_url'] : '';
+    if ( $redirect_url !== '' ) {
+        wp_safe_redirect( $redirect_url );
+        exit;
+    }
+}, 4 );
 
 add_filter( 'woocommerce_add_to_cart_validation', 'wk_rh_block_addon_without_parent', 20, 3 );
 function wk_rh_block_addon_without_parent( $passed, $product_id, $quantity ) {
