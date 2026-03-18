@@ -328,8 +328,8 @@ window.RH_I18N = {
                         <div class="counter">
                             <div class="counter-row">
                                 <div class="counter-label">
-                                    <strong><?php esc_html_e( 'Voksne', 'racehall-wc-ui' ); ?></strong>
-                                    <small><?php esc_html_e( '18 år eller over.', 'racehall-wc-ui' ); ?></small>
+                                    <strong><?php esc_html_e( 'Voksen kart', 'racehall-wc-ui' ); ?></strong>
+                                    <small><?php esc_html_e( 'Fra 150 cm. højde', 'racehall-wc-ui' ); ?></small>
                                 </div>
                                 <div class="counter-controls">
                                     <button type="button" onclick="updateCount('adult-1', -1)">−</button>
@@ -340,8 +340,8 @@ window.RH_I18N = {
 
                             <div class="counter-row">
                                 <div class="counter-label">
-                                    <strong><?php esc_html_e( 'Børn', 'racehall-wc-ui' ); ?></strong>
-                                    <small><?php esc_html_e( '5–17 år.', 'racehall-wc-ui' ); ?></small>
+                                    <strong><?php esc_html_e( 'Børnekart', 'racehall-wc-ui' ); ?></strong>
+                                    <small><?php esc_html_e( 'Fra 120-149 cm. højde', 'racehall-wc-ui' ); ?></small>
                                 </div>
                                 <div class="counter-controls">
                                     <button type="button" onclick="updateCount('child-1', -1)">−</button>
