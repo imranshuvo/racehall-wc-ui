@@ -14,10 +14,22 @@ document.addEventListener('DOMContentLoaded', function () {
 let currentQuantityRules = {
     adults: { min: 1, max: null, step: 1, quantity: 1 },
     children: { min: 0, max: null, step: 1, quantity: 0 },
+    twin: { min: 0, max: null, step: 1, quantity: 0 },
     total: { min: 1, max: null, step: 1 }
 }
 let currentPageProductLimits = null
 let currentPageProducts = []
+const PARTY_KEYS = ['adults', 'children', 'twin']
+const PARTY_INPUT_IDS = {
+    adults: 'adult-1',
+    children: 'child-1',
+    twin: 'twin-1'
+}
+const PARTY_HIDDEN_IDS = {
+    adults: 'booking_adults',
+    children: 'booking_children',
+    twin: 'booking_twin'
+}
 
 function logBookingClientEvent(eventName, context = {}) {
     const logger = window.RH_LOGGER || null
@@ -124,10 +136,27 @@ function pickStep(group) {
     return 1
 }
 
+function resolvePartyKey(keyOrInputId) {
+    if (PARTY_KEYS.includes(keyOrInputId)) return keyOrInputId
+
+    const matched = Object.entries(PARTY_INPUT_IDS).find(([, inputId]) => inputId === keyOrInputId)
+    return matched ? matched[0] : 'adults'
+}
+
+function getPartyAdjustmentOrder(preferredKey) {
+    const resolvedPreferredKey = resolvePartyKey(preferredKey)
+    return [resolvedPreferredKey, ...PARTY_KEYS.filter((key) => key !== resolvedPreferredKey)]
+}
+
+function getTotalFromCounts(counts) {
+    return PARTY_KEYS.reduce((sum, key) => sum + (Number(counts[key]) || 0), 0)
+}
+
 function extractRulesFromProposal(proposal, pageProductLimits = null) {
     const rules = {
         adults: { min: 1, max: null, step: 1, quantity: 1 },
         children: { min: 0, max: null, step: 1, quantity: 0 },
+        twin: { min: 0, max: null, step: 1, quantity: 0 },
         total: { min: 1, max: null, step: 1 }
     }
 
@@ -170,6 +199,8 @@ function extractRulesFromProposal(proposal, pageProductLimits = null) {
             ? rules.adults
             : (tag === 'kids' || tag === 'children' || tag === 'child' || tag === 'born' || tag === 'børn')
                 ? rules.children
+                : (tag === 'twin' || tag === 'twinkart' || tag === 'tandem' || tag === 'passenger')
+                    ? rules.twin
                 : null
 
         if (!target) return
@@ -181,9 +212,11 @@ function extractRulesFromProposal(proposal, pageProductLimits = null) {
 
     const adultsMin = parseRuleNumber(rules.adults.min, 1)
     const childrenMin = parseRuleNumber(rules.children.min, 0)
+    const twinMin = parseRuleNumber(rules.twin.min, 0)
     const totalMin = parseRuleNumber(rules.total.min, 1)
     const adultsMax = parseRuleNumber(rules.adults.max, null)
     const childrenMax = parseRuleNumber(rules.children.max, null)
+    const twinMax = parseRuleNumber(rules.twin.max, null)
 
     if (adultsMax !== null && adultsMax < adultsMin) {
         rules.adults.max = adultsMin
@@ -191,22 +224,29 @@ function extractRulesFromProposal(proposal, pageProductLimits = null) {
     if (childrenMax !== null && childrenMax < childrenMin) {
         rules.children.max = childrenMin
     }
+    if (twinMax !== null && twinMax < twinMin) {
+        rules.twin.max = twinMin
+    }
 
     const resolvedAdultsMax = parseRuleNumber(rules.adults.max, null)
     const resolvedChildrenMax = parseRuleNumber(rules.children.max, null)
-    if (resolvedAdultsMax !== null && resolvedChildrenMax !== null) {
-        const maxCapacity = resolvedAdultsMax + resolvedChildrenMax
+    const resolvedTwinMax = parseRuleNumber(rules.twin.max, null)
+    if (resolvedAdultsMax !== null && resolvedChildrenMax !== null && resolvedTwinMax !== null) {
+        const maxCapacity = resolvedAdultsMax + resolvedChildrenMax + resolvedTwinMax
         if (maxCapacity < totalMin) {
             rules.adults.max = null
             rules.children.max = null
+            rules.twin.max = null
         }
     }
 
-    rules.adults.min = Math.max(parseRuleNumber(rules.adults.min, 1), totalMin)
-    const currentAdultQty = parseRuleNumber(rules.adults.quantity, null)
-    if (currentAdultQty !== null && currentAdultQty < rules.adults.min) {
-        rules.adults.quantity = rules.adults.min
-    }
+    PARTY_KEYS.forEach((key) => {
+        const min = parseRuleNumber((rules[key] || {}).min, key === 'adults' ? 1 : 0)
+        const quantity = parseRuleNumber((rules[key] || {}).quantity, null)
+        if (quantity !== null && quantity < min) {
+            rules[key].quantity = min
+        }
+    })
 
     return rules
 }
@@ -232,63 +272,70 @@ function clampByRule(value, rule) {
 }
 
 function enforceCountsByRules(counts, changedKey) {
-    const next = {
-        adults: clampByRule(counts.adults, currentQuantityRules.adults),
-        children: clampByRule(counts.children, currentQuantityRules.children)
-    }
+    const next = PARTY_KEYS.reduce((acc, key) => {
+        acc[key] = clampByRule(counts[key], currentQuantityRules[key])
+        return acc
+    }, {})
 
     const totalRule = currentQuantityRules.total || { min: 1, max: null, step: 1 }
     const totalMin = Math.max(1, parseRuleNumber(totalRule.min, 1))
     const totalMax = parseRuleNumber(totalRule.max, null)
     const totalStep = parseRuleNumber(totalRule.step, 1)
 
-    let total = next.adults + next.children
-
-    const preferredKey = changedKey === 'children' ? 'children' : 'adults'
-    const secondaryKey = preferredKey === 'adults' ? 'children' : 'adults'
+    let total = getTotalFromCounts(next)
+    const adjustmentOrder = getPartyAdjustmentOrder(changedKey)
 
     while (total < totalMin) {
-        const incRule = currentQuantityRules[preferredKey] || { step: 1 }
-        const incStep = parseRuleNumber(incRule.step, 1)
-        const before = next[preferredKey]
-        next[preferredKey] = clampByRule(next[preferredKey] + incStep, incRule)
-        if (next[preferredKey] === before) {
-            const secRule = currentQuantityRules[secondaryKey] || { step: 1 }
-            const secStep = parseRuleNumber(secRule.step, 1)
-            const secBefore = next[secondaryKey]
-            next[secondaryKey] = clampByRule(next[secondaryKey] + secStep, secRule)
-            if (next[secondaryKey] === secBefore) break
+        let changed = false
+        for (const key of adjustmentOrder) {
+            const rule = currentQuantityRules[key] || { step: 1 }
+            const step = parseRuleNumber(rule.step, 1)
+            const before = next[key]
+            next[key] = clampByRule(next[key] + step, rule)
+            if (next[key] !== before) {
+                changed = true
+                break
+            }
         }
-        total = next.adults + next.children
+        if (!changed) break
+        total = getTotalFromCounts(next)
     }
 
     if (totalMax !== null) {
         while (total > totalMax) {
-            const decRule = currentQuantityRules[preferredKey] || { step: 1 }
-            const decStep = parseRuleNumber(decRule.step, 1)
-            const before = next[preferredKey]
-            next[preferredKey] = clampByRule(next[preferredKey] - decStep, decRule)
-            if (next[preferredKey] === before) {
-                const secRule = currentQuantityRules[secondaryKey] || { step: 1 }
-                const secStep = parseRuleNumber(secRule.step, 1)
-                const secBefore = next[secondaryKey]
-                next[secondaryKey] = clampByRule(next[secondaryKey] - secStep, secRule)
-                if (next[secondaryKey] === secBefore) break
+            let changed = false
+            for (const key of adjustmentOrder) {
+                const rule = currentQuantityRules[key] || { step: 1 }
+                const step = parseRuleNumber(rule.step, 1)
+                const before = next[key]
+                next[key] = clampByRule(next[key] - step, rule)
+                if (next[key] !== before) {
+                    changed = true
+                    break
+                }
             }
-            total = next.adults + next.children
+            if (!changed) break
+            total = getTotalFromCounts(next)
         }
     }
 
-    total = next.adults + next.children
+    total = getTotalFromCounts(next)
     if (totalStep > 1) {
         let guard = 0
         while ((total - totalMin) % totalStep !== 0 && guard < 10) {
-            const decRule = currentQuantityRules[preferredKey] || { step: 1 }
-            const decStep = parseRuleNumber(decRule.step, 1)
-            const before = next[preferredKey]
-            next[preferredKey] = clampByRule(next[preferredKey] - decStep, decRule)
-            if (next[preferredKey] === before) break
-            total = next.adults + next.children
+            let changed = false
+            for (const key of adjustmentOrder) {
+                const rule = currentQuantityRules[key] || { step: 1 }
+                const step = parseRuleNumber(rule.step, 1)
+                const before = next[key]
+                next[key] = clampByRule(next[key] - step, rule)
+                if (next[key] !== before) {
+                    changed = true
+                    break
+                }
+            }
+            if (!changed) break
+            total = getTotalFromCounts(next)
             guard++
         }
     }
@@ -297,22 +344,16 @@ function enforceCountsByRules(counts, changedKey) {
 }
 
 function applyCountsToUI(counts) {
-    const adultsEl = document.getElementById('adult-1')
-    const childrenEl = document.getElementById('child-1')
-    if (adultsEl) {
-        if ('value' in adultsEl) {
-            adultsEl.value = String(Math.max(0, counts.adults))
+    PARTY_KEYS.forEach((key) => {
+        const element = document.getElementById(PARTY_INPUT_IDS[key])
+        if (!element) return
+
+        if ('value' in element) {
+            element.value = String(Math.max(0, counts[key]))
         } else {
-            adultsEl.textContent = String(Math.max(0, counts.adults))
+            element.textContent = String(Math.max(0, counts[key]))
         }
-    }
-    if (childrenEl) {
-        if ('value' in childrenEl) {
-            childrenEl.value = String(Math.max(0, counts.children))
-        } else {
-            childrenEl.textContent = String(Math.max(0, counts.children))
-        }
-    }
+    })
 }
 
 let quantityInputsBound = false
@@ -321,16 +362,12 @@ function applyManualCount(type) {
     const el = document.getElementById(type)
     if (!el) return
 
-    const isAdult = type === 'adult-1'
-    const key = isAdult ? 'adults' : 'children'
+    const key = resolvePartyKey(type)
     const raw = ('value' in el) ? el.value : el.textContent
     const parsed = parseInt(String(raw || ''), 10)
 
     const counts = getPartyCounts()
-    const candidate = {
-        adults: counts.adults,
-        children: counts.children
-    }
+    const candidate = { ...counts }
 
     if (Number.isFinite(parsed)) {
         candidate[key] = parsed
@@ -345,17 +382,14 @@ function bindQuantityInputEvents() {
     if (quantityInputsBound) return
     quantityInputsBound = true
 
-    const adultsEl = document.getElementById('adult-1')
-    const childrenEl = document.getElementById('child-1')
+    PARTY_KEYS.forEach((key) => {
+        const inputId = PARTY_INPUT_IDS[key]
+        const input = document.getElementById(inputId)
+        if (!input || !('value' in input)) return
 
-    if (adultsEl && 'value' in adultsEl) {
-        adultsEl.addEventListener('change', function () { applyManualCount('adult-1') })
-        adultsEl.addEventListener('blur', function () { applyManualCount('adult-1') })
-    }
-    if (childrenEl && 'value' in childrenEl) {
-        childrenEl.addEventListener('change', function () { applyManualCount('child-1') })
-        childrenEl.addEventListener('blur', function () { applyManualCount('child-1') })
-    }
+        input.addEventListener('change', function () { applyManualCount(inputId) })
+        input.addEventListener('blur', function () { applyManualCount(inputId) })
+    })
 }
 
 function setNumericInputRules(input, rule, value, fallbackMin = 0) {
@@ -377,41 +411,32 @@ function setNumericInputRules(input, rule, value, fallbackMin = 0) {
 }
 
 function updateCounterButtonStates(counts) {
-    const adultValueEl = document.getElementById('adult-1')
-    const childValueEl = document.getElementById('child-1')
+    PARTY_KEYS.forEach((key) => {
+        const valueElement = document.getElementById(PARTY_INPUT_IDS[key])
+        const controls = valueElement ? valueElement.parentElement : null
+        const decButton = controls ? controls.querySelector('button:nth-of-type(1)') : null
+        const incButton = controls ? controls.querySelector('button:nth-of-type(2)') : null
+        const rule = currentQuantityRules[key] || { min: key === 'adults' ? 1 : 0, max: null }
+        const min = parseRuleNumber(rule.min, key === 'adults' ? 1 : 0)
+        const max = parseRuleNumber(rule.max, null)
 
-    const adultControls = adultValueEl ? adultValueEl.parentElement : null
-    const childControls = childValueEl ? childValueEl.parentElement : null
+        if (decButton) decButton.disabled = counts[key] <= min
 
-    const adultDecBtn = adultControls ? adultControls.querySelector('button:nth-of-type(1)') : null
-    const adultIncBtn = adultControls ? adultControls.querySelector('button:nth-of-type(2)') : null
-    const childDecBtn = childControls ? childControls.querySelector('button:nth-of-type(1)') : null
-    const childIncBtn = childControls ? childControls.querySelector('button:nth-of-type(2)') : null
-
-    const adultRule = currentQuantityRules.adults || { min: 1, max: null }
-    const childRule = currentQuantityRules.children || { min: 0, max: null }
-
-    const adultMin = parseRuleNumber(adultRule.min, 1)
-    const adultMax = parseRuleNumber(adultRule.max, null)
-    const childMin = parseRuleNumber(childRule.min, 0)
-    const childMax = parseRuleNumber(childRule.max, null)
-
-    if (adultDecBtn) adultDecBtn.disabled = counts.adults <= adultMin
-    if (adultIncBtn) adultIncBtn.disabled = adultMax !== null && counts.adults >= adultMax
-    if (childDecBtn) childDecBtn.disabled = counts.children <= childMin
-    if (childIncBtn) childIncBtn.disabled = childMax !== null && counts.children >= childMax
+        const incDisabled = max !== null && counts[key] >= max
+        if (incButton) incButton.disabled = incDisabled
+    })
 }
 
 function syncQuantityConstraintsToForm(counts) {
-    const adultsInput = document.getElementById('booking_adults')
-    const childrenInput = document.getElementById('booking_children')
     const quantityInput = document.getElementById('booking_quantity')
     const cartQuantityInput = document.getElementById('cart_quantity')
 
     const total = getTotalQuantity()
 
-    setNumericInputRules(adultsInput, currentQuantityRules.adults, counts.adults, 1)
-    setNumericInputRules(childrenInput, currentQuantityRules.children, counts.children, 0)
+    PARTY_KEYS.forEach((key) => {
+        const hiddenInput = document.getElementById(PARTY_HIDDEN_IDS[key])
+        setNumericInputRules(hiddenInput, currentQuantityRules[key], counts[key], key === 'adults' ? 1 : 0)
+    })
     setNumericInputRules(quantityInput, currentQuantityRules.total, total, 1)
     setNumericInputRules(cartQuantityInput, currentQuantityRules.total, total, 1)
 
@@ -420,12 +445,12 @@ function syncQuantityConstraintsToForm(counts) {
 
 function applyProposalQuantityRules(proposal, pageProductLimits = null) {
     currentQuantityRules = extractRulesFromProposal(proposal, pageProductLimits)
-    const initial = {
-        adults: parseRuleNumber(currentQuantityRules.adults.quantity, currentQuantityRules.adults.min),
-        children: parseRuleNumber(currentQuantityRules.children.quantity, currentQuantityRules.children.min)
-    }
+    const initial = PARTY_KEYS.reduce((acc, key) => {
+        acc[key] = parseRuleNumber(currentQuantityRules[key].quantity, currentQuantityRules[key].min)
+        return acc
+    }, {})
     const targetMinTotal = parseRuleNumber((currentQuantityRules.total || {}).min, 1)
-    const initialTotal = (Number(initial.adults) || 0) + (Number(initial.children) || 0)
+    const initialTotal = getTotalFromCounts(initial)
     if (targetMinTotal > initialTotal) {
         initial.adults = (Number(initial.adults) || 0) + (targetMinTotal - initialTotal)
     }
@@ -439,19 +464,15 @@ function updateCount(type, delta) {
     const el = document.getElementById(type)
     if (!el) return
 
-    const isAdult = type === 'adult-1'
-    const key = isAdult ? 'adults' : 'children'
-    const rule = isAdult ? currentQuantityRules.adults : currentQuantityRules.children
+    const key = resolvePartyKey(type)
+    const rule = currentQuantityRules[key]
     const step = parseRuleNumber(rule.step, 1)
 
     const counts = getPartyCounts()
-    const currentValue = isAdult ? counts.adults : counts.children
+    const currentValue = counts[key]
     const candidateValue = currentValue + (delta * step)
 
-    const candidate = {
-        adults: counts.adults,
-        children: counts.children
-    }
+    const candidate = { ...counts }
     candidate[key] = candidateValue
 
     const enforced = enforceCountsByRules(candidate, key)
@@ -462,23 +483,21 @@ function updateCount(type, delta) {
 window.updateCount = updateCount
 
 function getPartyCounts() {
-    const adultsEl = document.getElementById('adult-1')
-    const childrenEl = document.getElementById('child-1')
-    const adultMin = parseRuleNumber((currentQuantityRules.adults || {}).min, 1)
-    const childMin = parseRuleNumber((currentQuantityRules.children || {}).min, 0)
-    const adultsRaw = adultsEl ? (('value' in adultsEl) ? adultsEl.value : adultsEl.textContent) : String(adultMin)
-    const childrenRaw = childrenEl ? (('value' in childrenEl) ? childrenEl.value : childrenEl.textContent) : String(childMin)
-    const adults = Math.max(adultMin, parseInt(String(adultsRaw), 10) || adultMin)
-    const children = Math.max(childMin, parseInt(String(childrenRaw), 10) || childMin)
-    return { adults, children }
+    return PARTY_KEYS.reduce((acc, key) => {
+        const input = document.getElementById(PARTY_INPUT_IDS[key])
+        const fallbackMin = parseRuleNumber((currentQuantityRules[key] || {}).min, key === 'adults' ? 1 : 0)
+        const raw = input ? (('value' in input) ? input.value : input.textContent) : String(fallbackMin)
+        acc[key] = Math.max(fallbackMin, parseInt(String(raw), 10) || fallbackMin)
+        return acc
+    }, {})
 }
 
 function initializeQuantityState() {
     bindQuantityInputEvents()
-    const initial = {
-        adults: parseRuleNumber((currentQuantityRules.adults || {}).quantity, parseRuleNumber((currentQuantityRules.adults || {}).min, 1)),
-        children: parseRuleNumber((currentQuantityRules.children || {}).quantity, parseRuleNumber((currentQuantityRules.children || {}).min, 0))
-    }
+    const initial = PARTY_KEYS.reduce((acc, key) => {
+        acc[key] = parseRuleNumber((currentQuantityRules[key] || {}).quantity, parseRuleNumber((currentQuantityRules[key] || {}).min, key === 'adults' ? 1 : 0))
+        return acc
+    }, {})
     const enforced = enforceCountsByRules(initial, 'adults')
     applyCountsToUI(enforced)
     updateSummaryPeople()
@@ -487,7 +506,7 @@ function initializeQuantityState() {
 
 function getTotalQuantity() {
     const counts = enforceCountsByRules(getPartyCounts(), 'adults')
-    const total = counts.adults + counts.children
+    const total = getTotalFromCounts(counts)
     const totalMin = parseRuleNumber((currentQuantityRules.total || {}).min, 1)
     const totalMax = parseRuleNumber((currentQuantityRules.total || {}).max, null)
     let resolved = Math.max(totalMin, total)
@@ -550,16 +569,18 @@ function updateSummaryPeople() {
     const i18n = window.RH_I18N || {}
     const adultsLabel = i18n.adultsLabel || ''
     const childrenLabel = i18n.childrenLabel || ''
+    const twinLabel = i18n.twinLabel || ''
     const adultKartLabel = i18n.adultKartLabel || ''
     const childKartLabel = i18n.childKartLabel || ''
+    const twinKartLabel = i18n.twinKartLabel || ''
 
     if (peopleEl) {
-        peopleEl.innerHTML = `${counts.adults} ${adultsLabel}<br>${counts.children} ${childrenLabel}`
+        peopleEl.innerHTML = `${counts.adults} ${adultsLabel}<br>${counts.children} ${childrenLabel}<br>${counts.twin} ${twinLabel}`
     }
 
     const kartsEl = document.getElementById('summary-karts')
     if (kartsEl) {
-        kartsEl.innerHTML = `${counts.adults} ${adultKartLabel}<br>${counts.children} ${childKartLabel}`
+        kartsEl.innerHTML = `${counts.adults} ${adultKartLabel}<br>${counts.children} ${childKartLabel}<br>${counts.twin} ${twinKartLabel}`
     }
 
     syncQuantityConstraintsToForm(counts)
@@ -625,6 +646,16 @@ function updateSummaryTime(timeStr) {
     if (timeStr) {
         setBookingValidationMessage('time', '')
     }
+}
+
+function getProposalDisplayTime(proposal) {
+    const blocks = proposal && Array.isArray(proposal.blocks) ? proposal.blocks : []
+    const firstBlock = blocks.length ? blocks[0] : null
+    const firstSlot = firstBlock && firstBlock.block ? firstBlock.block : null
+
+    if (!firstSlot || !firstSlot.start) return ''
+
+    return String(firstSlot.start).substring(11, 16)
 }
 
 function setBookingProposalState(options = {}) {
@@ -1039,14 +1070,13 @@ async function fetchAndRenderTimeslots(dateStr) {
                 const firstBlock = blocks.length ? blocks[0] : null
                 const firstSlot = firstBlock && firstBlock.block ? firstBlock.block : {}
                 const resourceId = firstSlot.resourceId || (firstBlock && firstBlock.productLineIds && firstBlock.productLineIds[0]) || ''
-                const start = firstSlot.start ? firstSlot.start.substring(11, 16) : ''
-                const stop = firstSlot.stop ? firstSlot.stop.substring(11, 16) : ''
+                const start = getProposalDisplayTime(proposal)
                 const blockName = firstSlot && firstSlot.name ? String(firstSlot.name).trim() : ''
 
                 const btn = document.createElement('button')
                 btn.className = 'time-slot'
-                btn.textContent = blockName ? `${blockName} - ${start}` : `${start} - ${stop}`
-                btn.setAttribute('data-time', `${start} - ${stop}`)
+                btn.textContent = blockName ? `${blockName} - ${start}` : start
+                btn.setAttribute('data-time', start)
 
                 // Disable button if slot == 0
                 if (firstSlot.slot === 0) {

@@ -62,8 +62,10 @@ window.RH_PRICE_CONFIG = {
 window.RH_I18N = {
     adultsLabel: <?php echo wp_json_encode( __( 'voksne', 'racehall-wc-ui' ) ); ?>,
     childrenLabel: <?php echo wp_json_encode( __( 'børn', 'racehall-wc-ui' ) ); ?>,
+    twinLabel: <?php echo wp_json_encode( __( 'twin kart', 'racehall-wc-ui' ) ); ?>,
     adultKartLabel: <?php echo wp_json_encode( __( 'voksen karts', 'racehall-wc-ui' ) ); ?>,
     childKartLabel: <?php echo wp_json_encode( __( 'børne kart', 'racehall-wc-ui' ) ); ?>,
+    twinKartLabel: <?php echo wp_json_encode( __( 'twin kart', 'racehall-wc-ui' ) ); ?>,
     monthNames: <?php echo wp_json_encode( [
         __( 'januar', 'racehall-wc-ui' ),
         __( 'februar', 'racehall-wc-ui' ),
@@ -350,6 +352,18 @@ window.RH_I18N = {
                                 </div>
                             </div>
 
+                            <div class="counter-row">
+                                <div class="counter-label">
+                                    <strong><?php esc_html_e( 'Twin kart', 'racehall-wc-ui' ); ?></strong>
+                                    <small><?php esc_html_e( 'Passager mindst 90 cm. og chauffør mindst 18 år.', 'racehall-wc-ui' ); ?></small>
+                                </div>
+                                <div class="counter-controls">
+                                    <button type="button" onclick="updateCount('twin-1', -1)">−</button>
+                                    <input type="number" id="twin-1" value="0" min="0" step="1" inputmode="numeric" />
+                                    <button type="button" onclick="updateCount('twin-1', 1)">+</button>
+                                </div>
+                            </div>
+
                         </div>
                     </div>
                 </div>
@@ -383,7 +397,7 @@ window.RH_I18N = {
                             <div class="summary-section">
                                 <h4><?php esc_html_e( 'Antal', 'racehall-wc-ui' ); ?></h4>
                                 <div class="summary-item">
-                                    <span id="summary-people" class="summary-label"><?php echo wp_kses_post( __( '1 voksen<br>0 børn', 'racehall-wc-ui' ) ); ?></span>
+                                    <span id="summary-people" class="summary-label"><?php echo wp_kses_post( __( '1 voksen<br>0 børn<br>0 twin kart', 'racehall-wc-ui' ) ); ?></span>
                                 </div>
                             </div>
 
@@ -395,7 +409,7 @@ window.RH_I18N = {
                             </div>
 
                             <div class="summary-section">
-                                <h4><?php esc_html_e( 'Tidspunkt', 'racehall-wc-ui' ); ?></h4>
+                                <h4><?php esc_html_e( 'Køretid (mødetid 30 min. før)', 'racehall-wc-ui' ); ?></h4>
                                 <div class="summary-item">
                                     <span id="summary-time" class="summary-label"></span>
                                 </div>
@@ -419,6 +433,7 @@ window.RH_I18N = {
                                                     <input type="hidden" name="booking_page_products" id="booking_page_products">
                                         <input type="hidden" name="booking_adults" id="booking_adults" value="1">
                                         <input type="hidden" name="booking_children" id="booking_children" value="0">
+                                                    <input type="hidden" name="booking_twin" id="booking_twin" value="0">
                                         <input type="hidden" name="booking_quantity" id="booking_quantity" value="1">
                                         <input type="hidden" name="booking_location" id="booking_location"
                                             value="<?php echo esc_attr( $lokation ); ?>">

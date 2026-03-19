@@ -875,13 +875,40 @@ function wk_rh_save_booking_data_to_cart( $cart_item_data, $product_id ) {
     if ( isset( $_POST['booking_children'] ) ) {
         $cart_item_data['booking_children'] = max( 0, intval( $_POST['booking_children'] ) );
     }
+    if ( isset( $_POST['booking_twin'] ) ) {
+        $cart_item_data['booking_twin'] = max( 0, intval( $_POST['booking_twin'] ) );
+    }
     return $cart_item_data;
+}
+
+function wk_rh_get_booking_participant_counts( array $source ) {
+    return [
+        'adults'   => isset( $source['booking_adults'] ) ? max( 0, (int) $source['booking_adults'] ) : 0,
+        'children' => isset( $source['booking_children'] ) ? max( 0, (int) $source['booking_children'] ) : 0,
+        'twin'     => isset( $source['booking_twin'] ) ? max( 0, (int) $source['booking_twin'] ) : 0,
+    ];
+}
+
+function wk_rh_get_booking_total_participants( array $counts ) {
+    return max( 0, (int) ( $counts['adults'] ?? 0 ) ) + max( 0, (int) ( $counts['children'] ?? 0 ) ) + max( 0, (int) ( $counts['twin'] ?? 0 ) );
+}
+
+function wk_rh_format_booking_participants_text( array $source ) {
+    $counts = wk_rh_get_booking_participant_counts( $source );
+
+    return sprintf(
+        'Voksen kart: %1$d, Børnekart: %2$d, Twin kart: %3$d',
+        $counts['adults'],
+        $counts['children'],
+        $counts['twin']
+    );
 }
 
 function wk_rh_extract_quantity_rules_from_proposal( $proposal ) {
     $rules = [
         'adults' => [ 'min' => 1, 'max' => null, 'step' => 1 ],
         'kids' => [ 'min' => 0, 'max' => null, 'step' => 1 ],
+        'twin' => [ 'min' => 0, 'max' => null, 'step' => 1 ],
         'total' => [ 'min' => 1, 'max' => null, 'step' => 1 ],
     ];
 
@@ -947,6 +974,8 @@ function wk_rh_extract_quantity_rules_from_proposal( $proposal ) {
             $target_key = 'adults';
         } elseif ( in_array( $tag, [ 'kids', 'children', 'child', 'born', 'børn' ], true ) ) {
             $target_key = 'kids';
+        } elseif ( in_array( $tag, [ 'twin', 'twinkart', 'tandem', 'passenger' ], true ) ) {
+            $target_key = 'twin';
         }
 
         if ( $target_key === null ) {
@@ -1019,9 +1048,10 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
 
     $adults = isset( $_POST['booking_adults'] ) ? max( 0, (int) $_POST['booking_adults'] ) : null;
     $kids   = isset( $_POST['booking_children'] ) ? max( 0, (int) $_POST['booking_children'] ) : null;
+    $twin   = isset( $_POST['booking_twin'] ) ? max( 0, (int) $_POST['booking_twin'] ) : null;
     $qty    = max( 1, (int) $quantity );
 
-    if ( $adults === null && $kids === null ) {
+    if ( $adults === null && $kids === null && $twin === null ) {
         return $passed;
     }
     if ( $adults === null ) {
@@ -1030,10 +1060,14 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
     if ( $kids === null ) {
         $kids = 0;
     }
+    if ( $twin === null ) {
+        $twin = 0;
+    }
 
     $group_checks = [
         [ 'name' => __( 'Adults', 'onsite-booking-system' ), 'value' => $adults, 'rules' => $rules['adults'] ],
         [ 'name' => __( 'Children', 'onsite-booking-system' ), 'value' => $kids, 'rules' => $rules['kids'] ],
+        [ 'name' => __( 'Twin kart', 'racehall-wc-ui' ), 'value' => $twin, 'rules' => $rules['twin'] ],
     ];
 
     foreach ( $group_checks as $check ) {
@@ -1058,7 +1092,13 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
         }
     }
 
-    $total = $adults + $kids;
+    $counts = [
+        'adults' => $adults,
+        'children' => $kids,
+        'twin' => $twin,
+    ];
+
+    $total = wk_rh_get_booking_total_participants( $counts );
     if ( $total !== $qty ) {
         wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'reason' => 'total_quantity_mismatch', 'total' => $total, 'quantity' => $qty, 'productId' => $product_id ], 'warning' );
         wc_add_notice( __( 'Participant quantities do not match selected booking quantity.', 'onsite-booking-system' ), 'error' );
@@ -1223,10 +1263,8 @@ function wk_rh_show_booking_data_in_cart( $item_data, $cart_item ) {
     if ( isset( $cart_item['booking_location'] ) ) {
         $item_data[] = [ 'name' => 'Lokation', 'value' => $cart_item['booking_location'] ];
     }
-    if ( isset( $cart_item['booking_adults'] ) || isset( $cart_item['booking_children'] ) ) {
-        $adults = isset( $cart_item['booking_adults'] ) ? (int) $cart_item['booking_adults'] : 0;
-        $children = isset( $cart_item['booking_children'] ) ? (int) $cart_item['booking_children'] : 0;
-        $item_data[] = [ 'name' => 'Deltagere', 'value' => $adults . ' voksne, ' . $children . ' børn' ];
+    if ( isset( $cart_item['booking_adults'] ) || isset( $cart_item['booking_children'] ) || isset( $cart_item['booking_twin'] ) ) {
+        $item_data[] = [ 'name' => 'Deltagere', 'value' => wk_rh_format_booking_participants_text( $cart_item ) ];
     }
     return $item_data;
 }
@@ -1247,11 +1285,9 @@ function wk_rh_get_checkout_booking_details_text( $cart_item ) {
         $parts[] = 'Lokation: ' . sanitize_text_field( $cart_item['booking_location'] );
     }
 
-    $has_people = isset( $cart_item['booking_adults'] ) || isset( $cart_item['booking_children'] );
+    $has_people = isset( $cart_item['booking_adults'] ) || isset( $cart_item['booking_children'] ) || isset( $cart_item['booking_twin'] );
     if ( $has_people ) {
-        $adults   = isset( $cart_item['booking_adults'] ) ? (int) $cart_item['booking_adults'] : 0;
-        $children = isset( $cart_item['booking_children'] ) ? (int) $cart_item['booking_children'] : 0;
-        $parts[]  = 'Deltagere: ' . $adults . ' voksne, ' . $children . ' børn';
+        $parts[]  = 'Deltagere: ' . wk_rh_format_booking_participants_text( $cart_item );
     }
 
     if ( empty( $parts ) ) {
@@ -1322,6 +1358,9 @@ function wk_rh_add_booking_data_to_order_items( $item, $cart_item_key, $values, 
     }
     if ( isset( $values['booking_children'] ) ) {
         $item->add_meta_data( 'Børn', (int) $values['booking_children'], true );
+    }
+    if ( isset( $values['booking_twin'] ) ) {
+        $item->add_meta_data( 'Twin kart', (int) $values['booking_twin'], true );
     }
 }
 

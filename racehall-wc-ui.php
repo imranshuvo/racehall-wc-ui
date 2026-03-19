@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.79
+ * Version: 1.80
  * Author: Webkonsulenterne ApS
  */
 
@@ -47,7 +47,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.79' );
+define( 'RACEHALL_WC_UI_VERSION', '1.80' );
 
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
@@ -2608,6 +2608,81 @@ function wk_rh_get_checkout_step_required_keys() {
     ];
 }
 
+function wk_rh_force_required_default_address_fields( $fields ) {
+    foreach ( [ 'address_1', 'postcode', 'city' ] as $key ) {
+        if ( isset( $fields[ $key ] ) && is_array( $fields[ $key ] ) ) {
+            $fields[ $key ]['required'] = true;
+        }
+    }
+
+    return $fields;
+}
+add_filter( 'woocommerce_default_address_fields', 'wk_rh_force_required_default_address_fields', 20 );
+
+function wk_rh_force_required_checkout_billing_fields( $fields ) {
+    if ( ! isset( $fields['billing'] ) || ! is_array( $fields['billing'] ) ) {
+        return $fields;
+    }
+
+    foreach ( [ 'billing_address_1', 'billing_postcode', 'billing_city' ] as $key ) {
+        if ( isset( $fields['billing'][ $key ] ) && is_array( $fields['billing'][ $key ] ) ) {
+            $fields['billing'][ $key ]['required'] = true;
+        }
+    }
+
+    return $fields;
+}
+add_filter( 'woocommerce_checkout_fields', 'wk_rh_force_required_checkout_billing_fields', 20 );
+
+function wk_rh_force_required_billing_fields( $fields ) {
+    if ( ! is_array( $fields ) ) {
+        return $fields;
+    }
+
+    foreach ( [ 'billing_address_1', 'billing_postcode', 'billing_city' ] as $key ) {
+        if ( isset( $fields[ $key ] ) && is_array( $fields[ $key ] ) ) {
+            $fields[ $key ]['required'] = true;
+        }
+    }
+
+    return $fields;
+}
+add_filter( 'woocommerce_billing_fields', 'wk_rh_force_required_billing_fields', 20 );
+
+function wk_rh_normalize_company_field_config( array $field ) {
+    $company_text = __( 'Company', 'woocommerce' );
+
+    $field['label'] = $company_text;
+    $field['placeholder'] = $company_text;
+    $field['suppress_optional_suffix'] = true;
+
+    return $field;
+}
+
+function wk_rh_normalize_billing_company_field( $fields ) {
+    if ( ! is_array( $fields ) || ! isset( $fields['billing_company'] ) || ! is_array( $fields['billing_company'] ) ) {
+        return $fields;
+    }
+
+    $fields['billing_company'] = wk_rh_normalize_company_field_config( $fields['billing_company'] );
+
+    return $fields;
+}
+add_filter( 'woocommerce_billing_fields', 'wk_rh_normalize_billing_company_field', 30 );
+
+function wk_rh_normalize_checkout_company_field( $fields ) {
+    if ( ! isset( $fields['billing'] ) || ! is_array( $fields['billing'] ) ) {
+        return $fields;
+    }
+
+    if ( isset( $fields['billing']['billing_company'] ) && is_array( $fields['billing']['billing_company'] ) ) {
+        $fields['billing']['billing_company'] = wk_rh_normalize_company_field_config( $fields['billing']['billing_company'] );
+    }
+
+    return $fields;
+}
+add_filter( 'woocommerce_checkout_fields', 'wk_rh_normalize_checkout_company_field', 30 );
+
 function wk_rh_get_checkout_prefill_keys() {
     return [
         'billing_first_name',
@@ -2669,6 +2744,26 @@ function wk_rh_store_checkout_prefill( array $posted_data ) {
         $customer->save();
     }
 }
+
+function wk_rh_validate_required_checkout_address_fields( $posted_data, $errors ) {
+    if ( ! $errors instanceof WP_Error ) {
+        return;
+    }
+
+    $required_map = [
+        'billing_address_1' => __( 'Gade og nr.', 'racehall-wc-ui' ),
+        'billing_postcode'  => __( 'Postnummer', 'racehall-wc-ui' ),
+        'billing_city'      => __( 'By', 'racehall-wc-ui' ),
+    ];
+
+    foreach ( $required_map as $key => $label ) {
+        $value = isset( $posted_data[ $key ] ) ? sanitize_text_field( wp_unslash( (string) $posted_data[ $key ] ) ) : '';
+        if ( $value === '' ) {
+            $errors->add( 'rh_required_' . $key, sprintf( __( '%s er et påkrævet felt.', 'racehall-wc-ui' ), $label ) );
+        }
+    }
+}
+add_action( 'woocommerce_after_checkout_validation', 'wk_rh_validate_required_checkout_address_fields', 10, 2 );
 
 function wk_rh_get_checkout_prefill_value( $checkout, $key ) {
     $key = sanitize_key( (string) $key );
@@ -2974,9 +3069,19 @@ function wk_rh_validate_checkout_booking_quantity( array $cart_item, $quantity, 
     $rules = wk_rh_extract_quantity_rules_from_proposal( $proposal );
     $rules = wk_rh_apply_page_product_limits_to_rules( $rules, $cart_item['bmi_page_product_limits'] ?? null );
 
-    $adults = isset( $cart_item['booking_adults'] ) ? max( 0, (int) $cart_item['booking_adults'] ) : 0;
-    $kids   = isset( $cart_item['booking_children'] ) ? max( 0, (int) $cart_item['booking_children'] ) : 0;
-    $total  = $adults + $kids;
+    $counts = function_exists( 'wk_rh_get_booking_participant_counts' )
+        ? wk_rh_get_booking_participant_counts( $cart_item )
+        : [
+            'adults' => isset( $cart_item['booking_adults'] ) ? max( 0, (int) $cart_item['booking_adults'] ) : 0,
+            'children' => isset( $cart_item['booking_children'] ) ? max( 0, (int) $cart_item['booking_children'] ) : 0,
+            'twin' => isset( $cart_item['booking_twin'] ) ? max( 0, (int) $cart_item['booking_twin'] ) : 0,
+        ];
+    $adults = $counts['adults'];
+    $kids   = $counts['children'];
+    $twin   = $counts['twin'];
+    $total  = function_exists( 'wk_rh_get_booking_total_participants' )
+        ? wk_rh_get_booking_total_participants( $counts )
+        : ( $adults + $kids + $twin );
     $qty    = max( 1, (int) $quantity );
 
     if ( $total > 0 && $total !== $qty ) {
@@ -2987,11 +3092,13 @@ function wk_rh_validate_checkout_booking_quantity( array $cart_item, $quantity, 
     if ( $total === 0 ) {
         $total = $qty;
         $adults = $qty;
+        $twin = 0;
     }
 
     $group_checks = [
         [ 'label' => __( 'Adults', 'onsite-booking-system' ), 'value' => $adults, 'rules' => $rules['adults'] ],
         [ 'label' => __( 'Children', 'onsite-booking-system' ), 'value' => $kids, 'rules' => $rules['kids'] ],
+        [ 'label' => __( 'Twin kart', 'racehall-wc-ui' ), 'value' => $twin, 'rules' => $rules['twin'] ?? [ 'min' => 0, 'max' => null, 'step' => 1 ] ],
     ];
 
     foreach ( $group_checks as $check ) {
