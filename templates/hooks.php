@@ -130,7 +130,64 @@ function wk_rh_get_token( $location = '' ) {
     return $token;
 }
 
-function wk_rh_get_product_image_data_uri( $location, $product_id, $allow_remote_fetch = true ) {
+function wk_rh_detect_image_content_type( $body, $content_type = '' ) {
+    $content_type = is_string( $content_type ) ? trim( strtolower( (string) $content_type ) ) : '';
+    if ( $content_type !== '' ) {
+        $content_type = preg_replace( '/\s*;.*$/', '', $content_type );
+        if ( is_string( $content_type ) && strpos( $content_type, 'image/' ) === 0 ) {
+            return $content_type;
+        }
+    }
+
+    if ( ! is_string( $body ) || $body === '' ) {
+        return 'image/jpeg';
+    }
+
+    if ( function_exists( 'getimagesizefromstring' ) ) {
+        $image_info = @getimagesizefromstring( $body );
+        if ( is_array( $image_info ) && ! empty( $image_info['mime'] ) && is_string( $image_info['mime'] ) ) {
+            $detected_mime = trim( strtolower( $image_info['mime'] ) );
+            if ( strpos( $detected_mime, 'image/' ) === 0 ) {
+                return $detected_mime;
+            }
+        }
+    }
+
+    if ( class_exists( 'finfo' ) ) {
+        $finfo = new finfo( FILEINFO_MIME_TYPE );
+        $detected_mime = $finfo->buffer( $body );
+        if ( is_string( $detected_mime ) ) {
+            $detected_mime = trim( strtolower( $detected_mime ) );
+            if ( strpos( $detected_mime, 'image/' ) === 0 ) {
+                return $detected_mime;
+            }
+        }
+    }
+
+    if ( strncmp( $body, "\x89PNG\r\n\x1a\n", 8 ) === 0 ) {
+        return 'image/png';
+    }
+
+    if ( strncmp( $body, "\xff\xd8\xff", 3 ) === 0 ) {
+        return 'image/jpeg';
+    }
+
+    if ( strncmp( $body, 'GIF87a', 6 ) === 0 || strncmp( $body, 'GIF89a', 6 ) === 0 ) {
+        return 'image/gif';
+    }
+
+    if ( strncmp( $body, 'RIFF', 4 ) === 0 && substr( $body, 8, 4 ) === 'WEBP' ) {
+        return 'image/webp';
+    }
+
+    if ( stripos( ltrim( $body ), '<svg' ) === 0 ) {
+        return 'image/svg+xml';
+    }
+
+    return 'image/jpeg';
+}
+
+function wk_rh_get_product_image_data_uri( $location, $product_id ) {
     static $runtime_image_cache = [];
 
     $product_id = trim( (string) $product_id );
@@ -150,11 +207,6 @@ function wk_rh_get_product_image_data_uri( $location, $product_id, $allow_remote
         return $cached;
     }
 
-    if ( ! $allow_remote_fetch ) {
-        $runtime_image_cache[ $runtime_key ] = '';
-        return '';
-    }
-
     $token = wk_rh_get_token( $location );
     $creds = wk_rh_get_api_credentials( $location );
     if ( ! $token || empty( $creds['client_key'] ) || empty( $creds['subscription_key'] ) || empty( $creds['base_url'] ) ) {
@@ -169,7 +221,7 @@ function wk_rh_get_product_image_data_uri( $location, $product_id, $allow_remote
         [
             'headers' => [
                 'Authorization'        => 'Bearer ' . $token,
-                'Content-Type'         => 'application/json',
+                'Accept'               => 'image/*',
                 'Accept-Language'      => $creds['accept_language'],
                 'Bmi-Subscription-Key' => $creds['subscription_key'],
             ],
@@ -201,10 +253,7 @@ function wk_rh_get_product_image_data_uri( $location, $product_id, $allow_remote
     }
 
     $content_type = wp_remote_retrieve_header( $response, 'content-type' );
-    $content_type = is_string( $content_type ) ? trim( $content_type ) : '';
-    if ( strpos( $content_type, 'image/' ) !== 0 ) {
-        $content_type = 'image/jpeg';
-    }
+    $content_type = wk_rh_detect_image_content_type( $body, is_string( $content_type ) ? $content_type : '' );
 
     $data_uri = 'data:' . $content_type . ';base64,' . base64_encode( $body );
     set_transient( $cache_key, $data_uri, 12 * HOUR_IN_SECONDS );

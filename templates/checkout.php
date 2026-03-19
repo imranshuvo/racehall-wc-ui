@@ -174,7 +174,7 @@ window.RH_CHECKOUT_I18N = {
 <div class="form-group">
     <textarea name="order_comments"
               class="form-textarea"
-              placeholder="<?php echo esc_attr__( 'Evt. noter', 'racehall-wc-ui' ); ?>"
+              placeholder="<?php echo esc_attr( function_exists( 'wk_rh_get_order_comments_placeholder_text' ) ? wk_rh_get_order_comments_placeholder_text() : __( 'Bemærkninger til din ordre, f.eks. hvor mange børn under 13 år deltager?', 'racehall-wc-ui' ) ); ?>"
               rows="6"><?php echo esc_textarea( $checkout->get_value('order_comments') ); ?></textarea>
 </div>
 

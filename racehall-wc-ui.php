@@ -49,6 +49,26 @@ define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
 define( 'RACEHALL_WC_UI_VERSION', '1.80' );
 
+function wk_rh_hide_admin_shipping_line_items_css() {
+    if ( ! is_admin() || ! function_exists( 'get_current_screen' ) ) {
+        return;
+    }
+
+    $screen = get_current_screen();
+    if ( ! $screen ) {
+        return;
+    }
+
+    $screen_id = isset( $screen->id ) ? (string) $screen->id : '';
+    $allowed_screen_ids = [ 'shop_order', 'woocommerce_page_wc-orders' ];
+    if ( ! in_array( $screen_id, $allowed_screen_ids, true ) ) {
+        return;
+    }
+
+    echo '<style>tbody#order_shipping_line_items{display:none!important;}</style>';
+}
+add_action( 'admin_head', 'wk_rh_hide_admin_shipping_line_items_css' );
+
 function wk_rh_get_log_environment() {
     $settings = wk_rh_get_settings();
     $environment = isset( $settings['environment'] ) && $settings['environment'] === 'live' ? 'live' : 'test';
@@ -937,6 +957,89 @@ function wk_rh_render_checkoutwc_hold_banner() {
 add_action( 'cfw_before_checkout_form', 'wk_rh_render_checkoutwc_hold_banner', 5 );
 add_action( 'cfw_before_main_content', 'wk_rh_render_checkoutwc_hold_banner', 5 );
 
+function wk_rh_filter_checkoutwc_order_updates_text( $text ) {
+    return __( 'Du modtager booking bekræftelse via e-mail', 'racehall-wc-ui' );
+}
+add_filter( 'cfw_order_updates_text', 'wk_rh_filter_checkoutwc_order_updates_text', 20 );
+
+add_filter( 'cfw_billing_shipping_address_heading', '__return_empty_string', 20 );
+
+function wk_rh_output_checkoutwc_thank_you_customer_information_wrapped( $order ) {
+    if ( function_exists( 'cfw_thank_you_section_auto_wrap' ) ) {
+        cfw_thank_you_section_auto_wrap( 'wk_rh_output_checkoutwc_thank_you_customer_information', 'cfw-customer-information', [ $order ] );
+        return;
+    }
+
+    wk_rh_output_checkoutwc_thank_you_customer_information( $order );
+}
+
+function wk_rh_output_checkoutwc_thank_you_customer_information( $order ) {
+    if ( ! $order instanceof WC_Order ) {
+        return;
+    }
+
+    $payment_method_title = $order->get_payment_method_title();
+    ?>
+    <h3><?php esc_html_e( 'Information', 'checkout-wc' ); ?></h3>
+
+    <?php do_action( 'cfw_before_thank_you_customer_information', $order ); ?>
+
+    <div class="row">
+        <div class="col">
+            <h6><?php esc_html_e( 'Contact information', 'checkout-wc' ); ?></h6>
+            <p><?php echo esc_html( (string) $order->get_billing_email() ); ?></p>
+        </div>
+        <?php if ( ! empty( $payment_method_title ) ) : ?>
+            <div class="col">
+                <h6><?php esc_html_e( 'Payment', 'checkout-wc' ); ?></h6>
+                <p><?php echo esc_html( (string) $payment_method_title ); ?></p>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-6">
+            <address>
+                <?php
+                echo wp_kses_post(
+                    $order->needs_shipping_address() && ! wc_ship_to_billing_address_only()
+                        ? $order->get_formatted_shipping_address( esc_html__( 'N/A', 'woocommerce' ) )
+                        : $order->get_formatted_billing_address( esc_html__( 'N/A', 'woocommerce' ) )
+                );
+                ?>
+            </address>
+        </div>
+    </div>
+
+    <div class="clear"></div>
+
+    <?php
+    if ( function_exists( 'cfw_do_action' ) ) {
+        cfw_do_action( 'woocommerce_order_details_after_customer_details', $order );
+        cfw_do_action( 'woocommerce_order_details_after_order_table', $order );
+    } else {
+        do_action( 'woocommerce_order_details_after_customer_details', $order );
+        do_action( 'woocommerce_order_details_after_order_table', $order );
+    }
+}
+
+function wk_rh_replace_checkoutwc_thank_you_customer_information() {
+    if ( is_admin() ) {
+        return;
+    }
+
+    if ( function_exists( 'is_order_received_page' ) && ! is_order_received_page() ) {
+        return;
+    }
+
+    if ( function_exists( 'cfw_thank_you_customer_information_wrapped' ) ) {
+        remove_action( 'cfw_thank_you_content', 'cfw_thank_you_customer_information_wrapped', 80 );
+    }
+
+    add_action( 'cfw_thank_you_content', 'wk_rh_output_checkoutwc_thank_you_customer_information_wrapped', 80, 1 );
+}
+add_action( 'wp', 'wk_rh_replace_checkoutwc_thank_you_customer_information', 30 );
+
 function wk_rh_render_checkout_loading_overlay() {
     static $already_rendered = false;
 
@@ -1048,9 +1151,11 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                 <section class="left">
                     <h2 style="color: #fff;"><?php esc_html_e( 'FULDFØR DIN OPLEVELSE', 'racehall-wc-ui' ); ?></h2>
                     <p><?php esc_html_e( 'Løft din oplevelse til næste niveau. Her får du muligheden for at skræddersy dit race, finjustere detaljerne og sætte dit personlige præg på dagen. Uanset om jagten er fart, præcision eller bare den perfekte oplevelse, er dette stedet, hvor du former dit eget løb.', 'racehall-wc-ui' ); ?></p>
+                    <!--
                     <div class="trophy">
                         <img src="<?php echo esc_url( plugins_url( 'assets/image/trophy.png', __FILE__ ) ); ?>" alt="<?php echo esc_attr__( 'Trophy illustration', 'racehall-wc-ui' ); ?>" />
                     </div>
+        -->
                 </section>
                 <div class="center wk-rh-checkout-addons-shell">
                     <section class="addons wk-rh-checkout-addons-list">
@@ -1092,7 +1197,7 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                     $display_qty = $current_qty > 0 ? $current_qty : $min_qty;
                     $price_amount = wk_rh_get_supplement_price_amount( $supplement );
                     $addon_image = function_exists( 'wk_rh_get_product_image_data_uri' )
-                        ? wk_rh_get_product_image_data_uri( $location, $upstream_id, false )
+                        ? wk_rh_get_product_image_data_uri( $location, $upstream_id )
                         : '';
                     ?>
                     <div
@@ -2650,6 +2755,17 @@ function wk_rh_normalize_company_field_config( array $field ) {
     return $field;
 }
 
+function wk_rh_get_order_comments_placeholder_text() {
+    return __( 'Bemærkninger til din ordre, f.eks. hvor mange børn under 13 år deltager?', 'racehall-wc-ui' );
+}
+
+function wk_rh_normalize_order_comments_field_config( array $field ) {
+    $field['placeholder'] = wk_rh_get_order_comments_placeholder_text();
+    $field['suppress_optional_suffix'] = true;
+
+    return $field;
+}
+
 function wk_rh_normalize_billing_company_field( $fields ) {
     if ( ! is_array( $fields ) || ! isset( $fields['billing_company'] ) || ! is_array( $fields['billing_company'] ) ) {
         return $fields;
@@ -2673,6 +2789,19 @@ function wk_rh_normalize_checkout_company_field( $fields ) {
     return $fields;
 }
 add_filter( 'woocommerce_checkout_fields', 'wk_rh_normalize_checkout_company_field', 30 );
+
+function wk_rh_normalize_checkout_order_comments_field( $fields ) {
+    if ( ! isset( $fields['order'] ) || ! is_array( $fields['order'] ) ) {
+        return $fields;
+    }
+
+    if ( isset( $fields['order']['order_comments'] ) && is_array( $fields['order']['order_comments'] ) ) {
+        $fields['order']['order_comments'] = wk_rh_normalize_order_comments_field_config( $fields['order']['order_comments'] );
+    }
+
+    return $fields;
+}
+add_filter( 'woocommerce_checkout_fields', 'wk_rh_normalize_checkout_order_comments_field', 30 );
 
 function wk_rh_get_checkout_prefill_keys() {
     return [
