@@ -576,6 +576,17 @@ body.checkout-wc .wk-rh-addon-qty-btn {
   cursor: pointer;
 }
 
+body.checkout-wc .wk-rh-addon-card.has-required-name-marker {
+  border: 2px solid #C8102E;
+  box-shadow: inset 0 0 0 1px rgba(200, 16, 46, 0.25);
+}
+
+body.checkout-wc .wk-rh-addon-card.has-required-name-marker .title {
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 body.checkout-wc .wk-rh-invalid,
 body.checkout-wc .wk-rh-invalid-wrap input,
 body.checkout-wc .wk-rh-invalid-wrap select,

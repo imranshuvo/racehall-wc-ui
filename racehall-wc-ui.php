@@ -425,9 +425,40 @@ function wk_rh_get_settings_defaults() {
         'logging_enabled'     => 'yes',
         'addon_product_id'    => 0,
         'booking_hold_timeout_minutes' => 15,
+        'required_supplement_name_markers' => 'obligatorisk,obligatory,required,mandatory',
         'test_locations_json' => '[]',
         'live_locations_json' => '[]',
     ];
+}
+
+function wk_rh_normalize_required_supplement_match_string( $value ) {
+    $value = wp_strip_all_tags( (string) $value );
+    $value = trim( preg_replace( '/\s+/', ' ', $value ) );
+
+    if ( function_exists( 'mb_strtolower' ) ) {
+        return mb_strtolower( $value, 'UTF-8' );
+    }
+
+    return strtolower( $value );
+}
+
+function wk_rh_get_required_supplement_name_markers() {
+    $settings = wk_rh_get_settings();
+    $raw_markers = isset( $settings['required_supplement_name_markers'] )
+        ? (string) $settings['required_supplement_name_markers']
+        : '';
+
+    $markers = [];
+    foreach ( explode( ',', $raw_markers ) as $marker ) {
+        $marker = wk_rh_normalize_required_supplement_match_string( $marker );
+        if ( $marker !== '' ) {
+            $markers[] = $marker;
+        }
+    }
+
+    $markers = array_values( array_unique( $markers ) );
+
+    return apply_filters( 'wk_rh_required_supplement_name_markers', $markers );
 }
 
 function wk_rh_is_logging_enabled() {
@@ -712,6 +743,7 @@ function wk_rh_sanitize_settings( $input ) {
         'logging_enabled'     => ! empty( $input['logging_enabled'] ) && $input['logging_enabled'] === 'yes' ? 'yes' : 'no',
         'addon_product_id'    => $addon_product_id,
         'booking_hold_timeout_minutes' => max( 5, min( 120, (int) ( $input['booking_hold_timeout_minutes'] ?? $defaults['booking_hold_timeout_minutes'] ) ) ),
+        'required_supplement_name_markers' => sanitize_text_field( $input['required_supplement_name_markers'] ?? $defaults['required_supplement_name_markers'] ),
         'test_locations_json' => wk_rh_sanitize_locations_json( $input['test_locations_json'] ?? '[]', 'wk_rh_test_locations_json_invalid' ),
         'live_locations_json' => wk_rh_sanitize_locations_json( $input['live_locations_json'] ?? '[]', 'wk_rh_live_locations_json_invalid' ),
     ];
@@ -964,6 +996,23 @@ add_filter( 'cfw_order_updates_text', 'wk_rh_filter_checkoutwc_order_updates_tex
 
 add_filter( 'cfw_billing_shipping_address_heading', '__return_empty_string', 20 );
 
+function wk_rh_remove_shipping_total_from_order_received( $total_rows, $order, $tax_display ) {
+    if ( ! $order instanceof WC_Order ) {
+        return $total_rows;
+    }
+
+    if ( ! function_exists( 'is_order_received_page' ) || ! is_order_received_page() ) {
+        return $total_rows;
+    }
+
+    if ( isset( $total_rows['shipping'] ) ) {
+        unset( $total_rows['shipping'] );
+    }
+
+    return $total_rows;
+}
+add_filter( 'woocommerce_get_order_item_totals', 'wk_rh_remove_shipping_total_from_order_received', 20, 3 );
+
 function wk_rh_output_checkoutwc_thank_you_customer_information_wrapped( $order ) {
     if ( function_exists( 'cfw_thank_you_section_auto_wrap' ) ) {
         cfw_thank_you_section_auto_wrap( 'wk_rh_output_checkoutwc_thank_you_customer_information', 'cfw-customer-information', [ $order ] );
@@ -1196,12 +1245,13 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                     $current_qty = wk_rh_get_addon_quantity_by_upstream_id( $upstream_id );
                     $display_qty = $current_qty > 0 ? $current_qty : $min_qty;
                     $price_amount = wk_rh_get_supplement_price_amount( $supplement );
+                    $is_required_supplement = wk_rh_is_required_supplement( $supplement );
                     $addon_image = function_exists( 'wk_rh_get_product_image_data_uri' )
                         ? wk_rh_get_product_image_data_uri( $location, $upstream_id )
                         : '';
                     ?>
                     <div
-                        class="addon wk-rh-addon-card <?php echo $current_qty > 0 ? 'is-selected' : ''; ?>"
+                        class="addon wk-rh-addon-card <?php echo $current_qty > 0 ? 'is-selected' : ''; ?> <?php echo $is_required_supplement ? 'has-required-name-marker' : ''; ?>"
                         data-addon-upstream-id="<?php echo esc_attr( $upstream_id ); ?>"
                         data-current-qty="<?php echo esc_attr( $current_qty ); ?>"
                         data-min-qty="<?php echo esc_attr( $min_qty ); ?>"
@@ -1417,6 +1467,13 @@ function wk_rh_render_settings_page() {
                     <td>
                         <input class="small-text" type="number" min="5" max="120" step="1" id="wk_rh_booking_hold_timeout_minutes" name="wk_rh_settings[booking_hold_timeout_minutes]" value="<?php echo esc_attr( wk_rh_get_booking_hold_timeout_minutes() ); ?>">
                         <p class="description"><?php esc_html_e( 'Recommended range is 10–20 minutes. When exceeded, held bookings are cancelled upstream and users must start again.', 'onsite-booking-system' ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="wk_rh_required_supplement_name_markers"><?php esc_html_e( 'Required supplement name markers', 'onsite-booking-system' ); ?></label></th>
+                    <td>
+                        <input class="regular-text" type="text" id="wk_rh_required_supplement_name_markers" name="wk_rh_settings[required_supplement_name_markers]" value="<?php echo esc_attr( $settings['required_supplement_name_markers'] ?? '' ); ?>">
+                        <p class="description"><?php esc_html_e( 'Comma-separated words or phrases to look for in supplement names, for example: obligatorisk, obligatory, required.', 'onsite-booking-system' ); ?></p>
                     </td>
                 </tr>
                 <tr>
@@ -3074,6 +3131,32 @@ function wk_rh_get_supplement_quantity_bounds( array $supplement ) {
         'min' => $min_qty,
         'max' => $max_qty,
     ];
+}
+
+function wk_rh_is_required_supplement( array $supplement ) {
+    $supplement = wk_rh_normalize_booking_supplement_row( $supplement );
+    $name = isset( $supplement['name'] ) ? (string) $supplement['name'] : '';
+    $haystack = wk_rh_normalize_required_supplement_match_string( $name );
+
+    if ( $haystack === '' ) {
+        return (bool) apply_filters( 'wk_rh_is_required_supplement', false, $supplement, [] );
+    }
+
+    $markers = wk_rh_get_required_supplement_name_markers();
+    $is_required = false;
+
+    foreach ( $markers as $marker ) {
+        if ( ! is_string( $marker ) || $marker === '' ) {
+            continue;
+        }
+
+        if ( strpos( $haystack, $marker ) !== false ) {
+            $is_required = true;
+            break;
+        }
+    }
+
+    return (bool) apply_filters( 'wk_rh_is_required_supplement', $is_required, $supplement, $markers );
 }
 
 function wk_rh_get_supplement_price_amount( array $supplement ) {
