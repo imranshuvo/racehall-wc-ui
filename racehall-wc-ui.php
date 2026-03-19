@@ -1984,23 +1984,14 @@ function wk_rh_replace_main_product_only( $passed, $product_id, $quantity ) {
     $is_main_product = get_post_meta( $product_id, 'bmileisure_id', true );
     if ( ! $is_main_product || WC()->cart->is_empty() ) return $passed;
 
-    $removed_existing_booking = false;
-
     foreach ( WC()->cart->get_cart() as $cart_item_key => $cart_item ) {
-        $cart_product_id = $cart_item['product_id'];
-        $cart_is_main    = get_post_meta( $cart_product_id, 'bmileisure_id', true );
-        if ( $cart_is_main || ! empty( $cart_item['is_addon'] ) ) {
-            WC()->cart->remove_cart_item( $cart_item_key );
-            $removed_existing_booking = true;
-        }
+        WC()->cart->remove_cart_item( $cart_item_key );
     }
 
-    if ( $removed_existing_booking ) {
-        WC()->cart->calculate_totals();
+    WC()->cart->calculate_totals();
 
-        if ( method_exists( WC()->cart, 'set_session' ) ) {
-            WC()->cart->set_session();
-        }
+    if ( method_exists( WC()->cart, 'set_session' ) ) {
+        WC()->cart->set_session();
     }
 
     return $passed;
