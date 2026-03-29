@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.83
+ * Version: 1.84
  * Author: Webkonsulenterne ApS
  */
 
@@ -47,7 +47,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.83' );
+define( 'RACEHALL_WC_UI_VERSION', '1.84' );
 
 function wk_rh_hide_admin_shipping_line_items_css() {
     if ( ! is_admin() || ! function_exists( 'get_current_screen' ) ) {
@@ -424,11 +424,219 @@ function wk_rh_get_settings_defaults() {
         'accept_language'     => 'en',
         'logging_enabled'     => 'yes',
         'addon_product_id'    => 0,
+        'product_page_booking_mode' => 'new_only',
         'booking_hold_timeout_minutes' => 15,
         'required_supplement_name_markers' => 'obligatorisk,obligatory,required,mandatory',
         'test_locations_json' => '[]',
         'live_locations_json' => '[]',
     ];
+}
+
+function wk_rh_get_product_page_booking_mode_options() {
+    return [
+        'new_only'       => __( 'New booking only', 'onsite-booking-system' ),
+        'admin_only'     => __( 'Admin preview only', 'onsite-booking-system' ),
+        'dual_new_first' => __( 'Dual mode: new booking first', 'onsite-booking-system' ),
+        'dual_old_first' => __( 'Dual mode: old booking first', 'onsite-booking-system' ),
+        'old_only'       => __( 'Old booking only', 'onsite-booking-system' ),
+    ];
+}
+
+function wk_rh_get_product_page_booking_rollout_mode() {
+    $settings = wk_rh_get_settings();
+    $mode = isset( $settings['product_page_booking_mode'] ) ? sanitize_key( (string) $settings['product_page_booking_mode'] ) : '';
+    $options = wk_rh_get_product_page_booking_mode_options();
+
+    if ( ! isset( $options[ $mode ] ) ) {
+        return 'new_only';
+    }
+
+    return $mode;
+}
+
+function wk_rh_get_product_page_booking_request_mode() {
+    if ( ! isset( $_GET['rh_booking_mode'] ) ) {
+        return '';
+    }
+
+    $mode = sanitize_key( wp_unslash( (string) $_GET['rh_booking_mode'] ) );
+
+    return in_array( $mode, [ 'old', 'new' ], true ) ? $mode : '';
+}
+
+function wk_rh_current_user_can_preview_new_product_booking() {
+    return current_user_can( 'manage_options' );
+}
+
+function wk_rh_should_use_new_product_booking_flow() {
+    $rollout_mode = wk_rh_get_product_page_booking_rollout_mode();
+    $request_mode = wk_rh_get_product_page_booking_request_mode();
+
+    switch ( $rollout_mode ) {
+        case 'old_only':
+            return false;
+
+        case 'admin_only':
+            if ( ! wk_rh_current_user_can_preview_new_product_booking() ) {
+                return false;
+            }
+
+            return $request_mode !== 'old';
+
+        case 'dual_old_first':
+            return $request_mode === 'new';
+
+        case 'dual_new_first':
+            return $request_mode !== 'old';
+
+        case 'new_only':
+        default:
+            return true;
+    }
+}
+
+function wk_rh_get_product_page_booking_switch_context() {
+    if ( ! function_exists( 'is_product' ) || ! is_product() ) {
+        return null;
+    }
+
+    $rollout_mode = wk_rh_get_product_page_booking_rollout_mode();
+    $can_preview = wk_rh_current_user_can_preview_new_product_booking();
+    $allow_switch = in_array( $rollout_mode, [ 'dual_new_first', 'dual_old_first' ], true );
+
+    if ( $rollout_mode === 'admin_only' ) {
+        $allow_switch = $can_preview;
+    }
+
+    if ( ! $allow_switch ) {
+        return null;
+    }
+
+    $current_mode = wk_rh_should_use_new_product_booking_flow() ? 'new' : 'old';
+    $target_mode = $current_mode === 'new' ? 'old' : 'new';
+    $product_id = get_queried_object_id();
+    $base_url = $product_id > 0 ? get_permalink( $product_id ) : '';
+
+    if ( ! is_string( $base_url ) || $base_url === '' ) {
+        return null;
+    }
+
+    $target_url = add_query_arg( 'rh_booking_mode', $target_mode, $base_url );
+
+    if ( $rollout_mode === 'admin_only' ) {
+        return [
+            'current_mode' => $current_mode,
+            'target_mode'  => $target_mode,
+            'target_url'   => $target_url,
+            'message'      => $current_mode === 'new'
+                ? __( 'Du forhåndsviser den nye booking-side. Brug linket nedenfor for at sammenligne med den gamle produktside.', 'onsite-booking-system' )
+                : __( 'Du forhåndsviser den gamle produktside. Brug linket nedenfor for at sammenligne med den nye booking-side.', 'onsite-booking-system' ),
+            'button_label' => $current_mode === 'new'
+                ? __( 'Skift til gammel booking-side', 'onsite-booking-system' )
+                : __( 'Skift til ny booking-side', 'onsite-booking-system' ),
+        ];
+    }
+
+    return [
+        'current_mode' => $current_mode,
+        'target_mode'  => $target_mode,
+        'target_url'   => $target_url,
+        'message'      => $current_mode === 'new'
+            ? __( 'Du kan fortsat benytte vores tidligere måde at booke på, hvis du ønsker det.', 'onsite-booking-system' )
+            : __( 'Nyhed: Prøv vores nye booking system her.', 'onsite-booking-system' ),
+        'button_label' => $current_mode === 'new'
+            ? __( 'Klassisk booking system', 'onsite-booking-system' )
+            : __( 'Nyt booking system', 'onsite-booking-system' ),
+    ];
+}
+
+function wk_rh_get_product_page_booking_switch_html() {
+    $context = wk_rh_get_product_page_booking_switch_context();
+    if ( ! is_array( $context ) ) {
+        return '';
+    }
+
+    static $styles_printed = false;
+
+    ob_start();
+
+    if ( ! $styles_printed ) {
+        $styles_printed = true;
+        ?>
+        <style>
+            .wk-rh-booking-mode-switch {
+                padding: 16px 18px;
+                border: 1px solid var(--border);
+                color: #fff;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 12px;
+                align-items: center;
+                justify-content: space-between;
+                max-width: 1280px;
+                margin: 0 auto;
+                margin-bottom: 30px;
+            }
+
+            .wk-rh-booking-mode-switch--old {
+                margin-top: 30px;
+            }
+
+            .wk-rh-booking-mode-switch__content {
+                display: grid;
+                gap: 4px;
+            }
+
+            .wk-rh-booking-mode-switch__message {
+                margin: 0;
+                font-size: 14px;
+                line-height: 1.5;
+            }
+
+            .wk-rh-booking-mode-switch__button {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 42px;
+                padding: 0 16px;
+                border-radius: 999px;
+                color: #ffffff;
+                font-weight: 600;
+                text-decoration: none;
+                white-space: nowrap;
+                border: 1px solid var(--border);
+            }
+
+            a.wk-rh-booking-mode-switch__button:hover {
+                background: var(--border);
+                color: #fff;
+            }
+        </style>
+        <?php
+    }
+    ?>
+    <div class="wk-rh-booking-mode-switch<?php echo $context['current_mode'] === 'old' ? ' wk-rh-booking-mode-switch--old' : ''; ?>">
+        <div class="wk-rh-booking-mode-switch__content">
+            <p class="wk-rh-booking-mode-switch__message"><?php echo esc_html( $context['message'] ); ?></p>
+        </div>
+        <a class="wk-rh-booking-mode-switch__button" href="<?php echo esc_url( $context['target_url'] ); ?>"><?php echo esc_html( $context['button_label'] ); ?></a>
+    </div>
+    <?php
+
+    return ob_get_clean();
+}
+
+function wk_rh_output_product_page_booking_switch_html() {
+    if ( wk_rh_should_use_new_product_booking_flow() ) {
+        return;
+    }
+
+    $html = wk_rh_get_product_page_booking_switch_html();
+    if ( $html === '' ) {
+        return;
+    }
+
+    echo $html;
 }
 
 function wk_rh_normalize_required_supplement_match_string( $value ) {
@@ -742,6 +950,9 @@ function wk_rh_sanitize_settings( $input ) {
         'accept_language'     => sanitize_text_field( $input['accept_language'] ?? 'en' ),
         'logging_enabled'     => ! empty( $input['logging_enabled'] ) && $input['logging_enabled'] === 'yes' ? 'yes' : 'no',
         'addon_product_id'    => $addon_product_id,
+        'product_page_booking_mode' => array_key_exists( sanitize_key( (string) ( $input['product_page_booking_mode'] ?? '' ) ), wk_rh_get_product_page_booking_mode_options() )
+            ? sanitize_key( (string) $input['product_page_booking_mode'] )
+            : $defaults['product_page_booking_mode'],
         'booking_hold_timeout_minutes' => max( 5, min( 120, (int) ( $input['booking_hold_timeout_minutes'] ?? $defaults['booking_hold_timeout_minutes'] ) ) ),
         'required_supplement_name_markers' => sanitize_text_field( $input['required_supplement_name_markers'] ?? $defaults['required_supplement_name_markers'] ),
         'test_locations_json' => wk_rh_sanitize_locations_json( $input['test_locations_json'] ?? '[]', 'wk_rh_test_locations_json_invalid' ),
@@ -1463,6 +1674,17 @@ function wk_rh_render_settings_page() {
                     </td>
                 </tr>
                 <tr>
+                    <th scope="row"><label for="wk_rh_product_page_booking_mode"><?php esc_html_e( 'Product page rollout mode', 'onsite-booking-system' ); ?></label></th>
+                    <td>
+                        <select id="wk_rh_product_page_booking_mode" name="wk_rh_settings[product_page_booking_mode]">
+                            <?php foreach ( wk_rh_get_product_page_booking_mode_options() as $mode_value => $mode_label ) : ?>
+                                <option value="<?php echo esc_attr( $mode_value ); ?>" <?php selected( $settings['product_page_booking_mode'] ?? 'new_only', $mode_value ); ?>><?php echo esc_html( $mode_label ); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="description"><?php esc_html_e( 'Controls whether this plugin replaces the standard WooCommerce product page. In dual modes, customers can switch with rh_booking_mode=old or rh_booking_mode=new.', 'onsite-booking-system' ); ?></p>
+                    </td>
+                </tr>
+                <tr>
                     <th scope="row"><label for="wk_rh_booking_hold_timeout_minutes"><?php esc_html_e( 'Booking hold timeout (minutes)', 'onsite-booking-system' ); ?></label></th>
                     <td>
                         <input class="small-text" type="number" min="5" max="120" step="1" id="wk_rh_booking_hold_timeout_minutes" name="wk_rh_settings[booking_hold_timeout_minutes]" value="<?php echo esc_attr( wk_rh_get_booking_hold_timeout_minutes() ); ?>">
@@ -2032,9 +2254,11 @@ add_action( 'template_redirect', function() {
     }
 }, 5 );
 
+add_action( 'woocommerce_before_single_product', 'wk_rh_output_product_page_booking_switch_html', 1 );
+
 // Replace single product page content
 add_action('template_redirect', function() {
-    if ( is_product() ) {
+    if ( is_product() && wk_rh_should_use_new_product_booking_flow() ) {
 
         // Remove all default WooCommerce single product hooks
         remove_all_actions('woocommerce_before_single_product');

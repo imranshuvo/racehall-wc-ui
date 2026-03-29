@@ -89,6 +89,8 @@ window.RH_I18N = {
 
 <section class="single-product-page">
 
+    <?php echo wk_rh_get_product_page_booking_switch_html(); ?>
+
     <div class="main-content">
         <!-- Product Section -->
         <section class="product-section">
