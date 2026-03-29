@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.80
+ * Version: 1.82
  * Author: Webkonsulenterne ApS
  */
 
@@ -47,7 +47,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.80' );
+define( 'RACEHALL_WC_UI_VERSION', '1.82' );
 
 function wk_rh_hide_admin_shipping_line_items_css() {
     if ( ! is_admin() || ! function_exists( 'get_current_screen' ) ) {
@@ -2099,6 +2099,8 @@ add_action('template_redirect', function() {
             exit;
         }
 
+        // Custom cart override is disabled for now. Fall back to the default WooCommerce cart template.
+        /*
         remove_all_actions( 'woocommerce_before_cart' );
         remove_all_actions( 'woocommerce_cart_contents' );
         remove_all_actions( 'woocommerce_cart_actions' );
@@ -2106,6 +2108,7 @@ add_action('template_redirect', function() {
 
         include RACEHALL_WC_UI_PATH . 'templates/cart.php';
         exit;
+        */
     }
 
 });
@@ -2403,6 +2406,227 @@ add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $val
 
     return $cart_item;
 }, 20, 3 );
+
+function wk_rh_get_nexi_gateway_location_map() {
+    return [
+        'aarhus' => [
+            'dibs_easy',
+            'nets_easy_card',
+            'nets_easy_sofort',
+            'nets_easy_trustly',
+            'nets_easy_swish',
+            'nets_easy_ratepay_sepa',
+            'nets_easy_klarna',
+            'nets_easy_mobilepay',
+            'nets_easy_vipps',
+        ],
+        'kobenhavn' => [
+            'dibs_easy_copenhagen',
+            'nets_easy_copenhagen_card',
+            'nets_easy_copenhagen_sofort',
+            'nets_easy_copenhagen_trustly',
+            'nets_easy_copenhagen_swish',
+            'nets_easy_copenhagen_ratepay_sepa',
+            'nets_easy_copenhagen_klarna',
+            'nets_easy_copenhagen_mobilepay',
+            'nets_easy_copenhagen_vipps',
+        ],
+        'stockholm' => [
+            'dibs_easy_stockholm',
+            'nets_easy_stockholm_card',
+            'nets_easy_stockholm_sofort',
+            'nets_easy_stockholm_trustly',
+            'nets_easy_stockholm_swish',
+            'nets_easy_stockholm_ratepay_sepa',
+            'nets_easy_stockholm_klarna',
+            'nets_easy_stockholm_mobilepay',
+            'nets_easy_stockholm_vipps',
+        ],
+    ];
+}
+
+function wk_rh_normalize_nexi_gateway_location( $location ) {
+    $location = sanitize_text_field( (string) $location );
+    if ( '' === $location ) {
+        return '';
+    }
+
+    $location = strtolower( trim( remove_accents( $location ) ) );
+    $location = preg_replace( '/\s+/', ' ', $location );
+
+    $aliases = [
+        'aarhus' => 'aarhus',
+        'arhus' => 'aarhus',
+        'kobenhavn' => 'kobenhavn',
+        'kobenhavn k' => 'kobenhavn',
+        'copenhagen' => 'kobenhavn',
+        'stockholm' => 'stockholm',
+    ];
+
+    return $aliases[ $location ] ?? '';
+}
+
+function wk_rh_is_nexi_gateway_id( $gateway_id ) {
+    $gateway_id = (string) $gateway_id;
+    if ( '' === $gateway_id ) {
+        return false;
+    }
+
+    foreach ( wk_rh_get_nexi_gateway_location_map() as $gateway_ids ) {
+        if ( in_array( $gateway_id, $gateway_ids, true ) ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function wk_rh_get_cart_nexi_gateway_location_context() {
+    if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
+        return [
+            'status' => 'no-cart',
+            'location' => '',
+        ];
+    }
+
+    $has_booking_items = false;
+    $all_locations = [];
+    $main_locations = [];
+
+    foreach ( WC()->cart->get_cart() as $cart_item ) {
+        if (
+            ! empty( $cart_item['is_addon'] )
+            || ! empty( $cart_item['booking_date'] )
+            || ! empty( $cart_item['booking_time'] )
+            || ! empty( $cart_item['bmi_page_id'] )
+            || ! empty( $cart_item['bmi_order_id'] )
+            || ! empty( $cart_item['bmi_proposal'] )
+        ) {
+            $has_booking_items = true;
+        }
+
+        $raw_location = isset( $cart_item['booking_location'] ) ? (string) $cart_item['booking_location'] : '';
+        if ( '' === trim( $raw_location ) ) {
+            continue;
+        }
+
+        $normalized_location = wk_rh_normalize_nexi_gateway_location( $raw_location );
+        if ( '' === $normalized_location ) {
+            return [
+                'status' => 'unsupported-location',
+                'location' => '',
+                'raw_location' => sanitize_text_field( $raw_location ),
+            ];
+        }
+
+        $all_locations[ $normalized_location ] = true;
+
+        if ( empty( $cart_item['is_addon'] ) ) {
+            $main_locations[ $normalized_location ] = true;
+        }
+    }
+
+    if ( empty( $all_locations ) ) {
+        return [
+            'status' => $has_booking_items ? 'missing-location' : 'no-booking-location',
+            'location' => '',
+        ];
+    }
+
+    $effective_locations = ! empty( $main_locations ) ? $main_locations : $all_locations;
+    if ( count( $effective_locations ) > 1 ) {
+        return [
+            'status' => 'mixed-locations',
+            'location' => '',
+            'locations' => array_keys( $effective_locations ),
+        ];
+    }
+
+    return [
+        'status' => 'ok',
+        'location' => (string) key( $effective_locations ),
+    ];
+}
+
+function wk_rh_maybe_add_nexi_checkout_notice( $message ) {
+    static $shown_messages = [];
+
+    $message = (string) $message;
+    if ( '' === $message ) {
+        return;
+    }
+
+    if ( isset( $shown_messages[ $message ] ) ) {
+        return;
+    }
+
+    $shown_messages[ $message ] = true;
+
+    if ( function_exists( 'wc_has_notice' ) && wc_has_notice( $message, 'error' ) ) {
+        return;
+    }
+
+    wc_add_notice( $message, 'error' );
+}
+
+add_filter( 'woocommerce_available_payment_gateways', 'wk_rh_filter_nexi_gateways_by_booking_location', 20 );
+function wk_rh_filter_nexi_gateways_by_booking_location( $available_gateways ) {
+    if ( ! is_array( $available_gateways ) || empty( $available_gateways ) ) {
+        return $available_gateways;
+    }
+
+    if ( is_admin() && ! wp_doing_ajax() ) {
+        return $available_gateways;
+    }
+
+    $context = wk_rh_get_cart_nexi_gateway_location_context();
+    if ( 'no-cart' === $context['status'] || 'no-booking-location' === $context['status'] ) {
+        return $available_gateways;
+    }
+
+    $allowed_gateway_ids = [];
+    if ( 'ok' === $context['status'] ) {
+        $gateway_map = wk_rh_get_nexi_gateway_location_map();
+        $allowed_gateway_ids = $gateway_map[ $context['location'] ] ?? [];
+    }
+
+    foreach ( array_keys( $available_gateways ) as $gateway_id ) {
+        if ( ! wk_rh_is_nexi_gateway_id( $gateway_id ) ) {
+            continue;
+        }
+
+        if ( ! in_array( $gateway_id, $allowed_gateway_ids, true ) ) {
+            unset( $available_gateways[ $gateway_id ] );
+        }
+    }
+
+    if ( function_exists( 'WC' ) && WC()->session ) {
+        $chosen_payment_method = WC()->session->get( 'chosen_payment_method' );
+        if ( wk_rh_is_nexi_gateway_id( $chosen_payment_method ) && ! isset( $available_gateways[ $chosen_payment_method ] ) ) {
+            WC()->session->set( 'chosen_payment_method', '' );
+        }
+    }
+
+    if ( ! is_checkout() || is_order_received_page() ) {
+        return $available_gateways;
+    }
+
+    if ( 'mixed-locations' === $context['status'] ) {
+        wk_rh_maybe_add_nexi_checkout_notice( __( 'Betaling kunne ikke indlæses, fordi kurven indeholder bookinger fra flere lokationer. Gennemfør én lokation ad gangen.', 'racehall-wc-ui' ) );
+        return $available_gateways;
+    }
+
+    if ( 'missing-location' === $context['status'] ) {
+        wk_rh_maybe_add_nexi_checkout_notice( __( 'Betaling kunne ikke indlæses, fordi bookingens lokation mangler i kurven. Start bookingflowet igen.', 'racehall-wc-ui' ) );
+        return $available_gateways;
+    }
+
+    if ( 'unsupported-location' === $context['status'] ) {
+        wk_rh_maybe_add_nexi_checkout_notice( __( 'Betaling kunne ikke indlæses for den valgte lokation. Kontakt os, hvis problemet fortsætter.', 'racehall-wc-ui' ) );
+    }
+
+    return $available_gateways;
+}
 
 add_action( 'woocommerce_before_calculate_totals', function( $cart ) {
     if ( is_admin() && ! defined( 'DOING_AJAX' ) ) {

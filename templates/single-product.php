@@ -168,8 +168,15 @@ window.RH_I18N = {
             <div class="product-info">
                 <h1 class="product-title"><?php echo $product->get_title(); ?></h1>
 
+                <?php if ( $product->get_price_html() ) : ?>
+                <div class="product-price"><?php echo wp_kses_post( $product->get_price_html() ); ?></div>
+                <?php endif; ?>
+
+                <?php $product_short_description = trim( (string) $product->get_short_description() ); ?>
                 <div class="product-description">
-                    <p><?php esc_html_e( 'F1 Race er et løb af en halv times varighed, hvor banen er reserveret kun til jer. De første 10 minutter udgør en kvalifikationsrunde, hvor den hurtigste omgangstid tæller. Vinderen er den deltager, der kører flest omgange og krydser målstregen først efter cirka 20 minutter.', 'racehall-wc-ui' ); ?></p>
+                    <?php if ( '' !== $product_short_description ) : ?>
+                        <?php echo wp_kses_post( apply_filters( 'woocommerce_short_description', $product_short_description ) ); ?>
+                    <?php endif; ?>
                 </div>
 
                 <div class="product-details">
