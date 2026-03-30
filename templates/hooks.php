@@ -922,7 +922,9 @@ function wk_rh_save_booking_data_to_cart( $cart_item_data, $product_id ) {
         $cart_item_data['booking_time'] = sanitize_text_field( $_POST['booking_time'] );
     }
     if ( ! empty( $_POST['booking_location'] ) ) {
-        $cart_item_data['booking_location'] = sanitize_text_field( $_POST['booking_location'] );
+        $cart_item_data['booking_location'] = function_exists( 'wk_rh_sanitize_location_value' )
+            ? wk_rh_sanitize_location_value( wp_unslash( $_POST['booking_location'] ) )
+            : sanitize_text_field( wp_unslash( $_POST['booking_location'] ) );
     }
     if ( isset( $_POST['booking_adults'] ) ) {
         $cart_item_data['booking_adults'] = max( 0, intval( $_POST['booking_adults'] ) );
@@ -1746,7 +1748,12 @@ function wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location = '', 
         }
 
         $code = (int) wp_remote_retrieve_response_code( $response );
-        if ( $code >= 200 && $code < 300 ) {
+        $response_body = wp_remote_retrieve_body( $response );
+        $response_data = json_decode( $response_body, true );
+        $cancel_success = $code >= 200 && $code < 300
+            && ( ! is_array( $response_data ) || ! array_key_exists( 'success', $response_data ) || $response_data['success'] !== false );
+
+        if ( $cancel_success ) {
             if ( function_exists( 'wk_rh_release_active_hold' ) ) {
                 wk_rh_release_active_hold( $upstream_order_id );
             }
@@ -1757,6 +1764,18 @@ function wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location = '', 
                 'extra' => $extra_context,
             ] );
             return true;
+        }
+
+        if ( $code >= 200 && $code < 300 ) {
+            wk_rh_log_upstream_event( 'warning', 'Upstream cancellation endpoint returned semantic failure', [
+                'operation' => 'order_cancel',
+                'orderId' => (string) $upstream_order_id,
+                'location' => (string) $location,
+                'path' => (string) $path,
+                'httpCode' => $code,
+                'body' => is_array( $response_data ) ? $response_data : $response_body,
+                'extra' => $extra_context,
+            ] );
         }
     }
 

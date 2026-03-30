@@ -14,6 +14,15 @@ $bm_id = function_exists( 'wk_rh_get_product_bmileisure_id' )
 $lokation = function_exists( 'wk_rh_get_product_booking_location' )
     ? wk_rh_get_product_booking_location( $product->get_id() )
     : ( function_exists( 'get_field' ) ? get_field( 'lokation', $product->get_id() ) : get_post_meta( $product->get_id(), 'lokation', true ) );
+$availability = [];
+$timeslots = [];
+
+/*
+ * Initial upstream /products preflight intentionally disabled for staging review.
+ * We now trust the stored bmileisure_id here and let the AJAX availability/page
+ * requests validate the product upstream.
+ */
+/*
 $racehall_token = function_exists( 'wk_rh_get_token' ) ? wk_rh_get_token( $lokation ) : racehall_get_token( $lokation );
 $racehall_products = [];
 if ( $racehall_token ) {
@@ -24,11 +33,6 @@ if ( $racehall_token ) {
     }
 }
 $first_rh_product = !empty($racehall_products) ? $racehall_products[0] : null;
-$availability = [];
-$timeslots = [];
-
-
-
 
 $current_rh_product = null;
 if ( ! empty( $racehall_products ) && is_array( $racehall_products ) ) {
@@ -39,8 +43,9 @@ if ( ! empty( $racehall_products ) && is_array( $racehall_products ) ) {
         }
     }
 }
+*/
 
-$booking_product_available = $bm_id !== '' && is_array( $current_rh_product );
+$booking_product_available = $bm_id !== '';
 $booking_unavailable_message = __( 'Dette bookingprodukt findes ikke i det aktive BMI-miljø. Kontrollér bmileisure_id eller skift miljø.', 'racehall-wc-ui' );
 
 
