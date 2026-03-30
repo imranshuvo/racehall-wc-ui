@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.84
+ * Version: 1.87
  * Author: Webkonsulenterne ApS
  */
 
@@ -47,7 +47,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.84' );
+define( 'RACEHALL_WC_UI_VERSION', '1.87' );
 
 function wk_rh_hide_admin_shipping_line_items_css() {
     if ( ! is_admin() || ! function_exists( 'get_current_screen' ) ) {
@@ -556,64 +556,7 @@ function wk_rh_get_product_page_booking_switch_html() {
         return '';
     }
 
-    static $styles_printed = false;
-
     ob_start();
-
-    if ( ! $styles_printed ) {
-        $styles_printed = true;
-        ?>
-        <style>
-            .wk-rh-booking-mode-switch {
-                padding: 16px 18px;
-                border: 1px solid var(--border);
-                color: #fff;
-                display: flex;
-                flex-wrap: wrap;
-                gap: 12px;
-                align-items: center;
-                justify-content: space-between;
-                max-width: 1280px;
-                margin: 0 auto;
-                margin-bottom: 30px;
-            }
-
-            .wk-rh-booking-mode-switch--old {
-                margin-top: 30px;
-            }
-
-            .wk-rh-booking-mode-switch__content {
-                display: grid;
-                gap: 4px;
-            }
-
-            .wk-rh-booking-mode-switch__message {
-                margin: 0;
-                font-size: 14px;
-                line-height: 1.5;
-            }
-
-            .wk-rh-booking-mode-switch__button {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 42px;
-                padding: 0 16px;
-                border-radius: 999px;
-                color: #ffffff;
-                font-weight: 600;
-                text-decoration: none;
-                white-space: nowrap;
-                border: 1px solid var(--border);
-            }
-
-            a.wk-rh-booking-mode-switch__button:hover {
-                background: var(--border);
-                color: #fff;
-            }
-        </style>
-        <?php
-    }
     ?>
     <div class="wk-rh-booking-mode-switch<?php echo $context['current_mode'] === 'old' ? ' wk-rh-booking-mode-switch--old' : ''; ?>">
         <div class="wk-rh-booking-mode-switch__content">
@@ -2151,6 +2094,17 @@ add_action('wp_enqueue_scripts', function() {
     ];
 
     if ( is_product() ) {
+        wp_enqueue_style(
+            'racehall-product-booking-switch-css',
+            RACEHALL_WC_UI_URL . 'assets/css/product-booking-switch.css',
+            [],
+            RACEHALL_WC_UI_VERSION
+        );
+
+        if ( ! wk_rh_should_use_new_product_booking_flow() ) {
+            return;
+        }
+
         wp_enqueue_style(
             'racehall-single-product-css',
             RACEHALL_WC_UI_URL . 'assets/css/single-product.css',
