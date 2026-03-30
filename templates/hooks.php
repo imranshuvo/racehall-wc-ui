@@ -777,7 +777,7 @@ function wk_rh_ajax_get_timeslots() {
 
     $product_id = isset( $_POST['productId'] ) ? intval( $_POST['productId'] ) : 0;
     $date       = isset( $_POST['date'] ) ? sanitize_text_field( $_POST['date'] ) : '';
-    $quantity   = isset( $_POST['quantity'] ) ? max( 1, intval( $_POST['quantity'] ) ) : 1;
+    $quantity   = isset( $_POST['quantity'] ) ? max( 0, intval( $_POST['quantity'] ) ) : 0;
     $booking_location = isset( $_POST['bookingLocation'] ) ? sanitize_text_field( $_POST['bookingLocation'] ) : '';
     if ( ! $product_id || ! $date ) {
         wk_rh_log_user_event( 'timeslots.request_rejected', [
@@ -884,7 +884,9 @@ function wk_rh_ajax_get_timeslots() {
         wp_send_json_error( 'No page found for product/date', 404 );
     }
 
-    $timeslots = wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity, $booking_location );
+    $timeslots = $quantity > 0
+        ? wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity, $booking_location )
+        : [ 'proposals' => [] ];
     if ( is_array( $timeslots ) ) {
         $timeslots['pageId'] = (string) $page_id;
         $timeslots['pageProductLimits'] = [
@@ -892,6 +894,9 @@ function wk_rh_ajax_get_timeslots() {
             'maxAmount' => isset( $matched_product['maxAmount'] ) ? $matched_product['maxAmount'] : null,
         ];
         $timeslots['pageProducts'] = is_array( $matched_page_products ) ? array_values( $matched_page_products ) : [];
+        if ( $quantity <= 0 ) {
+            $timeslots['metadataOnly'] = true;
+        }
     }
     wk_rh_log_user_event( 'timeslots.request_succeeded', [
         'productId' => $product_id,
@@ -899,6 +904,7 @@ function wk_rh_ajax_get_timeslots() {
         'quantity' => $quantity,
         'bookingLocation' => $booking_location,
         'pageId' => $page_id,
+        'metadataOnly' => $quantity <= 0,
         'proposalCount' => isset( $timeslots['proposals'] ) && is_array( $timeslots['proposals'] ) ? count( $timeslots['proposals'] ) : 0,
     ] );
     wp_send_json( $timeslots );
@@ -938,6 +944,170 @@ function wk_rh_get_booking_participant_counts( array $source ) {
     ];
 }
 
+function wk_rh_get_default_booking_quantity_rules() {
+    return [
+        'adults' => [ 'min' => 0, 'max' => null, 'step' => 1 ],
+        'kids'   => [ 'min' => 0, 'max' => null, 'step' => 1 ],
+        'twin'   => [ 'min' => 0, 'max' => null, 'step' => 1 ],
+        'total'  => [ 'min' => 1, 'max' => null, 'step' => 1 ],
+    ];
+}
+
+function wk_rh_get_booking_rule_number_from_keys( $source, array $keys, $default = null ) {
+    if ( ! is_array( $source ) ) {
+        return $default;
+    }
+
+    foreach ( $keys as $key ) {
+        if ( isset( $source[ $key ] ) && is_numeric( $source[ $key ] ) ) {
+            return (float) $source[ $key ];
+        }
+    }
+
+    return $default;
+}
+
+function wk_rh_get_booking_group_step( array $group ) {
+    foreach ( [ 'step', 'stepQuantity', 'quantityStep', 'stepSize', 'increment' ] as $key ) {
+        if ( isset( $group[ $key ] ) && is_numeric( $group[ $key ] ) && (float) $group[ $key ] > 0 ) {
+            return (int) round( (float) $group[ $key ] );
+        }
+    }
+
+    return 1;
+}
+
+function wk_rh_get_booking_group_target_key( array $group ) {
+    $candidates = [];
+
+    if ( isset( $group['tag'] ) ) {
+        $candidates[] = trim( strtolower( (string) $group['tag'] ) );
+    }
+
+    if ( isset( $group['name'] ) ) {
+        $normalized_name = strtolower( preg_replace( '/[^a-z0-9]+/i', ' ', (string) $group['name'] ) );
+        $normalized_name = trim( preg_replace( '/\s+/', ' ', $normalized_name ) );
+        if ( $normalized_name !== '' ) {
+            $candidates[] = $normalized_name;
+        }
+    }
+
+    foreach ( $candidates as $candidate ) {
+        if ( $candidate === '' ) {
+            continue;
+        }
+
+        if ( in_array( $candidate, [ 'adults', 'adult', 'voksne' ], true ) || strpos( $candidate, 'adult' ) !== false || strpos( $candidate, 'over 150' ) !== false ) {
+            return 'adults';
+        }
+
+        if ( in_array( $candidate, [ 'kids', 'children', 'child', 'born', 'børn' ], true ) || strpos( $candidate, 'child' ) !== false || strpos( $candidate, 'kid' ) !== false || strpos( $candidate, 'under 150' ) !== false ) {
+            return 'kids';
+        }
+
+        if ( in_array( $candidate, [ 'twin', 'twinkart', 'tandem', 'passenger' ], true ) || strpos( $candidate, 'twin' ) !== false || strpos( $candidate, 'passenger' ) !== false ) {
+            return 'twin';
+        }
+    }
+
+    return null;
+}
+
+function wk_rh_get_selected_page_product( array $page_products, $product_id ) {
+    $product_id = trim( (string) $product_id );
+    if ( $product_id === '' ) {
+        return null;
+    }
+
+    foreach ( $page_products as $page_product ) {
+        if ( ! is_array( $page_product ) ) {
+            continue;
+        }
+
+        $page_product_id = isset( $page_product['id'] ) ? trim( (string) $page_product['id'] ) : '';
+        if ( $page_product_id !== '' && $page_product_id === $product_id ) {
+            return $page_product;
+        }
+    }
+
+    return null;
+}
+
+function wk_rh_extract_quantity_rules( $proposal, $page_product_limits = null, $page_products = [], $product_id = '' ) {
+    $rules = wk_rh_get_default_booking_quantity_rules();
+    $page_product_limits = is_array( $page_product_limits ) ? $page_product_limits : [];
+    $page_products = is_array( $page_products ) ? array_values( $page_products ) : [];
+    $proposal = is_array( $proposal ) ? $proposal : [];
+
+    $page_min_amount = wk_rh_get_booking_rule_number_from_keys( $page_product_limits, [ 'minAmount', 'minimumAmount' ], null );
+    $page_max_amount = wk_rh_get_booking_rule_number_from_keys( $page_product_limits, [ 'maxAmount', 'maximumAmount' ], null );
+    $proposal_min = wk_rh_get_booking_rule_number_from_keys( $proposal, [ 'minQuantity', 'minQty', 'minimumQuantity', 'minimumQty' ], null );
+    $proposal_max = wk_rh_get_booking_rule_number_from_keys( $proposal, [ 'maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty' ], null );
+    $proposal_min_amount = wk_rh_get_booking_rule_number_from_keys( $proposal, [ 'minAmount', 'minimumAmount' ], null );
+    $proposal_max_amount = wk_rh_get_booking_rule_number_from_keys( $proposal, [ 'maxAmount', 'maximumAmount' ], null );
+
+    if ( $page_min_amount !== null && $page_min_amount > 0 ) {
+        $rules['total']['min'] = max( (int) $rules['total']['min'], (int) round( $page_min_amount ) );
+    }
+
+    if ( $page_max_amount !== null && $page_max_amount > 0 ) {
+        $rules['total']['max'] = (int) round( $page_max_amount );
+    }
+
+    foreach ( [ $proposal_min, $proposal_min_amount ] as $proposal_floor ) {
+        if ( $proposal_floor !== null && $proposal_floor > 0 ) {
+            $rules['total']['min'] = max( (int) $rules['total']['min'], (int) round( $proposal_floor ) );
+        }
+    }
+
+    foreach ( [ $proposal_max, $proposal_max_amount ] as $proposal_ceiling ) {
+        if ( $proposal_ceiling === null || $proposal_ceiling <= 0 ) {
+            continue;
+        }
+
+        $resolved_ceiling = (int) round( $proposal_ceiling );
+        $rules['total']['max'] = $rules['total']['max'] === null
+            ? $resolved_ceiling
+            : min( (int) $rules['total']['max'], $resolved_ceiling );
+    }
+
+    $groups = [];
+    if ( isset( $proposal['dynamicGroups'] ) && is_array( $proposal['dynamicGroups'] ) && ! empty( $proposal['dynamicGroups'] ) ) {
+        $groups = $proposal['dynamicGroups'];
+    } else {
+        $page_product = wk_rh_get_selected_page_product( $page_products, $product_id );
+        if ( is_array( $page_product ) && isset( $page_product['dynamicGroups'] ) && is_array( $page_product['dynamicGroups'] ) ) {
+            $groups = $page_product['dynamicGroups'];
+        }
+    }
+
+    foreach ( $groups as $group ) {
+        if ( ! is_array( $group ) ) {
+            continue;
+        }
+
+        $target_key = wk_rh_get_booking_group_target_key( $group );
+        if ( $target_key === null ) {
+            continue;
+        }
+
+        $min = wk_rh_get_booking_rule_number_from_keys( $group, [ 'minQuantity', 'minQty', 'minimumQuantity', 'minimumQty' ], null );
+        $max = wk_rh_get_booking_rule_number_from_keys( $group, [ 'maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty' ], null );
+
+        if ( $min !== null && $min >= 0 ) {
+            $rules[ $target_key ]['min'] = max( 0, (int) round( $min ) );
+        }
+
+        if ( $max !== null && $max >= 0 ) {
+            $rules[ $target_key ]['max'] = max( 0, (int) round( $max ) );
+        }
+
+        $rules[ $target_key ]['step'] = wk_rh_get_booking_group_step( $group );
+    }
+
+    return $rules;
+}
+
 function wk_rh_get_booking_total_participants( array $counts ) {
     return max( 0, (int) ( $counts['adults'] ?? 0 ) ) + max( 0, (int) ( $counts['children'] ?? 0 ) ) + max( 0, (int) ( $counts['twin'] ?? 0 ) );
 }
@@ -954,112 +1124,7 @@ function wk_rh_format_booking_participants_text( array $source ) {
 }
 
 function wk_rh_extract_quantity_rules_from_proposal( $proposal ) {
-    $rules = [
-        'adults' => [ 'min' => 1, 'max' => null, 'step' => 1 ],
-        'kids' => [ 'min' => 0, 'max' => null, 'step' => 1 ],
-        'twin' => [ 'min' => 0, 'max' => null, 'step' => 1 ],
-        'total' => [ 'min' => 1, 'max' => null, 'step' => 1 ],
-    ];
-
-    if ( ! is_array( $proposal ) ) {
-        return $rules;
-    }
-
-    $proposal_min = null;
-    foreach ( [ 'minQuantity', 'minQty', 'minimumQuantity', 'minimumQty' ] as $key ) {
-        if ( isset( $proposal[ $key ] ) && is_numeric( $proposal[ $key ] ) ) {
-            $proposal_min = (float) $proposal[ $key ];
-            break;
-        }
-    }
-
-    $proposal_max = null;
-    foreach ( [ 'maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty' ] as $key ) {
-        if ( isset( $proposal[ $key ] ) && is_numeric( $proposal[ $key ] ) ) {
-            $proposal_max = (float) $proposal[ $key ];
-            break;
-        }
-    }
-
-    $min_amount = null;
-    foreach ( [ 'minAmount', 'minimumAmount' ] as $key ) {
-        if ( isset( $proposal[ $key ] ) && is_numeric( $proposal[ $key ] ) ) {
-            $min_amount = (float) $proposal[ $key ];
-            break;
-        }
-    }
-
-    $max_amount = null;
-    foreach ( [ 'maxAmount', 'maximumAmount' ] as $key ) {
-        if ( isset( $proposal[ $key ] ) && is_numeric( $proposal[ $key ] ) ) {
-            $max_amount = (float) $proposal[ $key ];
-            break;
-        }
-    }
-
-    if ( $proposal_min !== null && $proposal_min >= 0 ) {
-        $rules['total']['min'] = (int) round( $proposal_min );
-    }
-    if ( $proposal_max !== null && $proposal_max >= 0 ) {
-        $rules['total']['max'] = (int) round( $proposal_max );
-    }
-    if ( $min_amount !== null && $min_amount > 0 ) {
-        $rules['total']['min'] = max( (int) $rules['total']['min'], (int) round( $min_amount ) );
-    }
-    if ( $max_amount !== null && $max_amount > 0 ) {
-        $resolved_max = (int) round( $max_amount );
-        $rules['total']['max'] = $rules['total']['max'] === null ? $resolved_max : min( (int) $rules['total']['max'], $resolved_max );
-    }
-
-    $groups = isset( $proposal['dynamicGroups'] ) && is_array( $proposal['dynamicGroups'] ) ? $proposal['dynamicGroups'] : [];
-    foreach ( $groups as $group ) {
-        if ( ! is_array( $group ) ) {
-            continue;
-        }
-
-        $tag = strtolower( trim( (string) ( $group['tag'] ?? '' ) ) );
-        $target_key = null;
-        if ( in_array( $tag, [ 'adults', 'adult', 'voksne' ], true ) ) {
-            $target_key = 'adults';
-        } elseif ( in_array( $tag, [ 'kids', 'children', 'child', 'born', 'børn' ], true ) ) {
-            $target_key = 'kids';
-        } elseif ( in_array( $tag, [ 'twin', 'twinkart', 'tandem', 'passenger' ], true ) ) {
-            $target_key = 'twin';
-        }
-
-        if ( $target_key === null ) {
-            continue;
-        }
-
-        foreach ( [ 'minQuantity', 'minQty', 'minimumQuantity', 'minimumQty' ] as $key ) {
-            if ( isset( $group[ $key ] ) && is_numeric( $group[ $key ] ) ) {
-                $rules[ $target_key ]['min'] = max( 0, (int) round( (float) $group[ $key ] ) );
-                break;
-            }
-        }
-        foreach ( [ 'maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty' ] as $key ) {
-            if ( isset( $group[ $key ] ) && is_numeric( $group[ $key ] ) ) {
-                $rules[ $target_key ]['max'] = max( 0, (int) round( (float) $group[ $key ] ) );
-                break;
-            }
-        }
-
-        $step_candidates = [
-            $group['step'] ?? null,
-            $group['stepQuantity'] ?? null,
-            $group['quantityStep'] ?? null,
-            $group['stepSize'] ?? null,
-            $group['increment'] ?? null,
-        ];
-        foreach ( $step_candidates as $candidate ) {
-            if ( is_numeric( $candidate ) && (float) $candidate > 0 ) {
-                $rules[ $target_key ]['step'] = (int) round( (float) $candidate );
-                break;
-            }
-        }
-    }
-
-    return $rules;
+    return wk_rh_extract_quantity_rules( $proposal, null, [], '' );
 }
 
 function wk_rh_rule_value_matches_step( $value, $min, $step ) {
@@ -1090,10 +1155,12 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
         return $passed;
     }
 
-    $rules = wk_rh_extract_quantity_rules_from_proposal( $session_booking['proposal'] );
-    if ( function_exists( 'wk_rh_apply_page_product_limits_to_rules' ) ) {
-        $rules = wk_rh_apply_page_product_limits_to_rules( $rules, $session_booking['pageProductLimits'] ?? null );
-    }
+    $rules = wk_rh_extract_quantity_rules(
+        $session_booking['proposal'],
+        $session_booking['pageProductLimits'] ?? null,
+        $session_booking['pageProducts'] ?? [],
+        $session_booking['productId'] ?? ''
+    );
 
     $adults = isset( $_POST['booking_adults'] ) ? max( 0, (int) $_POST['booking_adults'] ) : null;
     $kids   = isset( $_POST['booking_children'] ) ? max( 0, (int) $_POST['booking_children'] ) : null;

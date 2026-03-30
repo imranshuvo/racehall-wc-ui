@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.90
+ * Version: 1.97
  * Author: Webkonsulenterne ApS
  */
 
@@ -47,7 +47,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.90' );
+define( 'RACEHALL_WC_UI_VERSION', '1.97' );
 
 function wk_rh_hide_admin_shipping_line_items_css() {
     if ( ! is_admin() || ! function_exists( 'get_current_screen' ) ) {
@@ -2523,9 +2523,11 @@ function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
     $bmi_data = WC()->session ? WC()->session->get('rh_bmi_booking') : null;
     if ( $bmi_data && ! $is_addon_request ) {
         $cart_item_data['bmi_proposal']    = $bmi_data['proposal']    ?? null;
+        $cart_item_data['bmi_product_id']  = isset( $bmi_data['productId'] ) ? sanitize_text_field( (string) $bmi_data['productId'] ) : '';
         $cart_item_data['bmi_page_id']     = $bmi_data['pageId']      ?? '';
         $cart_item_data['bmi_resource_id'] = $bmi_data['resourceId']  ?? '';
         $cart_item_data['bmi_page_product_limits'] = $bmi_data['pageProductLimits'] ?? null;
+        $cart_item_data['bmi_page_products'] = isset( $bmi_data['pageProducts'] ) && is_array( $bmi_data['pageProducts'] ) ? array_values( $bmi_data['pageProducts'] ) : [];
         $cart_item_data['bmi_order_id']    = '';
         $cart_item_data['bmi_order_item_id'] = '';
         $cart_item_data['bmi_hold_expires_at'] = 0;
@@ -2546,9 +2548,11 @@ function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
     if ( $is_addon_request ) {
         unset(
             $cart_item_data['bmi_proposal'],
+            $cart_item_data['bmi_product_id'],
             $cart_item_data['bmi_page_id'],
             $cart_item_data['bmi_resource_id'],
-            $cart_item_data['bmi_page_product_limits']
+            $cart_item_data['bmi_page_product_limits'],
+            $cart_item_data['bmi_page_products']
         );
     }
 
@@ -2684,6 +2688,18 @@ add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $val
 
     return $cart_item;
 }, 20, 3 );
+
+add_filter( 'woocommerce_get_cart_item_from_session', function( $cart_item, $values, $cart_item_key ) {
+    if ( isset( $values['bmi_product_id'] ) ) {
+        $cart_item['bmi_product_id'] = sanitize_text_field( (string) $values['bmi_product_id'] );
+    }
+
+    if ( isset( $values['bmi_page_products'] ) && is_array( $values['bmi_page_products'] ) ) {
+        $cart_item['bmi_page_products'] = array_values( $values['bmi_page_products'] );
+    }
+
+    return $cart_item;
+}, 30, 3 );
 
 function wk_rh_get_nexi_gateway_location_map() {
     return [
@@ -3212,6 +3228,37 @@ add_action( 'woocommerce_add_to_cart', function( $cart_item_key, $product_id, $q
 function wk_rh_get_main_booking_cart_item_key() {
     if ( ! function_exists( 'WC' ) || ! WC()->cart || WC()->cart->is_empty() ) {
         return '';
+    }
+
+    $session_product_id = '';
+    if ( WC()->session ) {
+        $session_booking = WC()->session->get( 'rh_bmi_booking' );
+        if ( is_array( $session_booking ) && ! empty( $session_booking['productId'] ) ) {
+            $session_product_id = trim( (string) $session_booking['productId'] );
+        }
+    }
+
+    if ( $session_product_id !== '' ) {
+        foreach ( WC()->cart->get_cart() as $cart_item_key => $cart_item ) {
+            if ( ! empty( $cart_item['is_addon'] ) ) {
+                continue;
+            }
+
+            $item_product_id = isset( $cart_item['bmi_product_id'] ) ? trim( (string) $cart_item['bmi_product_id'] ) : '';
+            if ( $item_product_id === '' ) {
+                $product_id = isset( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0;
+                if ( $product_id > 0 ) {
+                    $item_product_id = function_exists( 'get_field' )
+                        ? (string) get_field( 'bmileisure_id', $product_id )
+                        : (string) get_post_meta( $product_id, 'bmileisure_id', true );
+                    $item_product_id = trim( $item_product_id );
+                }
+            }
+
+            if ( $item_product_id !== '' && $item_product_id === $session_product_id ) {
+                return (string) $cart_item_key;
+            }
+        }
     }
 
     foreach ( WC()->cart->get_cart() as $cart_item_key => $cart_item ) {
@@ -3771,8 +3818,12 @@ function wk_rh_validate_checkout_booking_quantity( array $cart_item, $quantity, 
         return false;
     }
 
-    $rules = wk_rh_extract_quantity_rules_from_proposal( $proposal );
-    $rules = wk_rh_apply_page_product_limits_to_rules( $rules, $cart_item['bmi_page_product_limits'] ?? null );
+    $rules = wk_rh_extract_quantity_rules(
+        $proposal,
+        $cart_item['bmi_page_product_limits'] ?? null,
+        $cart_item['bmi_page_products'] ?? [],
+        $cart_item['bmi_product_id'] ?? ''
+    );
 
     $counts = function_exists( 'wk_rh_get_booking_participant_counts' )
         ? wk_rh_get_booking_participant_counts( $cart_item )
@@ -4059,6 +4110,7 @@ function wk_rh_store_main_cart_booking_hold( $main_cart_item_key, array $main_it
         $session_booking['productId'] = (string) $bm_id;
         $session_booking['quantity'] = $main_quantity;
         $session_booking['pageProductLimits'] = $main_item['bmi_page_product_limits'] ?? null;
+        $session_booking['pageProducts'] = isset( $main_item['bmi_page_products'] ) && is_array( $main_item['bmi_page_products'] ) ? array_values( $main_item['bmi_page_products'] ) : [];
         $session_booking['bookingLocation'] = $booking_location;
         $session_booking['orderId'] = $main_order_id;
         $session_booking['orderItemId'] = $main_order_item_id;
@@ -4258,6 +4310,7 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
 
     $code = (int) wp_remote_retrieve_response_code( $response );
     $result = json_decode( wp_remote_retrieve_body( $response ), true );
+    $body_success = ! is_array( $result ) || ! array_key_exists( 'success', $result ) || false !== $result['success'];
     if ( ! ( $code >= 200 && $code < 300 ) ) {
         wk_rh_log_user_event( 'booking.hold_failed', [
             'source' => (string) $source,
@@ -4274,6 +4327,33 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
         ];
     }
 
+    if ( ! $body_success ) {
+        $upstream_error_message = '';
+        if ( is_array( $result ) ) {
+            if ( ! empty( $result['errorMessage'] ) ) {
+                $upstream_error_message = sanitize_text_field( (string) $result['errorMessage'] );
+            } elseif ( ! empty( $result['errormessage'] ) ) {
+                $upstream_error_message = sanitize_text_field( (string) $result['errormessage'] );
+            }
+        }
+
+        wk_rh_log_user_event( 'booking.hold_failed', [
+            'source' => (string) $source,
+            'reason' => 'upstream_booking_semantic_failure',
+            'productId' => $product_id,
+            'bmProductId' => (string) $bm_id,
+            'bookingLocation' => $booking_location,
+            'httpCode' => $code,
+            'upstreamError' => $upstream_error_message,
+        ], 'warning' );
+
+        return [
+            'success' => false,
+            'userMessage' => __( 'Det valgte tidspunkt kan ikke reserveres lige nu. Vælg venligst et nyt tidspunkt.', 'racehall-wc-ui' ),
+            'redirectToProduct' => true,
+        ];
+    }
+
     if ( empty( $result['orderId'] ) || empty( $result['orderItemId'] ) ) {
         wk_rh_log_user_event( 'booking.hold_failed', [
             'source' => (string) $source,
@@ -4281,6 +4361,7 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
             'productId' => $product_id,
             'bmProductId' => (string) $bm_id,
             'bookingLocation' => $booking_location,
+            'responseKeys' => is_array( $result ) ? array_keys( $result ) : [],
         ], 'error' );
         return [
             'success' => false,

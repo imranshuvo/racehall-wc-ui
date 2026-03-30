@@ -305,27 +305,6 @@ window.RH_I18N = {
                     </div>
                 </div>
 
-                <div class="accordion-item active">
-                    <div class="accordion-header">
-                        <span><?php esc_html_e( 'Tidspunkt', 'racehall-wc-ui' ); ?></span>
-                        <div class="chevron">
-                            <svg width="16" height="9" viewBox="0 0 16 9" fill="none"
-                                 xmlns="http://www.w3.org/2000/svg">
-                                <path d="M0.353516 0.353516L7.85352 7.85352L15.3535 0.353516" stroke="#D9D9D9"/>
-                            </svg>
-
-                        </div>
-                    </div>
-                    <div class="accordion-content">
-                        <div class="accordion-content">
-                            <div class="time-slots" id="booking-time-slots-section" tabindex="-1" role="group" aria-label="<?php esc_attr_e( 'Vælg tidspunkt', 'racehall-wc-ui' ); ?>">
-
-                            </div>
-                            <p class="booking-validation-message" id="booking-time-error" aria-live="polite" hidden></p>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- PEOPLE -->
                 <div class="accordion-item active">
                     <div class="accordion-header">
@@ -348,7 +327,7 @@ window.RH_I18N = {
                                 </div>
                                 <div class="counter-controls">
                                     <button type="button" onclick="updateCount('adult-1', -1)">−</button>
-                                    <input type="number" id="adult-1" value="1" min="1" step="1" inputmode="numeric" />
+                                    <input type="number" id="adult-1" value="0" min="0" step="1" inputmode="numeric" />
                                     <button type="button" onclick="updateCount('adult-1', 1)">+</button>
                                 </div>
                             </div>
@@ -377,6 +356,27 @@ window.RH_I18N = {
                                 </div>
                             </div>
 
+                        </div>
+                    </div>
+                </div>
+
+                <div class="accordion-item active">
+                    <div class="accordion-header">
+                        <span><?php esc_html_e( 'Tidspunkt', 'racehall-wc-ui' ); ?></span>
+                        <div class="chevron">
+                            <svg width="16" height="9" viewBox="0 0 16 9" fill="none"
+                                 xmlns="http://www.w3.org/2000/svg">
+                                <path d="M0.353516 0.353516L7.85352 7.85352L15.3535 0.353516" stroke="#D9D9D9"/>
+                            </svg>
+
+                        </div>
+                    </div>
+                    <div class="accordion-content">
+                        <div class="accordion-content">
+                            <div class="time-slots" id="booking-time-slots-section" tabindex="-1" role="group" aria-label="<?php esc_attr_e( 'Vælg tidspunkt', 'racehall-wc-ui' ); ?>">
+
+                            </div>
+                            <p class="booking-validation-message" id="booking-time-error" aria-live="polite" hidden></p>
                         </div>
                     </div>
                 </div>
@@ -410,7 +410,7 @@ window.RH_I18N = {
                             <div class="summary-section">
                                 <h4><?php esc_html_e( 'Antal', 'racehall-wc-ui' ); ?></h4>
                                 <div class="summary-item">
-                                    <span id="summary-people" class="summary-label"><?php echo wp_kses_post( __( '1 voksen<br>0 børn<br>0 twin kart', 'racehall-wc-ui' ) ); ?></span>
+                                    <span id="summary-people" class="summary-label"><?php echo wp_kses_post( __( '0 voksne<br>0 børn<br>0 twin kart', 'racehall-wc-ui' ) ); ?></span>
                                 </div>
                             </div>
 
@@ -431,7 +431,7 @@ window.RH_I18N = {
                                 <div class="total-item">
                                     <span class="total-label"><?php esc_html_e( 'Total', 'racehall-wc-ui' ); ?></span>
                                     <span class="total-price" id="summary-total-price">
-                                        <?php echo wc_price( $product->get_price() ); ?>
+                                        <?php echo wc_price( 0 ); ?>
                                     </span>
                                 </div>
                             </div>
@@ -444,14 +444,14 @@ window.RH_I18N = {
                                                      <input type="hidden" name="booking_product_id" id="booking_product_id" value="<?php echo esc_attr( $bm_id ); ?>">
                                                     <input type="hidden" name="booking_page_product_limits" id="booking_page_product_limits">
                                                     <input type="hidden" name="booking_page_products" id="booking_page_products">
-                                        <input type="hidden" name="booking_adults" id="booking_adults" value="1">
+                                        <input type="hidden" name="booking_adults" id="booking_adults" value="0">
                                         <input type="hidden" name="booking_children" id="booking_children" value="0">
                                                     <input type="hidden" name="booking_twin" id="booking_twin" value="0">
-                                        <input type="hidden" name="booking_quantity" id="booking_quantity" value="1">
+                                        <input type="hidden" name="booking_quantity" id="booking_quantity" value="0">
                                         <input type="hidden" name="booking_location" id="booking_location"
                                             value="<?php echo esc_attr( $lokation ); ?>">
                                         <input type="hidden" name="add-to-cart" value="<?php echo esc_attr( $product->get_id() ); ?>" />
-                                        <input type="hidden" name="quantity" id="cart_quantity" value="1" />
+                                        <input type="hidden" name="quantity" id="cart_quantity" value="0" />
                                         <!-- Optional booking meta (populated by JS) -->
 
                                         <button type="submit" class="single_add_to_cart_button button alt add-to-cart-button" aria-disabled="<?php echo $booking_product_available ? 'false' : 'true'; ?>"<?php disabled( ! $booking_product_available ); ?>><?php esc_html_e( 'Tilføj til kurv', 'racehall-wc-ui' ); ?></button>

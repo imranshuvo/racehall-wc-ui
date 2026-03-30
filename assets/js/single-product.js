@@ -12,13 +12,20 @@ document.addEventListener('DOMContentLoaded', function () {
 })
 
 let currentQuantityRules = {
-    adults: { min: 1, max: null, step: 1, quantity: 1 },
+    adults: { min: 0, max: null, step: 1, quantity: 0 },
     children: { min: 0, max: null, step: 1, quantity: 0 },
     twin: { min: 0, max: null, step: 1, quantity: 0 },
-    total: { min: 1, max: null, step: 1 }
+    total: { min: 0, max: null, step: 1 }
 }
 let currentPageProductLimits = null
 let currentPageProducts = []
+let pendingTimeslotRefresh = null
+let currentPageRulesDateKey = ''
+let pageRulesCache = {}
+let pendingPageRulesRequests = {}
+let activeTimeslotRequestController = null
+let latestTimeslotRequestId = 0
+const TIMESLOT_REFRESH_DEBOUNCE_MS = 450
 const PARTY_KEYS = ['adults', 'children', 'twin']
 const PARTY_INPUT_IDS = {
     adults: 'adult-1',
@@ -119,6 +126,14 @@ function normalizeTag(tagValue) {
     return String(tagValue || '').trim().toLowerCase()
 }
 
+function normalizeGroupName(nameValue) {
+    return String(nameValue || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+}
+
 function pickStep(group) {
     const candidates = [
         group.step,
@@ -152,9 +167,47 @@ function getTotalFromCounts(counts) {
     return PARTY_KEYS.reduce((sum, key) => sum + (Number(counts[key]) || 0), 0)
 }
 
-function extractRulesFromProposal(proposal, pageProductLimits = null) {
+function getCurrentBookingProductId(productId = null) {
+    if (productId !== null && productId !== undefined && String(productId).trim() !== '') {
+        return String(productId).trim()
+    }
+
+    return String(window.RH_PRODUCT_ID || '').trim()
+}
+
+function getSelectedPageProduct(pageProducts, productId = null) {
+    const resolvedProductId = getCurrentBookingProductId(productId)
+    if (!resolvedProductId || !Array.isArray(pageProducts)) return null
+
+    return pageProducts.find((pageProduct) => pageProduct && String(pageProduct.id || '').trim() === resolvedProductId) || null
+}
+
+function resolveGroupTargetKey(group) {
+    if (!group || typeof group !== 'object') return null
+
+    const candidates = [normalizeTag(group.tag), normalizeGroupName(group.name)]
+    for (const candidate of candidates) {
+        if (!candidate) continue
+
+        if (['adults', 'adult', 'voksne'].includes(candidate) || candidate.includes('adult') || candidate.includes('over 150')) {
+            return 'adults'
+        }
+
+        if (['kids', 'children', 'child', 'born'].includes(candidate) || candidate.includes('child') || candidate.includes('kid') || candidate.includes('under 150')) {
+            return 'children'
+        }
+
+        if (['twin', 'twinkart', 'tandem', 'passenger'].includes(candidate) || candidate.includes('twin') || candidate.includes('passenger')) {
+            return 'twin'
+        }
+    }
+
+    return null
+}
+
+function extractRulesFromSources(proposal, pageProductLimits = null, pageProducts = [], productId = null) {
     const rules = {
-        adults: { min: 1, max: null, step: 1, quantity: 1 },
+        adults: { min: 0, max: null, step: 1, quantity: 0 },
         children: { min: 0, max: null, step: 1, quantity: 0 },
         twin: { min: 0, max: null, step: 1, quantity: 0 },
         total: { min: 1, max: null, step: 1 }
@@ -162,6 +215,7 @@ function extractRulesFromProposal(proposal, pageProductLimits = null) {
 
     const proposalSource = (proposal && typeof proposal === 'object') ? proposal : {}
     const pageSource = (pageProductLimits && typeof pageProductLimits === 'object') ? pageProductLimits : {}
+    const selectedPageProduct = getSelectedPageProduct(pageProducts, productId)
 
     const proposalMin = parseRuleFromKeys(proposalSource, ['minQuantity', 'minQty', 'minimumQuantity', 'minimumQty'], null)
     const proposalMax = parseRuleFromKeys(proposalSource, ['maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty'], null)
@@ -171,37 +225,31 @@ function extractRulesFromProposal(proposal, pageProductLimits = null) {
     const pageMaxAmount = parseRuleFromKeys(pageSource, ['maxAmount', 'maximumAmount'], null)
 
     if (pageMinAmount !== null && pageMinAmount > 0) {
-        rules.total.min = pageMinAmount
-    } else {
-        if (proposalMin !== null) rules.total.min = proposalMin
-        if (proposalMinAmount !== null && proposalMinAmount > 0) rules.total.min = Math.max(rules.total.min, proposalMinAmount)
+        rules.total.min = Math.max(rules.total.min, pageMinAmount)
     }
 
     if (pageMaxAmount !== null && pageMaxAmount > 0) {
         rules.total.max = pageMaxAmount
-    } else {
-        if (proposalMax !== null) rules.total.max = proposalMax
-        if (proposalMaxAmount !== null && proposalMaxAmount > 0) rules.total.max = rules.total.max === null ? proposalMaxAmount : Math.min(rules.total.max, proposalMaxAmount)
     }
 
+    if (proposalMin !== null && proposalMin > 0) rules.total.min = Math.max(rules.total.min, proposalMin)
+    if (proposalMinAmount !== null && proposalMinAmount > 0) rules.total.min = Math.max(rules.total.min, proposalMinAmount)
+    if (proposalMax !== null && proposalMax > 0) rules.total.max = rules.total.max === null ? proposalMax : Math.min(rules.total.max, proposalMax)
+    if (proposalMaxAmount !== null && proposalMaxAmount > 0) rules.total.max = rules.total.max === null ? proposalMaxAmount : Math.min(rules.total.max, proposalMaxAmount)
+
     const proposalGroups = Array.isArray(proposalSource.dynamicGroups) ? proposalSource.dynamicGroups : []
-    const groups = proposalGroups
+    const pageGroups = selectedPageProduct && Array.isArray(selectedPageProduct.dynamicGroups) ? selectedPageProduct.dynamicGroups : []
+    const groups = proposalGroups.length ? proposalGroups : pageGroups
     groups.forEach(group => {
         if (!group || typeof group !== 'object') return
 
-        const tag = normalizeTag(group.tag)
         const min = parseRuleFromKeys(group, ['minQuantity', 'minQty', 'minimumQuantity', 'minimumQty'], null)
         const max = parseRuleFromKeys(group, ['maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty'], null)
         const step = pickStep(group)
         const quantity = parseRuleNumber(group.quantity, null)
 
-        const target = (tag === 'adults' || tag === 'adult' || tag === 'voksne')
-            ? rules.adults
-            : (tag === 'kids' || tag === 'children' || tag === 'child' || tag === 'born' || tag === 'børn')
-                ? rules.children
-                : (tag === 'twin' || tag === 'twinkart' || tag === 'tandem' || tag === 'passenger')
-                    ? rules.twin
-                : null
+        const targetKey = resolveGroupTargetKey(group)
+        const target = targetKey ? rules[targetKey] : null
 
         if (!target) return
         if (min !== null) target.min = min
@@ -210,7 +258,7 @@ function extractRulesFromProposal(proposal, pageProductLimits = null) {
         if (quantity !== null) target.quantity = quantity
     })
 
-    const adultsMin = parseRuleNumber(rules.adults.min, 1)
+    const adultsMin = parseRuleNumber(rules.adults.min, 0)
     const childrenMin = parseRuleNumber(rules.children.min, 0)
     const twinMin = parseRuleNumber(rules.twin.min, 0)
     const totalMin = parseRuleNumber(rules.total.min, 1)
@@ -241,7 +289,7 @@ function extractRulesFromProposal(proposal, pageProductLimits = null) {
     }
 
     PARTY_KEYS.forEach((key) => {
-        const min = parseRuleNumber((rules[key] || {}).min, key === 'adults' ? 1 : 0)
+        const min = parseRuleNumber((rules[key] || {}).min, 0)
         const quantity = parseRuleNumber((rules[key] || {}).quantity, null)
         if (quantity !== null && quantity < min) {
             rules[key].quantity = min
@@ -272,13 +320,24 @@ function clampByRule(value, rule) {
 }
 
 function enforceCountsByRules(counts, changedKey) {
+    const requestedTotal = getTotalFromCounts(counts)
+    if (requestedTotal <= 0) {
+        return PARTY_KEYS.reduce((acc, key) => {
+            const max = parseRuleNumber((currentQuantityRules[key] || {}).max, null)
+            let value = Math.max(0, Number(counts[key]) || 0)
+            if (max !== null) value = Math.min(max, value)
+            acc[key] = Math.round(value)
+            return acc
+        }, {})
+    }
+
     const next = PARTY_KEYS.reduce((acc, key) => {
         acc[key] = clampByRule(counts[key], currentQuantityRules[key])
         return acc
     }, {})
 
-    const totalRule = currentQuantityRules.total || { min: 1, max: null, step: 1 }
-    const totalMin = Math.max(1, parseRuleNumber(totalRule.min, 1))
+    const totalRule = currentQuantityRules.total || { min: 0, max: null, step: 1 }
+    const totalMin = Math.max(0, parseRuleNumber(totalRule.min, 0))
     const totalMax = parseRuleNumber(totalRule.max, null)
     const totalStep = parseRuleNumber(totalRule.step, 1)
 
@@ -358,6 +417,193 @@ function applyCountsToUI(counts) {
 
 let quantityInputsBound = false
 
+function getTimeslotsContainer() {
+    return document.getElementById('booking-time-slots-section') || document.querySelector('.time-slots')
+}
+
+function renderTimeslotsMessage(message) {
+    const container = getTimeslotsContainer()
+    if (container) {
+        container.innerHTML = `<span style="color:#fff">${String(message || '')}</span>`
+    }
+    return container
+}
+
+function isBookableSelectedDate(dateKey) {
+    return Boolean(dateKey) && availabilityState === 'ok' && availabilityMap[dateKey] === 0
+}
+
+function markQuantitySelectionTouched() {
+    const wasExplicitlyChosen = hasExplicitQuantitySelection
+    hasExplicitQuantitySelection = true
+    return !wasExplicitlyChosen
+}
+
+function renderTimeslotsLoadingState() {
+    const container = getTimeslotsContainer()
+    if (container) {
+        container.setAttribute('aria-busy', 'true')
+        container.innerHTML = '<div class="loading"><div class="spinner"></div></div>'
+    }
+    return container
+}
+
+function clearTimeslotsBusyState() {
+    const container = getTimeslotsContainer()
+    if (container) {
+        container.removeAttribute('aria-busy')
+    }
+    return container
+}
+
+function abortActiveTimeslotRequest() {
+    if (activeTimeslotRequestController) {
+        activeTimeslotRequestController.abort()
+        activeTimeslotRequestController = null
+    }
+}
+
+function getSelectedDateKey() {
+    if (!(selectedDate instanceof Date) || Number.isNaN(selectedDate.getTime())) return ''
+    return `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
+}
+
+async function fetchPageQuantityRulesForDate(dateKey) {
+    if (!dateKey || !isBookingProductAvailable()) return false
+
+    const cachedRules = pageRulesCache[dateKey] || null
+    if (cachedRules) {
+        if (getSelectedDateKey() === dateKey) {
+            currentPageProductLimits = cachedRules.pageProductLimits
+            currentPageProducts = cachedRules.pageProducts
+            currentPageRulesDateKey = dateKey
+            applyPageQuantityRules(currentPageProductLimits, currentPageProducts, window.RH_PRODUCT_ID)
+        }
+        return true
+    }
+
+    if (pendingPageRulesRequests[dateKey]) {
+        return pendingPageRulesRequests[dateKey]
+    }
+
+    const requestPromise = (async () => {
+        try {
+            const res = await fetch(window.my_ajax_object.ajax_url, {
+                method: 'POST',
+                credentials: 'same-origin',
+                body: new URLSearchParams({
+                    action: 'rh_get_timeslots',
+                    productId: window.RH_PRODUCT_ID,
+                    date: dateKey,
+                    quantity: '0',
+                    bookingLocation: getBookingLocation(),
+                    nonce: window.my_ajax_object.nonce || ''
+                })
+            })
+            const text = await res.text()
+            const data = JSON.parse(text)
+            if (!data || data.success === false || data.data === false) return false
+
+            const resolvedPageProductLimits = (data && typeof data.pageProductLimits === 'object') ? data.pageProductLimits : null
+            const resolvedPageProducts = (data && Array.isArray(data.pageProducts)) ? data.pageProducts : []
+
+            pageRulesCache[dateKey] = {
+                pageProductLimits: resolvedPageProductLimits,
+                pageProducts: resolvedPageProducts
+            }
+
+            if (getSelectedDateKey() === dateKey) {
+                currentPageProductLimits = resolvedPageProductLimits
+                currentPageProducts = resolvedPageProducts
+                currentPageRulesDateKey = dateKey
+                applyPageQuantityRules(currentPageProductLimits, currentPageProducts, window.RH_PRODUCT_ID)
+            }
+
+            return true
+        } catch (e) {
+            return false
+        } finally {
+            delete pendingPageRulesRequests[dateKey]
+        }
+    })()
+
+    pendingPageRulesRequests[dateKey] = requestPromise
+    return requestPromise
+}
+
+async function scheduleTimeslotRefreshForCurrentDate() {
+    const dateKey = getSelectedDateKey()
+    if (!dateKey) return
+
+    if (pendingTimeslotRefresh) {
+        window.clearTimeout(pendingTimeslotRefresh)
+        pendingTimeslotRefresh = null
+    }
+
+    abortActiveTimeslotRequest()
+
+    resetBookingTimeSelection()
+    setBookingSubmitEnabled(false)
+
+    if (!isBookableSelectedDate(dateKey)) {
+        clearTimeslotsBusyState()
+        renderTimeslotsMessage('Ingen ledige tider denne dag.')
+        return
+    }
+
+    const pageRulesPromise = fetchPageQuantityRulesForDate(dateKey)
+
+    if (getTotalQuantity() <= 0) {
+        clearTimeslotsBusyState()
+        renderTimeslotsMessage('Vælg antal personer for at se ledige tider. Det valgte antal bestemmer hvilke tider der vises.')
+        return
+    }
+
+    pendingTimeslotRefresh = window.setTimeout(async () => {
+        pendingTimeslotRefresh = null
+        renderTimeslotsLoadingState()
+
+        await pageRulesPromise
+
+        if (getSelectedDateKey() !== dateKey) return
+        if (!isBookableSelectedDate(dateKey)) {
+            clearTimeslotsBusyState()
+            renderTimeslotsMessage('Ingen ledige tider denne dag.')
+            return
+        }
+        if (getTotalQuantity() <= 0) {
+            clearTimeslotsBusyState()
+            renderTimeslotsMessage('Vælg antal personer for at se ledige tider. Det valgte antal bestemmer hvilke tider der vises.')
+            return
+        }
+
+        fetchAndRenderTimeslots(dateKey)
+    }, TIMESLOT_REFRESH_DEBOUNCE_MS)
+}
+
+function applyResolvedQuantityRules(rules, options = {}) {
+    currentQuantityRules = rules
+    const preserveCounts = options.preserveCounts === true
+    const preferredKey = options.changedKey || 'adults'
+    const initial = preserveCounts
+        ? getPartyCounts()
+        : PARTY_KEYS.reduce((acc, key) => {
+            acc[key] = parseRuleNumber(currentQuantityRules[key].quantity, currentQuantityRules[key].min)
+            return acc
+        }, {})
+
+    const targetMinTotal = parseRuleNumber((currentQuantityRules.total || {}).min, 1)
+    const initialTotal = getTotalFromCounts(initial)
+    if (targetMinTotal > initialTotal && (!preserveCounts || initialTotal > 0)) {
+        initial.adults = (Number(initial.adults) || 0) + (targetMinTotal - initialTotal)
+    }
+
+    const enforced = enforceCountsByRules(initial, preferredKey)
+    applyCountsToUI(enforced)
+    updateSummaryPeople()
+    syncQuantityConstraintsToForm(enforced)
+}
+
 function applyManualCount(type) {
     const el = document.getElementById(type)
     if (!el) return
@@ -366,6 +612,8 @@ function applyManualCount(type) {
     const raw = ('value' in el) ? el.value : el.textContent
     const parsed = parseInt(String(raw || ''), 10)
 
+    const quantityWasChosenNow = markQuantitySelectionTouched()
+    const previousTotal = getTotalQuantity()
     const counts = getPartyCounts()
     const candidate = { ...counts }
 
@@ -376,6 +624,10 @@ function applyManualCount(type) {
     const enforced = enforceCountsByRules(candidate, key)
     applyCountsToUI(enforced)
     updateSummaryPeople()
+
+    if (quantityWasChosenNow || getTotalQuantity() !== previousTotal) {
+        scheduleTimeslotRefreshForCurrentDate()
+    }
 }
 
 function bindQuantityInputEvents() {
@@ -416,8 +668,8 @@ function updateCounterButtonStates(counts) {
         const controls = valueElement ? valueElement.parentElement : null
         const decButton = controls ? controls.querySelector('button:nth-of-type(1)') : null
         const incButton = controls ? controls.querySelector('button:nth-of-type(2)') : null
-        const rule = currentQuantityRules[key] || { min: key === 'adults' ? 1 : 0, max: null }
-        const min = parseRuleNumber(rule.min, key === 'adults' ? 1 : 0)
+        const rule = currentQuantityRules[key] || { min: 0, max: null }
+        const min = parseRuleNumber(rule.min, 0)
         const max = parseRuleNumber(rule.max, null)
 
         if (decButton) decButton.disabled = counts[key] <= min
@@ -435,7 +687,7 @@ function syncQuantityConstraintsToForm(counts) {
 
     PARTY_KEYS.forEach((key) => {
         const hiddenInput = document.getElementById(PARTY_HIDDEN_IDS[key])
-        setNumericInputRules(hiddenInput, currentQuantityRules[key], counts[key], key === 'adults' ? 1 : 0)
+        setNumericInputRules(hiddenInput, currentQuantityRules[key], counts[key], 0)
     })
     setNumericInputRules(quantityInput, currentQuantityRules.total, total, 1)
     setNumericInputRules(cartQuantityInput, currentQuantityRules.total, total, 1)
@@ -443,21 +695,18 @@ function syncQuantityConstraintsToForm(counts) {
     updateCounterButtonStates(counts)
 }
 
-function applyProposalQuantityRules(proposal, pageProductLimits = null) {
-    currentQuantityRules = extractRulesFromProposal(proposal, pageProductLimits)
-    const initial = PARTY_KEYS.reduce((acc, key) => {
-        acc[key] = parseRuleNumber(currentQuantityRules[key].quantity, currentQuantityRules[key].min)
-        return acc
-    }, {})
-    const targetMinTotal = parseRuleNumber((currentQuantityRules.total || {}).min, 1)
-    const initialTotal = getTotalFromCounts(initial)
-    if (targetMinTotal > initialTotal) {
-        initial.adults = (Number(initial.adults) || 0) + (targetMinTotal - initialTotal)
-    }
-    const enforced = enforceCountsByRules(initial, 'adults')
-    applyCountsToUI(enforced)
-    updateSummaryPeople()
-    syncQuantityConstraintsToForm(enforced)
+function applyPageQuantityRules(pageProductLimits = null, pageProducts = [], productId = null, changedKey = 'adults') {
+    applyResolvedQuantityRules(
+        extractRulesFromSources(null, pageProductLimits, pageProducts, productId),
+        { preserveCounts: true, changedKey }
+    )
+}
+
+function applyProposalQuantityRules(proposal, pageProductLimits = null, pageProducts = [], productId = null, options = {}) {
+    applyResolvedQuantityRules(
+        extractRulesFromSources(proposal, pageProductLimits, pageProducts, productId),
+        { preserveCounts: options.preserveCounts === true, changedKey: options.changedKey || 'adults' }
+    )
 }
 
 function updateCount(type, delta) {
@@ -468,6 +717,8 @@ function updateCount(type, delta) {
     const rule = currentQuantityRules[key]
     const step = parseRuleNumber(rule.step, 1)
 
+    const quantityWasChosenNow = markQuantitySelectionTouched()
+    const previousTotal = getTotalQuantity()
     const counts = getPartyCounts()
     const currentValue = counts[key]
     const candidateValue = currentValue + (delta * step)
@@ -478,6 +729,10 @@ function updateCount(type, delta) {
     const enforced = enforceCountsByRules(candidate, key)
     applyCountsToUI(enforced)
     updateSummaryPeople()
+
+    if (quantityWasChosenNow || getTotalQuantity() !== previousTotal) {
+        scheduleTimeslotRefreshForCurrentDate()
+    }
 }
 
 window.updateCount = updateCount
@@ -485,7 +740,7 @@ window.updateCount = updateCount
 function getPartyCounts() {
     return PARTY_KEYS.reduce((acc, key) => {
         const input = document.getElementById(PARTY_INPUT_IDS[key])
-        const fallbackMin = parseRuleNumber((currentQuantityRules[key] || {}).min, key === 'adults' ? 1 : 0)
+        const fallbackMin = parseRuleNumber((currentQuantityRules[key] || {}).min, 0)
         const raw = input ? (('value' in input) ? input.value : input.textContent) : String(fallbackMin)
         acc[key] = Math.max(fallbackMin, parseInt(String(raw), 10) || fallbackMin)
         return acc
@@ -495,7 +750,7 @@ function getPartyCounts() {
 function initializeQuantityState() {
     bindQuantityInputEvents()
     const initial = PARTY_KEYS.reduce((acc, key) => {
-        acc[key] = parseRuleNumber((currentQuantityRules[key] || {}).quantity, parseRuleNumber((currentQuantityRules[key] || {}).min, key === 'adults' ? 1 : 0))
+        acc[key] = parseRuleNumber((currentQuantityRules[key] || {}).quantity, parseRuleNumber((currentQuantityRules[key] || {}).min, 0))
         return acc
     }, {})
     const enforced = enforceCountsByRules(initial, 'adults')
@@ -507,11 +762,13 @@ function initializeQuantityState() {
 function getTotalQuantity() {
     const counts = enforceCountsByRules(getPartyCounts(), 'adults')
     const total = getTotalFromCounts(counts)
-    const totalMin = parseRuleNumber((currentQuantityRules.total || {}).min, 1)
+    if (total <= 0) return 0
+
+    const totalMin = parseRuleNumber((currentQuantityRules.total || {}).min, 0)
     const totalMax = parseRuleNumber((currentQuantityRules.total || {}).max, null)
     let resolved = Math.max(totalMin, total)
     if (totalMax !== null) resolved = Math.min(totalMax, resolved)
-    return Math.max(1, resolved)
+    return Math.max(0, resolved)
 }
 
 function formatMoney(value) {
@@ -547,7 +804,7 @@ function updateSummaryPrice(totalQuantity) {
     const cfg = window.RH_PRICE_CONFIG || {}
     const unitPrice = Number(cfg.unitPrice)
     const resolvedUnit = Number.isFinite(unitPrice) ? unitPrice : 0
-    const totalValue = resolvedUnit * Math.max(1, Number(totalQuantity) || 1)
+    const totalValue = resolvedUnit * Math.max(0, Number(totalQuantity) || 0)
 
     const unitEl = document.getElementById('summary-unit-price')
     const totalEl = document.getElementById('summary-total-price')
@@ -603,6 +860,7 @@ let currentMonth = today.getMonth()
 let currentYear = today.getFullYear()
 let availabilityMap = {}
 let availabilityState = 'unknown'
+let hasExplicitQuantitySelection = false
 
 
 function isPastDate(date) {
@@ -986,7 +1244,7 @@ function renderCalendar(month, year) {
                 renderCalendar(currentMonth, currentYear)
                 updateSummaryDate(selectedDate)
                 logBookingClientEvent('date_selected', { date: dateKey, productId: window.RH_PRODUCT_ID || 0 })
-                fetchAndRenderTimeslots(dateKey)
+                scheduleTimeslotRefreshForCurrentDate()
             })
         }
         if (!isPastDate(dateCur) && !isBooked &&
@@ -1010,31 +1268,34 @@ function renderCalendar(month, year) {
     }
 }
 
-async function fetchAndRenderTimeslots(dateStr) {
+async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
     if (!isBookingProductAvailable()) {
-        const container = document.querySelector('.time-slots')
+        const container = getTimeslotsContainer()
         if (container) {
             container.innerHTML = ''
+            container.removeAttribute('aria-busy')
         }
         setBookingSubmitEnabled(false)
         return
     }
-    resetBookingTimeSelection()
-    setBookingSubmitEnabled(false)
-    const container = document.querySelector('.time-slots')
-    if (container) {
-        container.innerHTML = '<div class="loading"><div class="spinner"></div></div>'
-    }
+
+    const requestId = ++latestTimeslotRequestId
+    const requestController = new AbortController()
+    activeTimeslotRequestController = requestController
+
+    const container = getTimeslotsContainer()
+    const requestedQuantity = getTotalQuantity()
     try {
         const productId = window.RH_PRODUCT_ID
         const res = await fetch(window.my_ajax_object.ajax_url, {
             method: 'POST',
             credentials: 'same-origin',
+            signal: requestController.signal,
             body: new URLSearchParams({
                 action: 'rh_get_timeslots',
                 productId: window.RH_PRODUCT_ID,
                 date: dateStr,
-                quantity: String(getTotalQuantity()),
+                quantity: String(requestedQuantity),
                 bookingLocation: getBookingLocation(),
                 nonce: window.my_ajax_object.nonce || ''
             })
@@ -1047,8 +1308,10 @@ async function fetchAndRenderTimeslots(dateStr) {
             if (container) container.innerHTML = '<span class="calendar-error" style="color:#fff">Fejl i tidsdata. Prøv igen.</span>'
             return
         }
+        if (requestId !== latestTimeslotRequestId) return
         if (!container) return
         container.innerHTML = ''
+        clearTimeslotsBusyState()
         if (data.success === false || data.data === false) {
             logBookingClientEvent('timeslots_render_failed', { date: dateStr, productId, quantity: getTotalQuantity() })
             container.innerHTML = `<span class="calendar-error">${data.message || 'Ingen tider tilgængelige.'}</span>`
@@ -1058,12 +1321,23 @@ async function fetchAndRenderTimeslots(dateStr) {
         logBookingClientEvent('timeslots_loaded', {
             date: dateStr,
             productId,
-            quantity: getTotalQuantity(),
+            quantity: requestedQuantity,
             proposalCount: data.proposals && Array.isArray(data.proposals) ? data.proposals.length : 0
         })
         const responsePageId = data && data.pageId ? String(data.pageId) : ''
         currentPageProductLimits = (data && typeof data.pageProductLimits === 'object') ? data.pageProductLimits : null
         currentPageProducts = (data && Array.isArray(data.pageProducts)) ? data.pageProducts : []
+        pageRulesCache[dateStr] = {
+            pageProductLimits: currentPageProductLimits,
+            pageProducts: currentPageProducts
+        }
+        currentPageRulesDateKey = dateStr
+        applyPageQuantityRules(currentPageProductLimits, currentPageProducts, productId)
+        const resolvedQuantity = getTotalQuantity()
+        if (resolvedQuantity !== requestedQuantity && attempt < 1) {
+            fetchAndRenderTimeslots(dateStr, attempt + 1)
+            return
+        }
         if (data.proposals && data.proposals.length) {
             data.proposals.forEach(proposal => {
                 const blocks = Array.isArray(proposal.blocks) ? proposal.blocks : []
@@ -1096,16 +1370,13 @@ async function fetchAndRenderTimeslots(dateStr) {
                             pageProductLimits: currentPageProductLimits,
                             pageProducts: currentPageProducts
                         })
-                        applyProposalQuantityRules(proposal, currentPageProductLimits)
+                        applyProposalQuantityRules(proposal, currentPageProductLimits, currentPageProducts, productId, { preserveCounts: true, changedKey: 'adults' })
                         logBookingClientEvent('timeslot_selected', {
                             date: dateStr,
                             productId,
                             resourceId,
                             time: this.getAttribute('data-time') || ''
                         })
-
-                        // Show spinner while saving proposal
-                        // container.innerHTML = `<span class="calendar-loading"><div class="spinner"></div></span>`
 
                         // Await the saveProposalToSession call
                         const saveSucceeded = await saveProposalToSession(proposal, proposalPageId, resourceId, productId)
@@ -1144,8 +1415,19 @@ async function fetchAndRenderTimeslots(dateStr) {
         }
         setBookingSubmitEnabled(true)
     } catch (err) {
+        if (err && err.name === 'AbortError') {
+            return
+        }
+
         if (container) container.innerHTML = '<span class="calendar-error" style="color:#fff">Netværksfejl ved hentning af tider.</span>'
         setBookingSubmitEnabled(true)
+    } finally {
+        if (activeTimeslotRequestController === requestController) {
+            activeTimeslotRequestController = null
+        }
+        if (requestId === latestTimeslotRequestId) {
+            clearTimeslotsBusyState()
+        }
     }
 }
 
@@ -1269,13 +1551,13 @@ async function initCalendar() {
     updateSummaryDate(selectedDate)
     if (selectedDate) {
         const dateKey = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
-        if (availabilityState === 'ok') {
-            fetchAndRenderTimeslots(dateKey)
+        if (isBookableSelectedDate(dateKey)) {
+            scheduleTimeslotRefreshForCurrentDate()
+        } else if (availabilityState === 'ok') {
+            renderTimeslotsMessage('Ingen ledige tider denne dag.')
+            setBookingSubmitEnabled(false)
         } else {
-            const container = document.querySelector('.time-slots')
-            if (container) {
-                container.innerHTML = '<span style="color:#fff">Ingen ledige tider denne dag.</span>'
-            }
+            renderTimeslotsMessage('Ingen ledige tider denne dag.')
         }
     }
     if (prevBtn) {
