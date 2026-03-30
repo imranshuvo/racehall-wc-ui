@@ -735,9 +735,13 @@ footer{
 .days span.disabled,
 .days span.disabled.muted {
     opacity: 0.45;
-    cursor: default;
+    cursor: not-allowed !important;
     pointer-events: none;
     color: #7a7a7a;
+}
+
+.days span.muted.disabled {
+    color: rgb(85, 85, 85) !important;
 }
 
 /* disable prev nav when at earliest allowed month */

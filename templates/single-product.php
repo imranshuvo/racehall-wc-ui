@@ -8,8 +8,12 @@ if (!$product || !is_a($product, 'WC_Product')) {
 }
 
 // --- Example Usage for Server-side Rendering (optional, not used by AJAX) ---
-$bm_id = function_exists( 'get_field' ) ? get_field( 'bmileisure_id', $product->get_id() ) : get_post_meta( $product->get_id(), 'bmileisure_id', true );
-$lokation = function_exists( 'get_field' ) ? get_field( 'lokation', $product->get_id() ) : get_post_meta( $product->get_id(), 'lokation', true );
+$bm_id = function_exists( 'wk_rh_get_product_bmileisure_id' )
+    ? wk_rh_get_product_bmileisure_id( $product->get_id() )
+    : ( function_exists( 'get_field' ) ? get_field( 'bmileisure_id', $product->get_id() ) : get_post_meta( $product->get_id(), 'bmileisure_id', true ) );
+$lokation = function_exists( 'wk_rh_get_product_booking_location' )
+    ? wk_rh_get_product_booking_location( $product->get_id() )
+    : ( function_exists( 'get_field' ) ? get_field( 'lokation', $product->get_id() ) : get_post_meta( $product->get_id(), 'lokation', true ) );
 $racehall_token = function_exists( 'wk_rh_get_token' ) ? wk_rh_get_token( $lokation ) : racehall_get_token( $lokation );
 $racehall_products = [];
 if ( $racehall_token ) {
@@ -36,7 +40,7 @@ if ( ! empty( $racehall_products ) && is_array( $racehall_products ) ) {
     }
 }
 
-$booking_product_available = ! empty( $bm_id ) && is_array( $current_rh_product );
+$booking_product_available = $bm_id !== '' && is_array( $current_rh_product );
 $booking_unavailable_message = __( 'Dette bookingprodukt findes ikke i det aktive BMI-miljø. Kontrollér bmileisure_id eller skift miljø.', 'racehall-wc-ui' );
 
 
@@ -186,11 +190,11 @@ window.RH_I18N = {
                         <?php
                         // Read ACF (fall back to postmeta). Adjust field keys if needed.
                         if ( function_exists( 'get_field' ) ) {
-                            $lokation  = get_field( 'lokation', $product->get_id() );
+                            $lokation  = function_exists( 'wk_rh_get_product_booking_location' ) ? wk_rh_get_product_booking_location( $product->get_id() ) : get_field( 'lokation', $product->get_id() );
                             $event_tid = get_field( 'event_tid', $product->get_id() );
                             $banetid   = get_field( 'banetid', $product->get_id() );
                         } else {
-                            $lokation  = get_post_meta( $product->get_id(), 'lokation', true );
+                            $lokation  = function_exists( 'wk_rh_get_product_booking_location' ) ? wk_rh_get_product_booking_location( $product->get_id() ) : get_post_meta( $product->get_id(), 'lokation', true );
                             $event_tid = get_post_meta( $product->get_id(), 'event tid', true );
                             $banetid   = get_post_meta( $product->get_id(), 'banetid', true );
                         }

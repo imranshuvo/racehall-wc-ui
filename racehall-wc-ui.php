@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 1.87
+ * Version: 1.90
  * Author: Webkonsulenterne ApS
  */
 
@@ -47,7 +47,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '1.87' );
+define( 'RACEHALL_WC_UI_VERSION', '1.90' );
 
 function wk_rh_hide_admin_shipping_line_items_css() {
     if ( ! is_admin() || ! function_exists( 'get_current_screen' ) ) {
@@ -468,7 +468,102 @@ function wk_rh_current_user_can_preview_new_product_booking() {
     return current_user_can( 'manage_options' );
 }
 
+function wk_rh_get_product_bmileisure_id( $product = null ) {
+    if ( is_object( $product ) && method_exists( $product, 'get_id' ) ) {
+        $product = (int) $product->get_id();
+    }
+
+    if ( $product === null ) {
+        $product = get_queried_object_id();
+    }
+
+    $product_id = absint( $product );
+    if ( $product_id <= 0 ) {
+        return '';
+    }
+
+    $bm_id = function_exists( 'get_field' )
+        ? get_field( 'bmileisure_id', $product_id )
+        : get_post_meta( $product_id, 'bmileisure_id', true );
+
+    if ( ! is_scalar( $bm_id ) ) {
+        return '';
+    }
+
+    return trim( (string) $bm_id );
+}
+
+function wk_rh_get_product_booking_location( $product = null ) {
+    if ( is_object( $product ) && method_exists( $product, 'get_id' ) ) {
+        $product = (int) $product->get_id();
+    }
+
+    if ( $product === null ) {
+        $product = get_queried_object_id();
+    }
+
+    $product_id = absint( $product );
+    if ( $product_id <= 0 ) {
+        return '';
+    }
+
+    $location = '';
+
+    if ( function_exists( 'get_field' ) ) {
+        $location = get_field( 'lokation', $product_id );
+        if ( ! is_scalar( $location ) || trim( (string) $location ) === '' ) {
+            $location = get_field( 'location', $product_id );
+        }
+        if ( ! is_scalar( $location ) || trim( (string) $location ) === '' ) {
+            $location = get_field( 'plats', $product_id );
+        }
+    }
+
+    if ( ! is_scalar( $location ) || trim( (string) $location ) === '' ) {
+        $location = get_post_meta( $product_id, 'lokation', true );
+    }
+
+    if ( ! is_scalar( $location ) || trim( (string) $location ) === '' ) {
+        $location = get_post_meta( $product_id, 'location', true );
+    }
+
+    if ( ! is_scalar( $location ) || trim( (string) $location ) === '' ) {
+        $location = get_post_meta( $product_id, 'plats', true );
+    }
+
+    if ( ! is_scalar( $location ) ) {
+        return '';
+    }
+
+    return sanitize_text_field( trim( (string) $location ) );
+}
+
+function wk_rh_product_supports_new_booking_flow( $product = null ) {
+    return wk_rh_get_product_bmileisure_id( $product ) !== '';
+}
+
+add_filter( 'woocommerce_is_purchasable', 'wk_rh_allow_booking_products_to_be_purchasable', 20, 2 );
+function wk_rh_allow_booking_products_to_be_purchasable( $purchasable, $product ) {
+    if ( $purchasable ) {
+        return true;
+    }
+
+    if ( ! $product instanceof WC_Product ) {
+        return $purchasable;
+    }
+
+    if ( ! $product->is_type( 'external' ) ) {
+        return $purchasable;
+    }
+
+    return wk_rh_product_supports_new_booking_flow( $product );
+}
+
 function wk_rh_should_use_new_product_booking_flow() {
+    if ( function_exists( 'is_product' ) && is_product() && ! wk_rh_product_supports_new_booking_flow() ) {
+        return false;
+    }
+
     $rollout_mode = wk_rh_get_product_page_booking_rollout_mode();
     $request_mode = wk_rh_get_product_page_booking_request_mode();
 
@@ -497,6 +592,10 @@ function wk_rh_should_use_new_product_booking_flow() {
 
 function wk_rh_get_product_page_booking_switch_context() {
     if ( ! function_exists( 'is_product' ) || ! is_product() ) {
+        return null;
+    }
+
+    if ( ! wk_rh_product_supports_new_booking_flow() ) {
         return null;
     }
 

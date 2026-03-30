@@ -40,7 +40,9 @@ function wk_rh_normalize_direct_booking_compare_value( $value ) {
 }
 
 function wk_rh_get_direct_booking_product_location( $product_id ) {
-    $location = function_exists( 'get_field' ) ? get_field( 'lokation', $product_id ) : get_post_meta( $product_id, 'lokation', true );
+    $location = function_exists( 'wk_rh_get_product_booking_location' )
+        ? wk_rh_get_product_booking_location( $product_id )
+        : ( function_exists( 'get_field' ) ? get_field( 'lokation', $product_id ) : get_post_meta( $product_id, 'lokation', true ) );
 
     return is_string( $location ) ? sanitize_text_field( $location ) : '';
 }
