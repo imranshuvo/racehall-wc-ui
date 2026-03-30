@@ -449,7 +449,7 @@ function wk_rh_remove_upstream_order_item( $location, $order_id, $order_item_id 
         return false;
     }
 
-    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/booking/removeItem';
+    $url = $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/booking/removeItem';
     $response = wk_rh_remote_request_with_retry(
         'POST',
         $url,
@@ -519,7 +519,7 @@ function wk_rh_send_order_memo( $order ) {
         return;
     }
 
-    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/booking/memo';
+    $url = $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/booking/memo';
     $payload = [
         'orderId' => ctype_digit( (string) $upstream_order_id ) ? (int) $upstream_order_id : (string) $upstream_order_id,
         'memo'    => $memo,
@@ -1632,7 +1632,7 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
         ],
     ];
 
-    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/payment/confirm';
+    $url = $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/payment/confirm';
     $response = wk_rh_remote_request_with_retry(
         'POST',
         $url,
@@ -1717,7 +1717,7 @@ function wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location = '', 
     }
 
     $paths = [
-        '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/order/' . rawurlencode( (string) $upstream_order_id ) . '/cancel',
+        '/api/' . rawurlencode( $creds['client_key'] ) . '/order/' . rawurlencode( (string) $upstream_order_id ) . '/cancel',
         '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/bill/' . rawurlencode( (string) $upstream_order_id ) . '/cancel',
     ];
 
