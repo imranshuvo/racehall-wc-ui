@@ -323,8 +323,8 @@ function wk_rh_store_direct_booking_session( array $context ) {
         'resourceId'        => (string) $context['resourceId'],
         'productId'         => (string) $context['bmProductId'],
         'quantity'          => (int) $context['participants']['quantity'],
-        'pageProductLimits' => $context['pageProductLimits'],
-        'pageProducts'      => $context['pageProducts'],
+        'pageProductLimits' => is_array( $context['pageProductLimits'] ) ? $context['pageProductLimits'] : null,
+        'pageProducts'      => is_array( $context['pageProducts'] ) ? array_values( $context['pageProducts'] ) : [],
         'bookingLocation'   => (string) $context['bookingLocation'],
         'orderId'           => '',
         'orderItemId'       => '',
@@ -343,6 +343,31 @@ function wk_rh_clear_direct_booking_seeded_session() {
 
     WC()->session->set( 'rh_bmi_booking', null );
     WC()->session->set( 'booking_supplement', null );
+}
+
+function wk_rh_prepare_cart_for_direct_booking() {
+    if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
+        return;
+    }
+
+    if ( ! WC()->cart->is_empty() ) {
+        foreach ( array_keys( WC()->cart->get_cart() ) as $cart_item_key ) {
+            WC()->cart->remove_cart_item( $cart_item_key );
+        }
+
+        WC()->cart->calculate_totals();
+
+        if ( method_exists( WC()->cart, 'set_session' ) ) {
+            WC()->cart->set_session();
+        }
+    }
+
+    if ( function_exists( 'wk_rh_clear_booking_session_state' ) ) {
+        wk_rh_clear_booking_session_state();
+        return;
+    }
+
+    wk_rh_clear_direct_booking_seeded_session();
 }
 
 function wk_rh_fail_direct_booking_request( WP_Error $error, $redirect_url = '' ) {
@@ -424,13 +449,18 @@ function wk_rh_handle_direct_booking_request() {
         wk_rh_fail_direct_booking_request( $page_context, $product_context['redirectUrl'] );
     }
 
+    $dynamic_lines = function_exists( 'wk_rh_build_booking_dynamic_lines' )
+        ? wk_rh_build_booking_dynamic_lines( $participants, [], $page_context['pageProducts'], $product_context['bmProductId'] )
+        : [];
+
     $timeslot_response = wk_rh_get_timeslots(
         $token,
         (int) $product_context['bmProductId'],
         (int) $page_context['pageId'],
         $booking_date,
         (int) $participants['quantity'],
-        $booking_location
+        $booking_location,
+        $dynamic_lines
     );
     if ( ! is_array( $timeslot_response ) ) {
         wk_rh_fail_direct_booking_request( new WP_Error( 'timeslots_failed', __( 'Kunne ikke hente ledige tider.', 'racehall-wc-ui' ) ), $product_context['redirectUrl'] );
@@ -455,6 +485,7 @@ function wk_rh_handle_direct_booking_request() {
         'pageProducts'      => $page_context['pageProducts'],
     ];
 
+    wk_rh_prepare_cart_for_direct_booking();
     wk_rh_store_direct_booking_session( $booking_context );
     wk_rh_set_direct_booking_request_payload( $booking_context );
 

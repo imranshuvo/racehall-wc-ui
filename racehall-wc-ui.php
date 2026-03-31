@@ -2,8 +2,10 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.00
+ * Version: 2.01
  * Author: Webkonsulenterne ApS
+ * Text Domain: racehall-wc-ui
+ * Domain Path: /languages
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
@@ -47,7 +49,12 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.00' );
+define( 'RACEHALL_WC_UI_VERSION', '2.01' );
+
+function wk_rh_load_textdomain() {
+    load_plugin_textdomain( 'racehall-wc-ui', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
+}
+add_action( 'init', 'wk_rh_load_textdomain' );
 
 function wk_rh_hide_admin_shipping_line_items_css() {
     if ( ! is_admin() || ! function_exists( 'get_current_screen' ) ) {
@@ -434,11 +441,11 @@ function wk_rh_get_settings_defaults() {
 
 function wk_rh_get_product_page_booking_mode_options() {
     return [
-        'new_only'       => __( 'New booking only', 'onsite-booking-system' ),
-        'admin_only'     => __( 'Admin preview only', 'onsite-booking-system' ),
-        'dual_new_first' => __( 'Dual mode: new booking first', 'onsite-booking-system' ),
-        'dual_old_first' => __( 'Dual mode: old booking first', 'onsite-booking-system' ),
-        'old_only'       => __( 'Old booking only', 'onsite-booking-system' ),
+        'new_only'       => __( 'New booking only', 'racehall-wc-ui' ),
+        'admin_only'     => __( 'Admin preview only', 'racehall-wc-ui' ),
+        'dual_new_first' => __( 'Dual mode: new booking first', 'racehall-wc-ui' ),
+        'dual_old_first' => __( 'Dual mode: old booking first', 'racehall-wc-ui' ),
+        'old_only'       => __( 'Old booking only', 'racehall-wc-ui' ),
     ];
 }
 
@@ -638,11 +645,11 @@ function wk_rh_get_product_page_booking_switch_context() {
             'target_mode'  => $target_mode,
             'target_url'   => $target_url,
             'message'      => $current_mode === 'new'
-                ? __( 'Du forhåndsviser den nye booking-side. Brug linket nedenfor for at sammenligne med den gamle produktside.', 'onsite-booking-system' )
-                : __( 'Du forhåndsviser den gamle produktside. Brug linket nedenfor for at sammenligne med den nye booking-side.', 'onsite-booking-system' ),
+                ? __( 'Du forhåndsviser den nye booking-side. Brug linket nedenfor for at sammenligne med den gamle produktside.', 'racehall-wc-ui' )
+                : __( 'Du forhåndsviser den gamle produktside. Brug linket nedenfor for at sammenligne med den nye booking-side.', 'racehall-wc-ui' ),
             'button_label' => $current_mode === 'new'
-                ? __( 'Skift til gammel booking-side', 'onsite-booking-system' )
-                : __( 'Skift til ny booking-side', 'onsite-booking-system' ),
+                ? __( 'Skift til gammel booking-side', 'racehall-wc-ui' )
+                : __( 'Skift til ny booking-side', 'racehall-wc-ui' ),
         ];
     }
 
@@ -651,11 +658,11 @@ function wk_rh_get_product_page_booking_switch_context() {
         'target_mode'  => $target_mode,
         'target_url'   => $target_url,
         'message'      => $current_mode === 'new'
-            ? __( 'Du kan fortsat benytte vores tidligere måde at booke på, hvis du ønsker det.', 'onsite-booking-system' )
-            : __( 'Nyhed: Prøv vores nye booking system her.', 'onsite-booking-system' ),
+            ? __( 'Du kan fortsat benytte vores tidligere måde at booke på, hvis du ønsker det.', 'racehall-wc-ui' )
+            : __( 'Nyhed: Prøv vores nye booking system her.', 'racehall-wc-ui' ),
         'button_label' => $current_mode === 'new'
-            ? __( 'Klassisk booking system', 'onsite-booking-system' )
-            : __( 'Nyt booking system', 'onsite-booking-system' ),
+            ? __( 'Klassisk booking system', 'racehall-wc-ui' )
+            : __( 'Nyt booking system', 'racehall-wc-ui' ),
     ];
 }
 
@@ -1023,7 +1030,7 @@ function wk_rh_sanitize_locations_json( $raw_json, $error_key ) {
 
     $parsed = json_decode( $json, true );
     if ( ! is_array( $parsed ) ) {
-        add_settings_error( 'wk_rh_settings', $error_key, __( 'Location credentials JSON is invalid. Saved as empty list.', 'onsite-booking-system' ), 'error' );
+        add_settings_error( 'wk_rh_settings', $error_key, __( 'Location credentials JSON is invalid. Saved as empty list.', 'racehall-wc-ui' ), 'error' );
         return '[]';
     }
 
@@ -1041,7 +1048,7 @@ function wk_rh_sanitize_settings( $input ) {
     if ( $addon_product_id > 0 ) {
         $validation_error = wk_rh_get_addon_carrier_validation_error( $addon_product_id );
         if ( $validation_error !== '' ) {
-            add_settings_error( 'wk_rh_settings', 'wk_rh_addon_product_invalid', $validation_error . ' ' . __( 'Setting was cleared.', 'onsite-booking-system' ), 'error' );
+            add_settings_error( 'wk_rh_settings', 'wk_rh_addon_product_invalid', $validation_error . ' ' . __( 'Setting was cleared.', 'racehall-wc-ui' ), 'error' );
             $addon_product_id = 0;
         }
     }
@@ -1094,7 +1101,7 @@ function wk_rh_get_configured_addon_product() {
 
 function wk_rh_get_addon_carrier_validation_error( $product = null ) {
     if ( ! function_exists( 'wc_get_product' ) ) {
-        return __( 'WooCommerce product API is unavailable.', 'onsite-booking-system' );
+        return __( 'WooCommerce product API is unavailable.', 'racehall-wc-ui' );
     }
 
     if ( is_numeric( $product ) ) {
@@ -1102,27 +1109,27 @@ function wk_rh_get_addon_carrier_validation_error( $product = null ) {
     }
 
     if ( ! $product || ! is_object( $product ) || ! method_exists( $product, 'get_id' ) ) {
-        return __( 'Selected add-on product does not exist.', 'onsite-booking-system' );
+        return __( 'Selected add-on product does not exist.', 'racehall-wc-ui' );
     }
 
     if ( 'publish' !== $product->get_status() ) {
-        return __( 'Add-on carrier product must be published.', 'onsite-booking-system' );
+        return __( 'Add-on carrier product must be published.', 'racehall-wc-ui' );
     }
 
     if ( ! $product->is_type( 'simple' ) ) {
-        return __( 'Add-on carrier product must be a simple product.', 'onsite-booking-system' );
+        return __( 'Add-on carrier product must be a simple product.', 'racehall-wc-ui' );
     }
 
     if ( ! $product->is_purchasable() ) {
-        return __( 'Add-on carrier product must be purchasable.', 'onsite-booking-system' );
+        return __( 'Add-on carrier product must be purchasable.', 'racehall-wc-ui' );
     }
 
     if ( $product->is_sold_individually() ) {
-        return __( 'Add-on carrier product cannot be sold individually.', 'onsite-booking-system' );
+        return __( 'Add-on carrier product cannot be sold individually.', 'racehall-wc-ui' );
     }
 
     if ( method_exists( $product, 'is_in_stock' ) && ! $product->is_in_stock() ) {
-        return __( 'Add-on carrier product must be in stock.', 'onsite-booking-system' );
+        return __( 'Add-on carrier product must be in stock.', 'racehall-wc-ui' );
     }
 
     return '';
@@ -1343,18 +1350,18 @@ function wk_rh_output_checkoutwc_thank_you_customer_information( $order ) {
 
     $payment_method_title = $order->get_payment_method_title();
     ?>
-    <h3><?php esc_html_e( 'Information', 'checkout-wc' ); ?></h3>
+    <h3><?php esc_html_e( 'Information', 'racehall-wc-ui' ); ?></h3>
 
     <?php do_action( 'cfw_before_thank_you_customer_information', $order ); ?>
 
     <div class="row">
         <div class="col">
-            <h6><?php esc_html_e( 'Contact information', 'checkout-wc' ); ?></h6>
+            <h6><?php esc_html_e( 'Contact information', 'racehall-wc-ui' ); ?></h6>
             <p><?php echo esc_html( (string) $order->get_billing_email() ); ?></p>
         </div>
         <?php if ( ! empty( $payment_method_title ) ) : ?>
             <div class="col">
-                <h6><?php esc_html_e( 'Payment', 'checkout-wc' ); ?></h6>
+                <h6><?php esc_html_e( 'Payment', 'racehall-wc-ui' ); ?></h6>
                 <p><?php echo esc_html( (string) $payment_method_title ); ?></p>
             </div>
         <?php endif; ?>
@@ -1366,8 +1373,8 @@ function wk_rh_output_checkoutwc_thank_you_customer_information( $order ) {
                 <?php
                 echo wp_kses_post(
                     $order->needs_shipping_address() && ! wc_ship_to_billing_address_only()
-                        ? $order->get_formatted_shipping_address( esc_html__( 'N/A', 'woocommerce' ) )
-                        : $order->get_formatted_billing_address( esc_html__( 'N/A', 'woocommerce' ) )
+                        ? $order->get_formatted_shipping_address( esc_html__( 'N/A', 'racehall-wc-ui' ) )
+                        : $order->get_formatted_billing_address( esc_html__( 'N/A', 'racehall-wc-ui' ) )
                 );
                 ?>
             </address>
@@ -1729,93 +1736,93 @@ function wk_rh_render_settings_page() {
     $settings = wk_rh_get_settings();
     ?>
     <div class="wrap">
-        <h1><?php esc_html_e( 'Onsite Booking System Settings', 'onsite-booking-system' ); ?></h1>
+        <h1><?php esc_html_e( 'Onsite Booking System Settings', 'racehall-wc-ui' ); ?></h1>
         <?php settings_errors( 'wk_rh_settings' ); ?>
         <form method="post" action="options.php">
             <?php settings_fields( 'wk_rh_settings_group' ); ?>
             <table class="form-table" role="presentation">
                 <tr>
-                    <th scope="row"><label for="wk_rh_environment"><?php esc_html_e( 'Environment', 'onsite-booking-system' ); ?></label></th>
+                    <th scope="row"><label for="wk_rh_environment"><?php esc_html_e( 'Environment', 'racehall-wc-ui' ); ?></label></th>
                     <td>
                         <select id="wk_rh_environment" name="wk_rh_settings[environment]">
-                            <option value="test" <?php selected( $settings['environment'], 'test' ); ?>><?php esc_html_e( 'Test', 'onsite-booking-system' ); ?></option>
-                            <option value="live" <?php selected( $settings['environment'], 'live' ); ?>><?php esc_html_e( 'Live', 'onsite-booking-system' ); ?></option>
+                            <option value="test" <?php selected( $settings['environment'], 'test' ); ?>><?php esc_html_e( 'Test', 'racehall-wc-ui' ); ?></option>
+                            <option value="live" <?php selected( $settings['environment'], 'live' ); ?>><?php esc_html_e( 'Live', 'racehall-wc-ui' ); ?></option>
                         </select>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="wk_rh_test_base_url"><?php esc_html_e( 'Test Base URL', 'onsite-booking-system' ); ?></label></th>
+                    <th scope="row"><label for="wk_rh_test_base_url"><?php esc_html_e( 'Test Base URL', 'racehall-wc-ui' ); ?></label></th>
                     <td><input class="regular-text" type="url" id="wk_rh_test_base_url" name="wk_rh_settings[test_base_url]" value="<?php echo esc_attr( $settings['test_base_url'] ); ?>"></td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="wk_rh_live_base_url"><?php esc_html_e( 'Live Base URL', 'onsite-booking-system' ); ?></label></th>
+                    <th scope="row"><label for="wk_rh_live_base_url"><?php esc_html_e( 'Live Base URL', 'racehall-wc-ui' ); ?></label></th>
                     <td><input class="regular-text" type="url" id="wk_rh_live_base_url" name="wk_rh_settings[live_base_url]" value="<?php echo esc_attr( $settings['live_base_url'] ); ?>"></td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="wk_rh_accept_language"><?php esc_html_e( 'Accept-Language', 'onsite-booking-system' ); ?></label></th>
+                    <th scope="row"><label for="wk_rh_accept_language"><?php esc_html_e( 'Accept-Language', 'racehall-wc-ui' ); ?></label></th>
                     <td><input class="regular-text" type="text" id="wk_rh_accept_language" name="wk_rh_settings[accept_language]" value="<?php echo esc_attr( $settings['accept_language'] ); ?>"></td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="wk_rh_logging_enabled"><?php esc_html_e( 'Enable logging', 'onsite-booking-system' ); ?></label></th>
+                    <th scope="row"><label for="wk_rh_logging_enabled"><?php esc_html_e( 'Enable logging', 'racehall-wc-ui' ); ?></label></th>
                     <td>
                         <label for="wk_rh_logging_enabled">
                             <input type="checkbox" id="wk_rh_logging_enabled" name="wk_rh_settings[logging_enabled]" value="yes" <?php checked( $settings['logging_enabled'] ?? 'yes', 'yes' ); ?>>
-                            <?php esc_html_e( 'Write API and user-action logs to uploads/onsite-booking.', 'onsite-booking-system' ); ?>
+                            <?php esc_html_e( 'Write API and user-action logs to uploads/onsite-booking.', 'racehall-wc-ui' ); ?>
                         </label>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="wk_rh_addon_product_id"><?php esc_html_e( 'Add-on carrier product', 'onsite-booking-system' ); ?></label></th>
+                    <th scope="row"><label for="wk_rh_addon_product_id"><?php esc_html_e( 'Add-on carrier product', 'racehall-wc-ui' ); ?></label></th>
                     <td>
                         <select id="wk_rh_addon_product_id" name="wk_rh_settings[addon_product_id]">
-                            <option value="0"><?php esc_html_e( '— Select WooCommerce product —', 'onsite-booking-system' ); ?></option>
+                            <option value="0"><?php esc_html_e( '— Select WooCommerce product —', 'racehall-wc-ui' ); ?></option>
                             <?php foreach ( wk_rh_get_settings_product_options() as $product_id => $product_label ) : ?>
                                 <option value="<?php echo esc_attr( $product_id ); ?>" <?php selected( absint( $settings['addon_product_id'] ?? 0 ), $product_id ); ?>><?php echo esc_html( $product_label ); ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <p class="description"><?php esc_html_e( 'Choose one hidden WooCommerce product to carry all add-ons in the cart. The customer-facing add-on name and price still come from the upstream response.', 'onsite-booking-system' ); ?></p>
+                        <p class="description"><?php esc_html_e( 'Choose one hidden WooCommerce product to carry all add-ons in the cart. The customer-facing add-on name and price still come from the upstream response.', 'racehall-wc-ui' ); ?></p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="wk_rh_product_page_booking_mode"><?php esc_html_e( 'Product page rollout mode', 'onsite-booking-system' ); ?></label></th>
+                    <th scope="row"><label for="wk_rh_product_page_booking_mode"><?php esc_html_e( 'Product page rollout mode', 'racehall-wc-ui' ); ?></label></th>
                     <td>
                         <select id="wk_rh_product_page_booking_mode" name="wk_rh_settings[product_page_booking_mode]">
                             <?php foreach ( wk_rh_get_product_page_booking_mode_options() as $mode_value => $mode_label ) : ?>
                                 <option value="<?php echo esc_attr( $mode_value ); ?>" <?php selected( $settings['product_page_booking_mode'] ?? 'new_only', $mode_value ); ?>><?php echo esc_html( $mode_label ); ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <p class="description"><?php esc_html_e( 'Controls whether this plugin replaces the standard WooCommerce product page. In dual modes, customers can switch with rh_booking_mode=old or rh_booking_mode=new.', 'onsite-booking-system' ); ?></p>
+                        <p class="description"><?php esc_html_e( 'Controls whether this plugin replaces the standard WooCommerce product page. In dual modes, customers can switch with rh_booking_mode=old or rh_booking_mode=new.', 'racehall-wc-ui' ); ?></p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="wk_rh_booking_hold_timeout_minutes"><?php esc_html_e( 'Booking hold timeout (minutes)', 'onsite-booking-system' ); ?></label></th>
+                    <th scope="row"><label for="wk_rh_booking_hold_timeout_minutes"><?php esc_html_e( 'Booking hold timeout (minutes)', 'racehall-wc-ui' ); ?></label></th>
                     <td>
                         <input class="small-text" type="number" min="5" max="120" step="1" id="wk_rh_booking_hold_timeout_minutes" name="wk_rh_settings[booking_hold_timeout_minutes]" value="<?php echo esc_attr( wk_rh_get_booking_hold_timeout_minutes() ); ?>">
-                        <p class="description"><?php esc_html_e( 'Recommended range is 10–20 minutes. When exceeded, held bookings are cancelled upstream and users must start again.', 'onsite-booking-system' ); ?></p>
+                        <p class="description"><?php esc_html_e( 'Recommended range is 10–20 minutes. When exceeded, held bookings are cancelled upstream and users must start again.', 'racehall-wc-ui' ); ?></p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="wk_rh_required_supplement_name_markers"><?php esc_html_e( 'Required supplement name markers', 'onsite-booking-system' ); ?></label></th>
+                    <th scope="row"><label for="wk_rh_required_supplement_name_markers"><?php esc_html_e( 'Required supplement name markers', 'racehall-wc-ui' ); ?></label></th>
                     <td>
                         <input class="regular-text" type="text" id="wk_rh_required_supplement_name_markers" name="wk_rh_settings[required_supplement_name_markers]" value="<?php echo esc_attr( $settings['required_supplement_name_markers'] ?? '' ); ?>">
-                        <p class="description"><?php esc_html_e( 'Comma-separated words or phrases to look for in supplement names, for example: obligatorisk, obligatory, required.', 'onsite-booking-system' ); ?></p>
+                        <p class="description"><?php esc_html_e( 'Comma-separated words or phrases to look for in supplement names, for example: obligatorisk, obligatory, required.', 'racehall-wc-ui' ); ?></p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="wk_rh_test_locations_json"><?php esc_html_e( 'Test Location Credential Map (JSON)', 'onsite-booking-system' ); ?></label></th>
+                    <th scope="row"><label for="wk_rh_test_locations_json"><?php esc_html_e( 'Test Location Credential Map (JSON)', 'racehall-wc-ui' ); ?></label></th>
                     <td>
                         <textarea class="large-text code" rows="12" id="wk_rh_test_locations_json" name="wk_rh_settings[test_locations_json]"><?php echo esc_textarea( $settings['test_locations_json'] ?? '[]' ); ?></textarea>
                         <p class="description">
-                            <?php esc_html_e( 'Used only when Environment = Test.', 'onsite-booking-system' ); ?>
+                            <?php esc_html_e( 'Used only when Environment = Test.', 'racehall-wc-ui' ); ?>
                         </p>
                     </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="wk_rh_live_locations_json"><?php esc_html_e( 'Live Location Credential Map (JSON)', 'onsite-booking-system' ); ?></label></th>
+                    <th scope="row"><label for="wk_rh_live_locations_json"><?php esc_html_e( 'Live Location Credential Map (JSON)', 'racehall-wc-ui' ); ?></label></th>
                     <td>
                         <textarea class="large-text code" rows="12" id="wk_rh_live_locations_json" name="wk_rh_settings[live_locations_json]"><?php echo esc_textarea( $settings['live_locations_json'] ?? '[]' ); ?></textarea>
                         <p class="description">
-                            <?php esc_html_e( 'Format: [{"location":"Copenhagen","client_key":"...","subscription_key":"...","username":"...","password":"..."}]', 'onsite-booking-system' ); ?>
+                            <?php esc_html_e( 'Format: [{"location":"Copenhagen","client_key":"...","subscription_key":"...","username":"...","password":"..."}]', 'racehall-wc-ui' ); ?>
                         </p>
                     </td>
                 </tr>
@@ -1855,8 +1862,8 @@ function wk_rh_render_settings_page() {
 
 function wk_rh_register_admin_menu() {
     add_menu_page(
-        __( 'Onsite Booking', 'onsite-booking-system' ),
-        __( 'Onsite Booking', 'onsite-booking-system' ),
+        __( 'Onsite Booking', 'racehall-wc-ui' ),
+        __( 'Onsite Booking', 'racehall-wc-ui' ),
         'manage_options',
         'wk-rh-settings',
         'wk_rh_render_settings_page',
@@ -1866,8 +1873,8 @@ function wk_rh_register_admin_menu() {
 
     add_submenu_page(
         'wk-rh-settings',
-        __( 'Diagnostics', 'onsite-booking-system' ),
-        __( 'Diagnostics', 'onsite-booking-system' ),
+        __( 'Diagnostics', 'racehall-wc-ui' ),
+        __( 'Diagnostics', 'racehall-wc-ui' ),
         'manage_options',
         'wk-rh-diagnostics',
         'wk_rh_render_diagnostics_page'
@@ -1875,8 +1882,8 @@ function wk_rh_register_admin_menu() {
 
     add_submenu_page(
         'wk-rh-settings',
-        __( 'Upstream Data', 'onsite-booking-system' ),
-        __( 'Upstream Data', 'onsite-booking-system' ),
+        __( 'Upstream Data', 'racehall-wc-ui' ),
+        __( 'Upstream Data', 'racehall-wc-ui' ),
         'manage_options',
         'wk-rh-upstream-data',
         'wk_rh_render_upstream_data_page'
@@ -1888,7 +1895,7 @@ add_filter( 'cron_schedules', function( $schedules ) {
     if ( ! isset( $schedules['wk_rh_every_five_minutes'] ) ) {
         $schedules['wk_rh_every_five_minutes'] = [
             'interval' => 300,
-            'display'  => __( 'Every 5 minutes (Onsite Booking)', 'onsite-booking-system' ),
+            'display'  => __( 'Every 5 minutes (Onsite Booking)', 'racehall-wc-ui' ),
         ];
     }
     return $schedules;
@@ -1964,7 +1971,7 @@ function wk_rh_render_upstream_data_page() {
         if ( $selected_location !== '' ) {
             $token = function_exists( 'wk_rh_get_token' ) ? wk_rh_get_token( $selected_location ) : false;
             if ( ! $token ) {
-                $products_data['error'] = __( 'Could not fetch token for selected location.', 'onsite-booking-system' );
+                $products_data['error'] = __( 'Could not fetch token for selected location.', 'racehall-wc-ui' );
             } else {
                 $items = function_exists( 'wk_rh_get_products' ) ? wk_rh_get_products( $token, $selected_location ) : [];
                 if ( is_array( $items ) ) {
@@ -1972,7 +1979,7 @@ function wk_rh_render_upstream_data_page() {
                     $products_data['fetched_at'] = gmdate( 'c' );
                     set_transient( $cache_key, $products_data, 5 * MINUTE_IN_SECONDS );
                 } else {
-                    $products_data['error'] = __( 'Upstream products response was not an array.', 'onsite-booking-system' );
+                    $products_data['error'] = __( 'Upstream products response was not an array.', 'racehall-wc-ui' );
                 }
             }
         }
@@ -1995,13 +2002,13 @@ function wk_rh_render_upstream_data_page() {
     );
     ?>
     <div class="wrap">
-        <h1><?php esc_html_e( 'Onsite Booking Upstream Data', 'onsite-booking-system' ); ?></h1>
+        <h1><?php esc_html_e( 'Onsite Booking Upstream Data', 'racehall-wc-ui' ); ?></h1>
 
         <form method="get" style="margin:12px 0;display:flex;gap:8px;align-items:center;">
             <input type="hidden" name="page" value="wk-rh-upstream-data">
-            <label for="wk_rh_location_select"><strong><?php esc_html_e( 'Location', 'onsite-booking-system' ); ?>:</strong></label>
+            <label for="wk_rh_location_select"><strong><?php esc_html_e( 'Location', 'racehall-wc-ui' ); ?>:</strong></label>
             <select id="wk_rh_location_select" name="location">
-                <option value=""><?php esc_html_e( 'Select location', 'onsite-booking-system' ); ?></option>
+                <option value=""><?php esc_html_e( 'Select location', 'racehall-wc-ui' ); ?></option>
                 <?php foreach ( $profiles as $profile ) :
                     $location_name = isset( $profile['location'] ) ? (string) $profile['location'] : '';
                     if ( $location_name === '' ) {
@@ -2013,35 +2020,35 @@ function wk_rh_render_upstream_data_page() {
                     </option>
                 <?php endforeach; ?>
             </select>
-            <?php submit_button( __( 'Apply', 'onsite-booking-system' ), 'secondary', 'submit', false ); ?>
-            <a class="button" href="<?php echo esc_url( $refresh_url ); ?>"><?php esc_html_e( 'Refresh Products', 'onsite-booking-system' ); ?></a>
+            <?php submit_button( __( 'Apply', 'racehall-wc-ui' ), 'secondary', 'submit', false ); ?>
+            <a class="button" href="<?php echo esc_url( $refresh_url ); ?>"><?php esc_html_e( 'Refresh Products', 'racehall-wc-ui' ); ?></a>
         </form>
 
-        <h2><?php esc_html_e( 'Upstream Products', 'onsite-booking-system' ); ?></h2>
+        <h2><?php esc_html_e( 'Upstream Products', 'racehall-wc-ui' ); ?></h2>
         <?php if ( ! empty( $products_data['error'] ) ) : ?>
             <div class="notice notice-error"><p><?php echo esc_html( $products_data['error'] ); ?></p></div>
         <?php endif; ?>
         <p>
             <?php
             if ( ! empty( $products_data['fetched_at'] ) ) {
-                echo esc_html( sprintf( __( 'Last fetched (UTC): %s', 'onsite-booking-system' ), $products_data['fetched_at'] ) );
+                echo esc_html( sprintf( __( 'Last fetched (UTC): %s', 'racehall-wc-ui' ), $products_data['fetched_at'] ) );
             } else {
-                esc_html_e( 'No cached fetch yet.', 'onsite-booking-system' );
+                esc_html_e( 'No cached fetch yet.', 'racehall-wc-ui' );
             }
             ?>
         </p>
         <table class="widefat striped">
             <thead>
                 <tr>
-                    <th style="width:120px;"><?php esc_html_e( 'Product ID', 'onsite-booking-system' ); ?></th>
-                    <th><?php esc_html_e( 'Name', 'onsite-booking-system' ); ?></th>
-                    <th style="width:160px;"><?php esc_html_e( 'Resource ID', 'onsite-booking-system' ); ?></th>
-                    <th style="width:140px;"><?php esc_html_e( 'Sale Mode', 'onsite-booking-system' ); ?></th>
+                    <th style="width:120px;"><?php esc_html_e( 'Product ID', 'racehall-wc-ui' ); ?></th>
+                    <th><?php esc_html_e( 'Name', 'racehall-wc-ui' ); ?></th>
+                    <th style="width:160px;"><?php esc_html_e( 'Resource ID', 'racehall-wc-ui' ); ?></th>
+                    <th style="width:140px;"><?php esc_html_e( 'Sale Mode', 'racehall-wc-ui' ); ?></th>
                 </tr>
             </thead>
             <tbody>
             <?php if ( empty( $products_data['items'] ) ) : ?>
-                <tr><td colspan="4"><?php esc_html_e( 'No products available for selected location.', 'onsite-booking-system' ); ?></td></tr>
+                <tr><td colspan="4"><?php esc_html_e( 'No products available for selected location.', 'racehall-wc-ui' ); ?></td></tr>
             <?php else : ?>
                 <?php foreach ( $products_data['items'] as $product_item ) :
                     if ( ! is_array( $product_item ) ) {
@@ -2059,24 +2066,24 @@ function wk_rh_render_upstream_data_page() {
             </tbody>
         </table>
 
-        <h2 style="margin-top:24px;"><?php esc_html_e( 'Booking Sync State (Woo → Upstream)', 'onsite-booking-system' ); ?></h2>
+        <h2 style="margin-top:24px;"><?php esc_html_e( 'Booking Sync State (Woo → Upstream)', 'racehall-wc-ui' ); ?></h2>
         <table class="widefat striped">
             <thead>
                 <tr>
-                    <th style="width:90px;"><?php esc_html_e( 'Order', 'onsite-booking-system' ); ?></th>
-                    <th style="width:120px;"><?php esc_html_e( 'Status', 'onsite-booking-system' ); ?></th>
-                    <th style="width:160px;"><?php esc_html_e( 'Location', 'onsite-booking-system' ); ?></th>
-                    <th style="width:170px;"><?php esc_html_e( 'Upstream Order ID', 'onsite-booking-system' ); ?></th>
-                    <th style="width:180px;"><?php esc_html_e( 'Upstream Item IDs', 'onsite-booking-system' ); ?></th>
-                    <th style="width:90px;"><?php esc_html_e( 'Payment', 'onsite-booking-system' ); ?></th>
-                    <th style="width:90px;"><?php esc_html_e( 'Cancel', 'onsite-booking-system' ); ?></th>
-                    <th style="width:90px;"><?php esc_html_e( 'Memo', 'onsite-booking-system' ); ?></th>
-                    <th><?php esc_html_e( 'Last Error/Warning', 'onsite-booking-system' ); ?></th>
+                    <th style="width:90px;"><?php esc_html_e( 'Order', 'racehall-wc-ui' ); ?></th>
+                    <th style="width:120px;"><?php esc_html_e( 'Status', 'racehall-wc-ui' ); ?></th>
+                    <th style="width:160px;"><?php esc_html_e( 'Location', 'racehall-wc-ui' ); ?></th>
+                    <th style="width:170px;"><?php esc_html_e( 'Upstream Order ID', 'racehall-wc-ui' ); ?></th>
+                    <th style="width:180px;"><?php esc_html_e( 'Upstream Item IDs', 'racehall-wc-ui' ); ?></th>
+                    <th style="width:90px;"><?php esc_html_e( 'Payment', 'racehall-wc-ui' ); ?></th>
+                    <th style="width:90px;"><?php esc_html_e( 'Cancel', 'racehall-wc-ui' ); ?></th>
+                    <th style="width:90px;"><?php esc_html_e( 'Memo', 'racehall-wc-ui' ); ?></th>
+                    <th><?php esc_html_e( 'Last Error/Warning', 'racehall-wc-ui' ); ?></th>
                 </tr>
             </thead>
             <tbody>
             <?php if ( empty( $orders ) ) : ?>
-                <tr><td colspan="9"><?php esc_html_e( 'No orders found.', 'onsite-booking-system' ); ?></td></tr>
+                <tr><td colspan="9"><?php esc_html_e( 'No orders found.', 'racehall-wc-ui' ); ?></td></tr>
             <?php else : ?>
                 <?php foreach ( $orders as $order ) :
                     if ( ! $order instanceof WC_Order ) {
@@ -2137,7 +2144,7 @@ function wk_rh_render_diagnostics_page() {
     if ( isset( $_POST['wk_rh_clear_logs'] ) ) {
         check_admin_referer( 'wk_rh_clear_logs_action', 'wk_rh_clear_logs_nonce' );
         $deleted = wk_rh_clear_log_files();
-        echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sprintf( __( 'Log files cleared (%d deleted).', 'onsite-booking-system' ), $deleted ) ) . '</p></div>';
+        echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sprintf( __( 'Log files cleared (%d deleted).', 'racehall-wc-ui' ), $deleted ) ) . '</p></div>';
     }
 
     $environment = wk_rh_get_log_environment();
@@ -2146,43 +2153,43 @@ function wk_rh_render_diagnostics_page() {
     $logging_enabled = wk_rh_is_logging_enabled();
     ?>
     <div class="wrap">
-        <h1><?php esc_html_e( 'Onsite Booking Diagnostics', 'onsite-booking-system' ); ?></h1>
-        <p><?php esc_html_e( 'Recent booking lifecycle logs (latest first).', 'onsite-booking-system' ); ?></p>
+        <h1><?php esc_html_e( 'Onsite Booking Diagnostics', 'racehall-wc-ui' ); ?></h1>
+        <p><?php esc_html_e( 'Recent booking lifecycle logs (latest first).', 'racehall-wc-ui' ); ?></p>
         <p>
-            <strong><?php esc_html_e( 'Logging:', 'onsite-booking-system' ); ?></strong>
-            <?php echo esc_html( $logging_enabled ? __( 'Enabled', 'onsite-booking-system' ) : __( 'Disabled', 'onsite-booking-system' ) ); ?>
+            <strong><?php esc_html_e( 'Logging:', 'racehall-wc-ui' ); ?></strong>
+            <?php echo esc_html( $logging_enabled ? __( 'Enabled', 'racehall-wc-ui' ) : __( 'Disabled', 'racehall-wc-ui' ) ); ?>
             <br>
-            <strong><?php esc_html_e( 'Active log environment:', 'onsite-booking-system' ); ?></strong>
+            <strong><?php esc_html_e( 'Active log environment:', 'racehall-wc-ui' ); ?></strong>
             <?php echo esc_html( $environment ); ?>
             <br>
-            <strong><?php esc_html_e( 'Directory:', 'onsite-booking-system' ); ?></strong>
+            <strong><?php esc_html_e( 'Directory:', 'racehall-wc-ui' ); ?></strong>
             <?php echo esc_html( trailingslashit( (string) $log_directory ) . gmdate( 'd_m_Y' ) ); ?>
         </p>
 
         <?php if ( ! $logging_enabled ) : ?>
-            <div class="notice notice-warning"><p><?php esc_html_e( 'Logging is currently disabled in the plugin settings. No new log entries will be written until it is enabled again.', 'onsite-booking-system' ); ?></p></div>
+            <div class="notice notice-warning"><p><?php esc_html_e( 'Logging is currently disabled in the plugin settings. No new log entries will be written until it is enabled again.', 'racehall-wc-ui' ); ?></p></div>
         <?php endif; ?>
 
         <form method="post" style="margin: 12px 0 16px;">
             <?php wp_nonce_field( 'wk_rh_clear_logs_action', 'wk_rh_clear_logs_nonce' ); ?>
             <input type="hidden" name="wk_rh_clear_logs" value="1">
-            <?php submit_button( __( 'Clear Logs', 'onsite-booking-system' ), 'secondary', 'submit', false ); ?>
+            <?php submit_button( __( 'Clear Logs', 'racehall-wc-ui' ), 'secondary', 'submit', false ); ?>
         </form>
 
         <table class="widefat striped">
             <thead>
                 <tr>
-                    <th style="width:180px;"><?php esc_html_e( 'Time (UTC)', 'onsite-booking-system' ); ?></th>
-                    <th style="width:110px;"><?php esc_html_e( 'Channel', 'onsite-booking-system' ); ?></th>
-                    <th style="width:90px;"><?php esc_html_e( 'Level', 'onsite-booking-system' ); ?></th>
-                    <th style="width:280px;"><?php esc_html_e( 'Message', 'onsite-booking-system' ); ?></th>
-                    <th><?php esc_html_e( 'Context', 'onsite-booking-system' ); ?></th>
+                    <th style="width:180px;"><?php esc_html_e( 'Time (UTC)', 'racehall-wc-ui' ); ?></th>
+                    <th style="width:110px;"><?php esc_html_e( 'Channel', 'racehall-wc-ui' ); ?></th>
+                    <th style="width:90px;"><?php esc_html_e( 'Level', 'racehall-wc-ui' ); ?></th>
+                    <th style="width:280px;"><?php esc_html_e( 'Message', 'racehall-wc-ui' ); ?></th>
+                    <th><?php esc_html_e( 'Context', 'racehall-wc-ui' ); ?></th>
                 </tr>
             </thead>
             <tbody>
             <?php if ( empty( $logs ) ) : ?>
                 <tr>
-                    <td colspan="5"><?php esc_html_e( 'No booking events logged yet.', 'onsite-booking-system' ); ?></td>
+                    <td colspan="5"><?php esc_html_e( 'No booking events logged yet.', 'racehall-wc-ui' ); ?></td>
                 </tr>
             <?php else : ?>
                 <?php foreach ( $logs as $log ) : ?>
@@ -3405,7 +3412,7 @@ function wk_rh_force_required_billing_fields( $fields ) {
 add_filter( 'woocommerce_billing_fields', 'wk_rh_force_required_billing_fields', 20 );
 
 function wk_rh_normalize_company_field_config( array $field ) {
-    $company_text = __( 'Company', 'woocommerce' );
+    $company_text = __( 'Company', 'racehall-wc-ui' );
 
     $field['label'] = $company_text;
     $field['placeholder'] = $company_text;
@@ -3905,8 +3912,8 @@ function wk_rh_validate_checkout_booking_quantity( array $cart_item, $quantity, 
     }
 
     $group_checks = [
-        [ 'label' => __( 'Adults', 'onsite-booking-system' ), 'value' => $adults, 'rules' => $rules['adults'] ],
-        [ 'label' => __( 'Children', 'onsite-booking-system' ), 'value' => $kids, 'rules' => $rules['kids'] ],
+        [ 'label' => __( 'Adults', 'racehall-wc-ui' ), 'value' => $adults, 'rules' => $rules['adults'] ],
+        [ 'label' => __( 'Children', 'racehall-wc-ui' ), 'value' => $kids, 'rules' => $rules['kids'] ],
         [ 'label' => __( 'Twin kart', 'racehall-wc-ui' ), 'value' => $twin, 'rules' => $rules['twin'] ?? [ 'min' => 0, 'max' => null, 'step' => 1 ] ],
     ];
 
@@ -3916,17 +3923,17 @@ function wk_rh_validate_checkout_booking_quantity( array $cart_item, $quantity, 
         $step = (int) ( $check['rules']['step'] ?? 1 );
 
         if ( $check['value'] < $min ) {
-            $errors->add( 'rh_booking_group_min', sprintf( __( '%s must be at least %d.', 'onsite-booking-system' ), $check['label'], $min ) );
+            $errors->add( 'rh_booking_group_min', sprintf( __( '%s must be at least %d.', 'racehall-wc-ui' ), $check['label'], $min ) );
             return false;
         }
 
         if ( $max !== null && $check['value'] > (int) $max ) {
-            $errors->add( 'rh_booking_group_max', sprintf( __( '%s cannot exceed %d.', 'onsite-booking-system' ), $check['label'], (int) $max ) );
+            $errors->add( 'rh_booking_group_max', sprintf( __( '%s cannot exceed %d.', 'racehall-wc-ui' ), $check['label'], (int) $max ) );
             return false;
         }
 
         if ( ! wk_rh_rule_value_matches_step( $check['value'], $min, $step ) ) {
-            $errors->add( 'rh_booking_group_step', sprintf( __( '%s quantity must follow step %d starting from %d.', 'onsite-booking-system' ), $check['label'], max( 1, $step ), $min ) );
+            $errors->add( 'rh_booking_group_step', sprintf( __( '%s quantity must follow step %d starting from %d.', 'racehall-wc-ui' ), $check['label'], max( 1, $step ), $min ) );
             return false;
         }
     }
@@ -3936,17 +3943,17 @@ function wk_rh_validate_checkout_booking_quantity( array $cart_item, $quantity, 
     $total_step = (int) ( $rules['total']['step'] ?? 1 );
 
     if ( $total < $total_min ) {
-        $errors->add( 'rh_booking_total_min', sprintf( __( 'Total participants must be at least %d.', 'onsite-booking-system' ), $total_min ) );
+        $errors->add( 'rh_booking_total_min', sprintf( __( 'Total participants must be at least %d.', 'racehall-wc-ui' ), $total_min ) );
         return false;
     }
 
     if ( $total_max !== null && $total > (int) $total_max ) {
-        $errors->add( 'rh_booking_total_max', sprintf( __( 'Total participants cannot exceed %d.', 'onsite-booking-system' ), (int) $total_max ) );
+        $errors->add( 'rh_booking_total_max', sprintf( __( 'Total participants cannot exceed %d.', 'racehall-wc-ui' ), (int) $total_max ) );
         return false;
     }
 
     if ( ! wk_rh_rule_value_matches_step( $total, $total_min, $total_step ) ) {
-        $errors->add( 'rh_booking_total_step', sprintf( __( 'Total participants must follow step %d starting from %d.', 'onsite-booking-system' ), max( 1, $total_step ), $total_min ) );
+        $errors->add( 'rh_booking_total_step', sprintf( __( 'Total participants must follow step %d starting from %d.', 'racehall-wc-ui' ), max( 1, $total_step ), $total_min ) );
         return false;
     }
 
@@ -4299,6 +4306,18 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
         ];
     }
 
+    $participant_counts = function_exists( 'wk_rh_get_booking_participant_counts_for_request' )
+        ? wk_rh_get_booking_participant_counts_for_request( $main_item, $main_quantity )
+        : [ 'adults' => (int) $main_quantity, 'children' => 0, 'twin' => 0 ];
+    $dynamic_lines = function_exists( 'wk_rh_build_booking_dynamic_lines' )
+        ? wk_rh_build_booking_dynamic_lines(
+            $participant_counts,
+            $proposal,
+            isset( $main_item['bmi_page_products'] ) && is_array( $main_item['bmi_page_products'] ) ? $main_item['bmi_page_products'] : [],
+            isset( $main_item['bmi_product_id'] ) ? (string) $main_item['bmi_product_id'] : (string) $bm_id
+        )
+        : [];
+
     $body = [
         'productId'  => (string) $bm_id,
         'pageId'     => (string) $page_id,
@@ -4306,6 +4325,9 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
         'resourceId' => (string) $resource_id,
         'proposal'   => $proposal,
     ];
+    if ( ! empty( $dynamic_lines ) ) {
+        $body['dynamicLines'] = $dynamic_lines;
+    }
     if ( ! empty( $prepared_contact_person ) ) {
         $body['contactPerson'] = $prepared_contact_person;
     }

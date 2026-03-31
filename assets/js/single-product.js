@@ -1284,9 +1284,10 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
     activeTimeslotRequestController = requestController
 
     const container = getTimeslotsContainer()
-    const requestedQuantity = getTotalQuantity()
     try {
         const productId = window.RH_PRODUCT_ID
+        const counts = enforceCountsByRules(getPartyCounts(), 'adults')
+        const requestedQuantity = getTotalFromCounts(counts)
         const res = await fetch(window.my_ajax_object.ajax_url, {
             method: 'POST',
             credentials: 'same-origin',
@@ -1296,6 +1297,9 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
                 productId: window.RH_PRODUCT_ID,
                 date: dateStr,
                 quantity: String(requestedQuantity),
+                booking_adults: String(counts.adults || 0),
+                booking_children: String(counts.children || 0),
+                booking_twin: String(counts.twin || 0),
                 bookingLocation: getBookingLocation(),
                 nonce: window.my_ajax_object.nonce || ''
             })

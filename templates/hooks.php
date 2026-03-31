@@ -718,13 +718,21 @@ function wk_rh_ajax_get_availability() {
 add_action( 'wp_ajax_rh_get_availability', 'wk_rh_ajax_get_availability' );
 add_action( 'wp_ajax_nopriv_rh_get_availability', 'wk_rh_ajax_get_availability' );
 
-function wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity = 1, $location = '' ) {
+function wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity = 1, $location = '', $dynamic_lines = [] ) {
     $creds = wk_rh_get_api_credentials( $location );
     if ( empty( $token ) || empty( $creds['base_url'] ) || empty( $creds['client_key'] ) || empty( $creds['subscription_key'] ) ) {
         return [];
     }
 
     $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/availability?date=' . rawurlencode( $date );
+    $request_body = [
+        'productId' => (int) $product_id,
+        'pageId'    => (int) $page_id,
+        'quantity'  => (int) $quantity,
+    ];
+    if ( ! empty( $dynamic_lines ) ) {
+        $request_body['dynamicLines'] = array_values( $dynamic_lines );
+    }
 
     $response = wk_rh_remote_request_with_retry(
         'POST',
@@ -736,11 +744,7 @@ function wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity = 
                 'Content-Type'         => 'application/json',
                 'Accept-Language'      => $creds['accept_language'],
             ],
-            'body'    => wp_json_encode([
-                'productId' => (int) $product_id,
-                'pageId'    => (int) $page_id,
-                'quantity'  => (int) $quantity,
-            ]),
+            'body'    => wp_json_encode( $request_body ),
             'timeout' => 15,
         ],
         1,
@@ -884,8 +888,20 @@ function wk_rh_ajax_get_timeslots() {
         wp_send_json_error( 'No page found for product/date', 404 );
     }
 
+    $participant_counts = wk_rh_get_booking_participant_counts_for_request(
+        [
+            'booking_adults'   => isset( $_POST['booking_adults'] ) ? wp_unslash( $_POST['booking_adults'] ) : null,
+            'booking_children' => isset( $_POST['booking_children'] ) ? wp_unslash( $_POST['booking_children'] ) : null,
+            'booking_twin'     => isset( $_POST['booking_twin'] ) ? wp_unslash( $_POST['booking_twin'] ) : null,
+        ],
+        $quantity
+    );
+    $dynamic_lines = $quantity > 0
+        ? wk_rh_build_booking_dynamic_lines( $participant_counts, [], $matched_page_products, (string) $product_id )
+        : [];
+
     $timeslots = $quantity > 0
-        ? wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity, $booking_location )
+        ? wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity, $booking_location, $dynamic_lines )
         : [ 'proposals' => [] ];
     if ( is_array( $timeslots ) ) {
         $timeslots['pageId'] = (string) $page_id;
@@ -1035,6 +1051,88 @@ function wk_rh_get_selected_page_product( array $page_products, $product_id ) {
     return null;
 }
 
+function wk_rh_get_booking_dynamic_groups( $proposal, $page_products = [], $product_id = '' ) {
+    $proposal = is_array( $proposal ) ? $proposal : [];
+    $page_products = is_array( $page_products ) ? array_values( $page_products ) : [];
+
+    if ( isset( $proposal['dynamicGroups'] ) && is_array( $proposal['dynamicGroups'] ) && ! empty( $proposal['dynamicGroups'] ) ) {
+        return array_values( $proposal['dynamicGroups'] );
+    }
+
+    $page_product = wk_rh_get_selected_page_product( $page_products, $product_id );
+    if ( is_array( $page_product ) && isset( $page_product['dynamicGroups'] ) && is_array( $page_product['dynamicGroups'] ) ) {
+        return array_values( $page_product['dynamicGroups'] );
+    }
+
+    return [];
+}
+
+function wk_rh_get_booking_dynamic_line_quantity( array $counts, $target_key ) {
+    if ( $target_key === 'kids' ) {
+        return max( 0, (int) ( $counts['children'] ?? 0 ) );
+    }
+
+    return max( 0, (int) ( $counts[ $target_key ] ?? 0 ) );
+}
+
+function wk_rh_normalize_booking_dynamic_line( array $group, $quantity ) {
+    $dynamic_line = [];
+
+    if ( isset( $group['id'] ) && $group['id'] !== '' ) {
+        $dynamic_line['id'] = is_numeric( $group['id'] ) ? (int) $group['id'] : sanitize_text_field( (string) $group['id'] );
+    }
+
+    if ( isset( $group['name'] ) && $group['name'] !== '' ) {
+        $dynamic_line['name'] = sanitize_text_field( (string) $group['name'] );
+    }
+
+    if ( isset( $group['tag'] ) && $group['tag'] !== '' ) {
+        $dynamic_line['tag'] = sanitize_text_field( (string) $group['tag'] );
+    }
+
+    $min_quantity = wk_rh_get_booking_rule_number_from_keys( $group, [ 'minQuantity', 'minQty', 'minimumQuantity', 'minimumQty' ], null );
+    if ( $min_quantity !== null ) {
+        $dynamic_line['minQuantity'] = (float) $min_quantity;
+    }
+
+    $max_quantity = wk_rh_get_booking_rule_number_from_keys( $group, [ 'maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty' ], null );
+    if ( $max_quantity !== null ) {
+        $dynamic_line['maxQuantity'] = (float) $max_quantity;
+    }
+
+    $dynamic_line['quantity'] = (float) max( 0, (int) $quantity );
+
+    return $dynamic_line;
+}
+
+function wk_rh_build_booking_dynamic_lines( array $counts, $proposal, $page_products = [], $product_id = '' ) {
+    $groups = wk_rh_get_booking_dynamic_groups( $proposal, $page_products, $product_id );
+    if ( empty( $groups ) ) {
+        return [];
+    }
+
+    $dynamic_lines = [];
+    foreach ( $groups as $group ) {
+        if ( ! is_array( $group ) ) {
+            continue;
+        }
+
+        $target_key = wk_rh_get_booking_group_target_key( $group );
+        if ( $target_key === null ) {
+            continue;
+        }
+
+        $quantity = wk_rh_get_booking_dynamic_line_quantity( $counts, $target_key );
+        if ( $quantity <= 0 ) {
+            continue;
+        }
+
+        $dynamic_lines[] = wk_rh_normalize_booking_dynamic_line( $group, $quantity );
+    }
+
+    return array_values( $dynamic_lines );
+}
+
 function wk_rh_extract_quantity_rules( $proposal, $page_product_limits = null, $page_products = [], $product_id = '' ) {
     $rules = wk_rh_get_default_booking_quantity_rules();
     $page_product_limits = is_array( $page_product_limits ) ? $page_product_limits : [];
@@ -1073,15 +1171,7 @@ function wk_rh_extract_quantity_rules( $proposal, $page_product_limits = null, $
             : min( (int) $rules['total']['max'], $resolved_ceiling );
     }
 
-    $groups = [];
-    if ( isset( $proposal['dynamicGroups'] ) && is_array( $proposal['dynamicGroups'] ) && ! empty( $proposal['dynamicGroups'] ) ) {
-        $groups = $proposal['dynamicGroups'];
-    } else {
-        $page_product = wk_rh_get_selected_page_product( $page_products, $product_id );
-        if ( is_array( $page_product ) && isset( $page_product['dynamicGroups'] ) && is_array( $page_product['dynamicGroups'] ) ) {
-            $groups = $page_product['dynamicGroups'];
-        }
-    }
+    $groups = wk_rh_get_booking_dynamic_groups( $proposal, $page_products, $product_id );
 
     foreach ( $groups as $group ) {
         if ( ! is_array( $group ) ) {
@@ -1112,6 +1202,15 @@ function wk_rh_extract_quantity_rules( $proposal, $page_product_limits = null, $
 
 function wk_rh_get_booking_total_participants( array $counts ) {
     return max( 0, (int) ( $counts['adults'] ?? 0 ) ) + max( 0, (int) ( $counts['children'] ?? 0 ) ) + max( 0, (int) ( $counts['twin'] ?? 0 ) );
+}
+
+function wk_rh_get_booking_participant_counts_for_request( array $source, $quantity = 0 ) {
+    $counts = wk_rh_get_booking_participant_counts( $source );
+    if ( wk_rh_get_booking_total_participants( $counts ) <= 0 && $quantity > 0 ) {
+        $counts['adults'] = max( 0, (int) $quantity );
+    }
+
+    return $counts;
 }
 
 function wk_rh_format_booking_participants_text( array $source ) {
@@ -1183,8 +1282,8 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
     }
 
     $group_checks = [
-        [ 'name' => __( 'Adults', 'onsite-booking-system' ), 'value' => $adults, 'rules' => $rules['adults'] ],
-        [ 'name' => __( 'Children', 'onsite-booking-system' ), 'value' => $kids, 'rules' => $rules['kids'] ],
+        [ 'name' => __( 'Adults', 'racehall-wc-ui' ), 'value' => $adults, 'rules' => $rules['adults'] ],
+        [ 'name' => __( 'Children', 'racehall-wc-ui' ), 'value' => $kids, 'rules' => $rules['kids'] ],
         [ 'name' => __( 'Twin kart', 'racehall-wc-ui' ), 'value' => $twin, 'rules' => $rules['twin'] ],
     ];
 
@@ -1195,17 +1294,17 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
 
         if ( $check['value'] < $min ) {
             wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'group' => $check['name'], 'reason' => 'below_min', 'value' => $check['value'], 'min' => $min, 'productId' => $product_id ] , 'warning' );
-            wc_add_notice( sprintf( __( '%s must be at least %d.', 'onsite-booking-system' ), $check['name'], $min ), 'error' );
+            wc_add_notice( sprintf( __( '%s must be at least %d.', 'racehall-wc-ui' ), $check['name'], $min ), 'error' );
             return false;
         }
         if ( $max !== null && $check['value'] > (int) $max ) {
             wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'group' => $check['name'], 'reason' => 'above_max', 'value' => $check['value'], 'max' => (int) $max, 'productId' => $product_id ], 'warning' );
-            wc_add_notice( sprintf( __( '%s cannot exceed %d.', 'onsite-booking-system' ), $check['name'], (int) $max ), 'error' );
+            wc_add_notice( sprintf( __( '%s cannot exceed %d.', 'racehall-wc-ui' ), $check['name'], (int) $max ), 'error' );
             return false;
         }
         if ( ! wk_rh_rule_value_matches_step( $check['value'], $min, $step ) ) {
             wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'group' => $check['name'], 'reason' => 'step_mismatch', 'value' => $check['value'], 'min' => $min, 'step' => $step, 'productId' => $product_id ], 'warning' );
-            wc_add_notice( sprintf( __( '%s quantity must follow step %d starting from %d.', 'onsite-booking-system' ), $check['name'], max( 1, $step ), $min ), 'error' );
+            wc_add_notice( sprintf( __( '%s quantity must follow step %d starting from %d.', 'racehall-wc-ui' ), $check['name'], max( 1, $step ), $min ), 'error' );
             return false;
         }
     }
@@ -1219,7 +1318,7 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
     $total = wk_rh_get_booking_total_participants( $counts );
     if ( $total !== $qty ) {
         wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'reason' => 'total_quantity_mismatch', 'total' => $total, 'quantity' => $qty, 'productId' => $product_id ], 'warning' );
-        wc_add_notice( __( 'Participant quantities do not match selected booking quantity.', 'onsite-booking-system' ), 'error' );
+        wc_add_notice( __( 'Participant quantities do not match selected booking quantity.', 'racehall-wc-ui' ), 'error' );
         return false;
     }
 
@@ -1229,17 +1328,17 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
 
     if ( $total < $total_min ) {
         wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'reason' => 'total_below_min', 'total' => $total, 'min' => $total_min, 'productId' => $product_id ], 'warning' );
-        wc_add_notice( sprintf( __( 'Total participants must be at least %d.', 'onsite-booking-system' ), $total_min ), 'error' );
+        wc_add_notice( sprintf( __( 'Total participants must be at least %d.', 'racehall-wc-ui' ), $total_min ), 'error' );
         return false;
     }
     if ( $total_max !== null && $total > (int) $total_max ) {
         wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'reason' => 'total_above_max', 'total' => $total, 'max' => (int) $total_max, 'productId' => $product_id ], 'warning' );
-        wc_add_notice( sprintf( __( 'Total participants cannot exceed %d.', 'onsite-booking-system' ), (int) $total_max ), 'error' );
+        wc_add_notice( sprintf( __( 'Total participants cannot exceed %d.', 'racehall-wc-ui' ), (int) $total_max ), 'error' );
         return false;
     }
     if ( ! wk_rh_rule_value_matches_step( $total, $total_min, $total_step ) ) {
         wk_rh_log_user_event( 'booking.quantity_validation_failed', [ 'reason' => 'total_step_mismatch', 'total' => $total, 'min' => $total_min, 'step' => $total_step, 'productId' => $product_id ], 'warning' );
-        wc_add_notice( sprintf( __( 'Total participants must follow step %d starting from %d.', 'onsite-booking-system' ), max( 1, $total_step ), $total_min ), 'error' );
+        wc_add_notice( sprintf( __( 'Total participants must follow step %d starting from %d.', 'racehall-wc-ui' ), max( 1, $total_step ), $total_min ), 'error' );
         return false;
     }
 
@@ -1836,6 +1935,6 @@ function racehall_get_availability( $token, $product_id, $date_from, $date_till,
     return wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $location );
 }
 
-function racehall_get_timeslots( $token, $product_id, $page_id, $date, $quantity = 1, $location = '' ) {
-    return wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity, $location );
+function racehall_get_timeslots( $token, $product_id, $page_id, $date, $quantity = 1, $location = '', $dynamic_lines = [] ) {
+    return wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity, $location, $dynamic_lines );
 }
