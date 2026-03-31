@@ -1723,7 +1723,7 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
         return;
     }
 
-    if ( $order->get_payment_method() === 'cod' ) {
+    if ( $order->get_payment_method() === 'cod' && ! $order->has_status( 'completed' ) ) {
         return;
     }
 
@@ -1793,7 +1793,14 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
     $code = (int) wp_remote_retrieve_response_code( $response );
     $response_body = wp_remote_retrieve_body( $response );
     $response_data = function_exists( 'wk_rh_normalize_api_response' ) ? wk_rh_normalize_api_response( json_decode( $response_body, true ) ) : json_decode( $response_body, true );
-    $payment_success = ! is_array( $response_data ) || ! array_key_exists( 'success', $response_data ) || $response_data['success'] !== false;
+    $payment_status = is_array( $response_data ) && isset( $response_data['status'] ) && is_numeric( $response_data['status'] )
+        ? (int) $response_data['status']
+        : null;
+    $payment_success = $payment_status === 0;
+
+    if ( $payment_status === null && is_array( $response_data ) && array_key_exists( 'success', $response_data ) ) {
+        $payment_success = $response_data['success'] !== false;
+    }
 
     if ( $code >= 200 && $code < 300 && $payment_success ) {
         wk_rh_mark_payment_confirmed( $order, $response_body );
@@ -1801,6 +1808,8 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
         $error_message = 'Onsite booking payment/confirm failed';
         if ( is_array( $response_data ) && ! empty( $response_data['errorMessage'] ) ) {
             $error_message .= ': ' . sanitize_text_field( (string) $response_data['errorMessage'] );
+        } elseif ( $payment_status !== null ) {
+            $error_message .= ' with status ' . $payment_status;
         } else {
             $error_message .= ' with HTTP ' . $code;
         }
@@ -1810,6 +1819,7 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
             'orderId' => (string) $upstream_order_id,
             'location' => (string) $location,
             'httpCode' => $code,
+            'status' => $payment_status,
             'body' => is_array( $response_data ) ? $response_data : $response_body,
         ], 'error' );
         wk_rh_log_upstream_event( 'error', 'Upstream payment/confirm failed', [
@@ -1818,6 +1828,7 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
             'wcOrderId' => (string) $order->get_id(),
             'location' => (string) $location,
             'httpCode' => $code,
+            'status' => $payment_status,
             'body' => is_array( $response_data ) ? $response_data : $response_body,
         ] );
         $order->add_order_note( $error_message );
