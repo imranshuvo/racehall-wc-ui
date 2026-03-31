@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.01
+ * Version: 2.03
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -49,7 +49,83 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.01' );
+define( 'RACEHALL_WC_UI_VERSION', '2.03' );
+
+function wk_rh_get_bmi_route_namespace( $route_group ) {
+    $route_group = sanitize_key( (string) $route_group );
+
+    $namespaces = [
+        'booking' => 'public-booking',
+        'api'     => 'api',
+    ];
+
+    $namespace = isset( $namespaces[ $route_group ] ) ? $namespaces[ $route_group ] : 'api';
+
+    return trim( (string) apply_filters( 'wk_rh_bmi_route_namespace', $namespace, $route_group ), '/' );
+}
+
+function wk_rh_build_bmi_client_url( array $creds, $route_group, $path = '', $query = [] ) {
+    $base_url = isset( $creds['base_url'] ) ? untrailingslashit( (string) $creds['base_url'] ) : '';
+    $client_key = isset( $creds['client_key'] ) ? (string) $creds['client_key'] : '';
+    $namespace = wk_rh_get_bmi_route_namespace( $route_group );
+
+    if ( $base_url === '' || $client_key === '' || $namespace === '' ) {
+        return '';
+    }
+
+    $url = $base_url . '/' . $namespace . '/' . rawurlencode( $client_key );
+    if ( $path !== '' ) {
+        $url .= '/' . ltrim( (string) $path, '/' );
+    }
+
+    if ( is_array( $query ) && ! empty( $query ) ) {
+        $url .= '?' . http_build_query( $query );
+    } elseif ( is_string( $query ) && $query !== '' ) {
+        $url .= '?' . ltrim( $query, '?' );
+    }
+
+    return $url;
+}
+
+function wk_rh_transform_api_dto_keys( $value, $direction = 'to_api' ) {
+    if ( ! is_array( $value ) ) {
+        return $value;
+    }
+
+    $transformed = [];
+    $is_list = array_keys( $value ) === range( 0, count( $value ) - 1 );
+
+    if ( $is_list ) {
+        foreach ( $value as $index => $item ) {
+            $transformed[ $index ] = wk_rh_transform_api_dto_keys( $item, $direction );
+        }
+
+        return $transformed;
+    }
+
+    foreach ( $value as $key => $item ) {
+        $new_key = $key;
+        if ( is_string( $key ) ) {
+            $new_key = $direction === 'to_api' ? ucfirst( $key ) : lcfirst( $key );
+        }
+
+        $transformed[ $new_key ] = wk_rh_transform_api_dto_keys( $item, $direction );
+    }
+
+    return $transformed;
+}
+
+function wk_rh_prepare_api_payload( array $payload ) {
+    return wk_rh_transform_api_dto_keys( $payload, 'to_api' );
+}
+
+function wk_rh_normalize_api_response( $data ) {
+    return wk_rh_transform_api_dto_keys( $data, 'to_internal' );
+}
+
+function wk_rh_decode_api_response_body( $response ) {
+    return wk_rh_normalize_api_response( json_decode( wp_remote_retrieve_body( $response ), true ) );
+}
 
 function wk_rh_load_textdomain() {
     load_plugin_textdomain( 'racehall-wc-ui', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
@@ -475,7 +551,7 @@ function wk_rh_current_user_can_preview_new_product_booking() {
     return current_user_can( 'manage_options' );
 }
 
-function wk_rh_get_product_bmileisure_id( $product = null ) {
+function wk_rh_normalize_product_id( $product = null ) {
     if ( is_object( $product ) && method_exists( $product, 'get_id' ) ) {
         $product = (int) $product->get_id();
     }
@@ -486,12 +562,105 @@ function wk_rh_get_product_bmileisure_id( $product = null ) {
 
     $product_id = absint( $product );
     if ( $product_id <= 0 ) {
+        return 0;
+    }
+
+    return $product_id;
+}
+
+function wk_rh_get_wpml_product_id( $product_id, $language_code = null ) {
+    $product_id = absint( $product_id );
+    if ( $product_id <= 0 || ! has_filter( 'wpml_object_id' ) ) {
+        return 0;
+    }
+
+    if ( is_string( $language_code ) && $language_code !== '' ) {
+        $translated_product_id = apply_filters( 'wpml_object_id', $product_id, 'product', true, $language_code );
+    } else {
+        $translated_product_id = apply_filters( 'wpml_object_id', $product_id, 'product', true );
+    }
+
+    return is_numeric( $translated_product_id ) && (int) $translated_product_id > 0
+        ? (int) $translated_product_id
+        : 0;
+}
+
+function wk_rh_get_current_language_product_id( $product ) {
+    $product_id = wk_rh_normalize_product_id( $product );
+    if ( $product_id <= 0 ) {
+        return 0;
+    }
+
+    $translated_product_id = wk_rh_get_wpml_product_id( $product_id );
+
+    return $translated_product_id > 0 ? $translated_product_id : $product_id;
+}
+
+function wk_rh_get_default_language_product_id( $product ) {
+    $product_id = wk_rh_normalize_product_id( $product );
+    if ( $product_id <= 0 || ! has_filter( 'wpml_default_language' ) ) {
+        return 0;
+    }
+
+    $default_language = apply_filters( 'wpml_default_language', null );
+    if ( ! is_string( $default_language ) || $default_language === '' ) {
+        return 0;
+    }
+
+    return wk_rh_get_wpml_product_id( $product_id, $default_language );
+}
+
+function wk_rh_get_canonical_product_lookup_ids( $product = null ) {
+    $product_id = wk_rh_normalize_product_id( $product );
+    if ( $product_id <= 0 ) {
+        return [];
+    }
+
+    $lookup_ids = [ $product_id ];
+    $default_product_id = wk_rh_get_default_language_product_id( $product_id );
+    if ( $default_product_id > 0 && $default_product_id !== $product_id ) {
+        $lookup_ids[] = $default_product_id;
+    }
+
+    return array_values( array_unique( array_map( 'absint', $lookup_ids ) ) );
+}
+
+function wk_rh_get_canonical_product_meta_value( $product = null, array $field_names = [] ) {
+    $lookup_ids = wk_rh_get_canonical_product_lookup_ids( $product );
+    if ( empty( $lookup_ids ) || empty( $field_names ) ) {
         return '';
     }
 
-    $bm_id = function_exists( 'get_field' )
-        ? get_field( 'bmileisure_id', $product_id )
-        : get_post_meta( $product_id, 'bmileisure_id', true );
+    foreach ( $lookup_ids as $product_id ) {
+        foreach ( $field_names as $field_name ) {
+            if ( ! is_string( $field_name ) || $field_name === '' ) {
+                continue;
+            }
+
+            $value = function_exists( 'get_field' )
+                ? get_field( $field_name, $product_id )
+                : get_post_meta( $product_id, $field_name, true );
+
+            if ( ! is_scalar( $value ) || trim( (string) $value ) === '' ) {
+                $value = get_post_meta( $product_id, $field_name, true );
+            }
+
+            if ( is_scalar( $value ) && trim( (string) $value ) !== '' ) {
+                return trim( (string) $value );
+            }
+        }
+    }
+
+    return '';
+}
+
+function wk_rh_get_product_bmileisure_id( $product = null ) {
+    $product_id = wk_rh_normalize_product_id( $product );
+    if ( $product_id <= 0 ) {
+        return '';
+    }
+
+    $bm_id = wk_rh_get_canonical_product_meta_value( $product_id, [ 'bmileisure_id' ] );
 
     if ( ! is_scalar( $bm_id ) ) {
         return '';
@@ -511,42 +680,12 @@ function wk_rh_sanitize_location_value( $location ) {
 }
 
 function wk_rh_get_product_booking_location( $product = null ) {
-    if ( is_object( $product ) && method_exists( $product, 'get_id' ) ) {
-        $product = (int) $product->get_id();
-    }
-
-    if ( $product === null ) {
-        $product = get_queried_object_id();
-    }
-
-    $product_id = absint( $product );
+    $product_id = wk_rh_normalize_product_id( $product );
     if ( $product_id <= 0 ) {
         return '';
     }
 
-    $location = '';
-
-    if ( function_exists( 'get_field' ) ) {
-        $location = get_field( 'lokation', $product_id );
-        if ( ! is_scalar( $location ) || trim( (string) $location ) === '' ) {
-            $location = get_field( 'location', $product_id );
-        }
-        if ( ! is_scalar( $location ) || trim( (string) $location ) === '' ) {
-            $location = get_field( 'plats', $product_id );
-        }
-    }
-
-    if ( ! is_scalar( $location ) || trim( (string) $location ) === '' ) {
-        $location = get_post_meta( $product_id, 'lokation', true );
-    }
-
-    if ( ! is_scalar( $location ) || trim( (string) $location ) === '' ) {
-        $location = get_post_meta( $product_id, 'location', true );
-    }
-
-    if ( ! is_scalar( $location ) || trim( (string) $location ) === '' ) {
-        $location = get_post_meta( $product_id, 'plats', true );
-    }
+    $location = wk_rh_get_canonical_product_meta_value( $product_id, [ 'lokation', 'location', 'plats' ] );
 
     if ( ! is_scalar( $location ) ) {
         return '';
@@ -2492,7 +2631,7 @@ function wk_rh_replace_main_product_only( $passed, $product_id, $quantity ) {
         return $passed;
     }
 
-    $is_main_product = get_post_meta( $product_id, 'bmileisure_id', true );
+    $is_main_product = wk_rh_get_product_bmileisure_id( $product_id );
     if ( ! $is_main_product || WC()->cart->is_empty() ) return $passed;
 
     foreach ( WC()->cart->get_cart() as $cart_item_key => $cart_item ) {
@@ -2508,8 +2647,22 @@ function wk_rh_replace_main_product_only( $passed, $product_id, $quantity ) {
     return $passed;
 }
 
+function wk_rh_should_skip_cart_remove_cancellation() {
+    if ( doing_action( 'woocommerce_checkout_create_order' ) || doing_action( 'woocommerce_checkout_create_order_line_item' ) ) {
+        return true;
+    }
+
+    if ( did_action( 'woocommerce_checkout_order_processed' ) > 0 ) {
+        return true;
+    }
+
+    return false;
+}
+
 add_action( 'woocommerce_remove_cart_item', function( $cart_item_key, $cart ) {
     $item = $cart->get_cart_item( $cart_item_key );
+    $skip_upstream_remove = wk_rh_should_skip_cart_remove_cancellation();
+
     if ( is_array( $item ) ) {
         wk_rh_log_user_event( 'cart.item_removed', [
             'cartItemKey' => (string) $cart_item_key,
@@ -2518,10 +2671,11 @@ add_action( 'woocommerce_remove_cart_item', function( $cart_item_key, $cart ) {
             'upstreamOrderId' => isset( $item['bmi_order_id'] ) ? (string) $item['bmi_order_id'] : '',
             'upstreamOrderItemId' => isset( $item['bmi_order_item_id'] ) ? (string) $item['bmi_order_item_id'] : '',
             'bookingLocation' => isset( $item['booking_location'] ) ? (string) $item['booking_location'] : '',
+            'skipUpstreamRemove' => $skip_upstream_remove,
         ] );
     }
 
-    if ( ! empty( $item['is_addon'] ) && ! empty( $item['bmi_order_id'] ) && ! empty( $item['bmi_order_item_id'] ) ) {
+    if ( ! $skip_upstream_remove && ! empty( $item['is_addon'] ) && ! empty( $item['bmi_order_id'] ) && ! empty( $item['bmi_order_item_id'] ) ) {
         $location = ! empty( $item['booking_location'] ) ? sanitize_text_field( $item['booking_location'] ) : '';
         if ( function_exists( 'wk_rh_remove_upstream_order_item' ) ) {
             wk_rh_remove_upstream_order_item( $location, $item['bmi_order_id'], $item['bmi_order_item_id'] );
@@ -2531,9 +2685,19 @@ add_action( 'woocommerce_remove_cart_item', function( $cart_item_key, $cart ) {
     $removed_product_id = isset( $item['product_id'] ) ? (int) $item['product_id'] : 0;
     $is_main_product_removed = $removed_product_id > 0
         && empty( $item['is_addon'] )
-        && ! empty( get_post_meta( $removed_product_id, 'bmileisure_id', true ) );
+        && ! empty( wk_rh_get_product_bmileisure_id( $removed_product_id ) );
 
     if ( ! $is_main_product_removed ) return;
+
+    if ( $skip_upstream_remove ) {
+        wk_rh_log_user_event( 'cart.main_booking_remove_skip_cancel', [
+            'cartItemKey' => (string) $cart_item_key,
+            'productId' => $removed_product_id,
+            'upstreamOrderId' => isset( $item['bmi_order_id'] ) ? (string) $item['bmi_order_id'] : '',
+            'reason' => 'checkout_order_processing',
+        ] );
+        return;
+    }
 
     wk_rh_log_user_event( 'cart.main_booking_removed', [
         'cartItemKey' => (string) $cart_item_key,
@@ -3308,10 +3472,7 @@ function wk_rh_get_main_booking_cart_item_key() {
             if ( $item_product_id === '' ) {
                 $product_id = isset( $cart_item['product_id'] ) ? (int) $cart_item['product_id'] : 0;
                 if ( $product_id > 0 ) {
-                    $item_product_id = function_exists( 'get_field' )
-                        ? (string) get_field( 'bmileisure_id', $product_id )
-                        : (string) get_post_meta( $product_id, 'bmileisure_id', true );
-                    $item_product_id = trim( $item_product_id );
+                    $item_product_id = wk_rh_get_product_bmileisure_id( $product_id );
                 }
             }
 
@@ -3331,9 +3492,7 @@ function wk_rh_get_main_booking_cart_item_key() {
             continue;
         }
 
-        $bm_id = function_exists( 'get_field' )
-            ? get_field( 'bmileisure_id', $product_id )
-            : get_post_meta( $product_id, 'bmileisure_id', true );
+        $bm_id = wk_rh_get_product_bmileisure_id( $product_id );
 
         if ( ! empty( $bm_id ) ) {
             return (string) $cart_item_key;
@@ -4221,9 +4380,7 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
 
     $main_item = $cart_contents[ $main_cart_item_key ];
     $product_id = isset( $main_item['product_id'] ) ? (int) $main_item['product_id'] : 0;
-    $bm_id = function_exists( 'get_field' )
-        ? get_field( 'bmileisure_id', $product_id )
-        : get_post_meta( $product_id, 'bmileisure_id', true );
+    $bm_id = wk_rh_get_product_bmileisure_id( $product_id );
     $proposal = isset( $main_item['bmi_proposal'] ) ? $main_item['bmi_proposal'] : null;
     $page_id = isset( $main_item['bmi_page_id'] ) ? trim( (string) $main_item['bmi_page_id'] ) : '';
     $resource_id = isset( $main_item['bmi_resource_id'] ) ? trim( (string) $main_item['bmi_resource_id'] ) : '';
@@ -4352,7 +4509,9 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
         ];
     }
 
-    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/booking/book';
+    $url = function_exists( 'wk_rh_build_bmi_client_url' )
+        ? wk_rh_build_bmi_client_url( $creds, 'booking', 'booking/book' )
+        : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/booking/book';
     $response = wk_rh_remote_request_with_retry(
         'POST',
         $url,
@@ -4363,7 +4522,7 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
                 'Accept-Language'      => $creds['accept_language'],
                 'Bmi-Subscription-Key' => $creds['subscription_key'],
             ],
-            'body'    => wp_json_encode( $body ),
+            'body'    => wp_json_encode( function_exists( 'wk_rh_prepare_api_payload' ) ? wk_rh_prepare_api_payload( $body ) : $body ),
             'timeout' => 60,
         ],
         1,
@@ -4383,7 +4542,7 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
     }
 
     $code = (int) wp_remote_retrieve_response_code( $response );
-    $result = json_decode( wp_remote_retrieve_body( $response ), true );
+    $result = function_exists( 'wk_rh_decode_api_response_body' ) ? wk_rh_decode_api_response_body( $response ) : json_decode( wp_remote_retrieve_body( $response ), true );
     $body_success = ! is_array( $result ) || ! array_key_exists( 'success', $result ) || false !== $result['success'];
     if ( ! ( $code >= 200 && $code < 300 ) ) {
         wk_rh_log_user_event( 'booking.hold_failed', [
@@ -4555,9 +4714,7 @@ function wk_rh_sync_checkout_booking_before_order( $posted_data, $errors ) {
         return;
     }
 
-    $bm_id = function_exists( 'get_field' )
-        ? get_field( 'bmileisure_id', $product->get_id() )
-        : get_post_meta( $product->get_id(), 'bmileisure_id', true );
+    $bm_id = wk_rh_get_product_bmileisure_id( $product->get_id() );
 
     if ( empty( $bm_id ) ) {
         wk_rh_log_user_event( 'checkout.booking_failed', [ 'reason' => 'missing_upstream_product_id', 'productId' => $product->get_id() ], 'error' );
@@ -4929,9 +5086,7 @@ add_action( 'woocommerce_check_cart_items', function() {
             continue;
         }
 
-        $bm_id = function_exists( 'get_field' )
-            ? get_field( 'bmileisure_id', $product_id )
-            : get_post_meta( $product_id, 'bmileisure_id', true );
+        $bm_id = wk_rh_get_product_bmileisure_id( $product_id );
 
         if ( empty( $bm_id ) ) {
             continue;

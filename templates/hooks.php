@@ -116,13 +116,13 @@ function wk_rh_get_token( $location = '' ) {
         return false;
     }
 
-    $data = json_decode( wp_remote_retrieve_body( $response ), true );
-    $token = isset( $data['AccessToken'] ) ? (string) $data['AccessToken'] : '';
+    $data = function_exists( 'wk_rh_decode_api_response_body' ) ? wk_rh_decode_api_response_body( $response ) : json_decode( wp_remote_retrieve_body( $response ), true );
+    $token = isset( $data['accessToken'] ) ? (string) $data['accessToken'] : '';
     if ( $token === '' ) {
         return false;
     }
 
-    $expires_in = isset( $data['ExpiresIn'] ) && is_numeric( $data['ExpiresIn'] ) ? (int) $data['ExpiresIn'] : 3600;
+    $expires_in = isset( $data['expiresIn'] ) && is_numeric( $data['expiresIn'] ) ? (int) $data['expiresIn'] : 3600;
     $ttl = max( 60, $expires_in - 60 );
     set_transient( $cache_key, $token, $ttl );
     $runtime_cache[ $cache_key ] = $token;
@@ -214,7 +214,9 @@ function wk_rh_get_product_image_data_uri( $location, $product_id ) {
         return '';
     }
 
-    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/image/product?productId=' . rawurlencode( $product_id );
+    $url = function_exists( 'wk_rh_build_bmi_client_url' )
+        ? wk_rh_build_bmi_client_url( $creds, 'booking', 'image/product', [ 'productId' => $product_id ] )
+        : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/image/product?productId=' . rawurlencode( $product_id );
     $response = wk_rh_remote_request_with_retry(
         'GET',
         $url,
@@ -381,7 +383,9 @@ function wk_rh_post_booking_sell( $location, $product_id, $quantity, $order_id, 
         $body['parentOrderItemId'] = (string) $parent_order_item_id;
     }
 
-    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/booking/sell';
+    $url = function_exists( 'wk_rh_build_bmi_client_url' )
+        ? wk_rh_build_bmi_client_url( $creds, 'booking', 'booking/sell' )
+        : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/booking/sell';
     $response = wk_rh_remote_request_with_retry(
         'POST',
         $url,
@@ -392,7 +396,7 @@ function wk_rh_post_booking_sell( $location, $product_id, $quantity, $order_id, 
                 'Accept-Language'      => $creds['accept_language'],
                 'Bmi-Subscription-Key' => $creds['subscription_key'],
             ],
-            'body'    => wp_json_encode( $body ),
+            'body'    => wp_json_encode( function_exists( 'wk_rh_prepare_api_payload' ) ? wk_rh_prepare_api_payload( $body ) : $body ),
             'timeout' => 30,
         ],
         1,
@@ -410,7 +414,7 @@ function wk_rh_post_booking_sell( $location, $product_id, $quantity, $order_id, 
 
     $code = (int) wp_remote_retrieve_response_code( $response );
     $raw_body = wp_remote_retrieve_body( $response );
-    $data = json_decode( $raw_body, true );
+    $data = function_exists( 'wk_rh_normalize_api_response' ) ? wk_rh_normalize_api_response( json_decode( $raw_body, true ) ) : json_decode( $raw_body, true );
     if ( ! ( $code >= 200 && $code < 300 ) ) {
         wk_rh_log_upstream_event( 'error', 'Upstream booking/sell failed', [
             'operation' => 'booking_sell',
@@ -449,7 +453,9 @@ function wk_rh_remove_upstream_order_item( $location, $order_id, $order_item_id 
         return false;
     }
 
-    $url = $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/booking/removeItem';
+    $url = function_exists( 'wk_rh_build_bmi_client_url' )
+        ? wk_rh_build_bmi_client_url( $creds, 'api', 'booking/removeItem' )
+        : $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/booking/removeItem';
     $response = wk_rh_remote_request_with_retry(
         'POST',
         $url,
@@ -460,10 +466,13 @@ function wk_rh_remove_upstream_order_item( $location, $order_id, $order_item_id 
                 'Accept-Language'      => $creds['accept_language'],
                 'Bmi-Subscription-Key' => $creds['subscription_key'],
             ],
-            'body'    => wp_json_encode([
+            'body'    => wp_json_encode( function_exists( 'wk_rh_prepare_api_payload' ) ? wk_rh_prepare_api_payload( [
                 'orderId'     => ctype_digit( (string) $order_id ) ? (int) $order_id : (string) $order_id,
                 'orderItemId' => ctype_digit( (string) $order_item_id ) ? (int) $order_item_id : (string) $order_item_id,
-            ]),
+            ] ) : [
+                'orderId'     => ctype_digit( (string) $order_id ) ? (int) $order_id : (string) $order_id,
+                'orderItemId' => ctype_digit( (string) $order_item_id ) ? (int) $order_item_id : (string) $order_item_id,
+            ] ),
             'timeout' => 30,
         ],
         3,
@@ -519,7 +528,9 @@ function wk_rh_send_order_memo( $order ) {
         return;
     }
 
-    $url = $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/booking/memo';
+    $url = function_exists( 'wk_rh_build_bmi_client_url' )
+        ? wk_rh_build_bmi_client_url( $creds, 'api', 'booking/memo' )
+        : $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/booking/memo';
     $payload = [
         'orderId' => ctype_digit( (string) $upstream_order_id ) ? (int) $upstream_order_id : (string) $upstream_order_id,
         'memo'    => $memo,
@@ -538,7 +549,7 @@ function wk_rh_send_order_memo( $order ) {
                 'Accept-Language'      => $creds['accept_language'],
                 'Bmi-Subscription-Key' => $creds['subscription_key'],
             ],
-            'body'    => wp_json_encode( $payload ),
+            'body'    => wp_json_encode( function_exists( 'wk_rh_prepare_api_payload' ) ? wk_rh_prepare_api_payload( $payload ) : $payload ),
             'timeout' => 20,
         ],
         3,
@@ -557,7 +568,7 @@ function wk_rh_send_order_memo( $order ) {
 
     $code = (int) wp_remote_retrieve_response_code( $response );
     $response_body = wp_remote_retrieve_body( $response );
-    $response_data = json_decode( $response_body, true );
+    $response_data = function_exists( 'wk_rh_normalize_api_response' ) ? wk_rh_normalize_api_response( json_decode( $response_body, true ) ) : json_decode( $response_body, true );
     $order->update_meta_data( 'wk_rh_memo_http_code', $code );
     $order->update_meta_data( 'wk_rh_memo_response', $response_body );
 
@@ -588,7 +599,9 @@ function wk_rh_get_products( $token, $location = '' ) {
         return [];
     }
 
-    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/products';
+    $url = function_exists( 'wk_rh_build_bmi_client_url' )
+        ? wk_rh_build_bmi_client_url( $creds, 'booking', 'products' )
+        : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/products';
 
     $response = wk_rh_remote_request_with_retry(
         'GET',
@@ -619,7 +632,7 @@ function wk_rh_get_products( $token, $location = '' ) {
         ] );
         return [];
     }
-    return json_decode( wp_remote_retrieve_body( $response ), true );
+    return function_exists( 'wk_rh_decode_api_response_body' ) ? wk_rh_decode_api_response_body( $response ) : json_decode( wp_remote_retrieve_body( $response ), true );
 }
 
 function wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $location = '' ) {
@@ -634,7 +647,13 @@ function wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $l
         'dateTill'  => (string) $date_till,
     ]);
 
-    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/availability?' . $query;
+    $url = function_exists( 'wk_rh_build_bmi_client_url' )
+        ? wk_rh_build_bmi_client_url( $creds, 'booking', 'availability', [
+            'productId' => (int) $product_id,
+            'dateFrom'  => (string) $date_from,
+            'dateTill'  => (string) $date_till,
+        ] )
+        : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/availability?' . $query;
 
     $response = wk_rh_remote_request_with_retry(
         'GET',
@@ -667,7 +686,7 @@ function wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $l
         ] );
         return [];
     }
-    return json_decode( wp_remote_retrieve_body( $response ), true );
+    return function_exists( 'wk_rh_decode_api_response_body' ) ? wk_rh_decode_api_response_body( $response ) : json_decode( wp_remote_retrieve_body( $response ), true );
 }
 
 function wk_rh_ajax_get_availability() {
@@ -724,7 +743,9 @@ function wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity = 
         return [];
     }
 
-    $url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/availability?date=' . rawurlencode( $date );
+    $url = function_exists( 'wk_rh_build_bmi_client_url' )
+        ? wk_rh_build_bmi_client_url( $creds, 'booking', 'availability', [ 'date' => (string) $date ] )
+        : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/availability?date=' . rawurlencode( $date );
     $request_body = [
         'productId' => (int) $product_id,
         'pageId'    => (int) $page_id,
@@ -744,7 +765,7 @@ function wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity = 
                 'Content-Type'         => 'application/json',
                 'Accept-Language'      => $creds['accept_language'],
             ],
-            'body'    => wp_json_encode( $request_body ),
+            'body'    => wp_json_encode( function_exists( 'wk_rh_prepare_api_payload' ) ? wk_rh_prepare_api_payload( $request_body ) : $request_body ),
             'timeout' => 15,
         ],
         1,
@@ -770,7 +791,7 @@ function wk_rh_get_timeslots( $token, $product_id, $page_id, $date, $quantity = 
         ] );
         return [];
     }
-    return json_decode( wp_remote_retrieve_body( $response ), true );
+    return function_exists( 'wk_rh_decode_api_response_body' ) ? wk_rh_decode_api_response_body( $response ) : json_decode( wp_remote_retrieve_body( $response ), true );
 }
 
 function wk_rh_ajax_get_timeslots() {
@@ -806,7 +827,9 @@ function wk_rh_ajax_get_timeslots() {
     }
 
     $creds = wk_rh_get_api_credentials( $booking_location );
-    $pages_url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/page?date=' . rawurlencode( $date . 'T00:00:00.000Z' );
+    $pages_url = function_exists( 'wk_rh_build_bmi_client_url' )
+        ? wk_rh_build_bmi_client_url( $creds, 'booking', 'page', [ 'date' => $date . 'T00:00:00.000Z' ] )
+        : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/page?date=' . rawurlencode( $date . 'T00:00:00.000Z' );
 
     $pages_response = wk_rh_remote_request_with_retry(
         'GET',
@@ -848,7 +871,7 @@ function wk_rh_ajax_get_timeslots() {
         ], 'error' );
         wp_send_json_error( 'API error: ' . $pages_response->get_error_message(), 500 );
     }
-    $pages = json_decode( wp_remote_retrieve_body( $pages_response ), true );
+    $pages = function_exists( 'wk_rh_decode_api_response_body' ) ? wk_rh_decode_api_response_body( $pages_response ) : json_decode( wp_remote_retrieve_body( $pages_response ), true );
     if ( ! is_array( $pages ) ) {
         wk_rh_log_user_event( 'timeslots.request_failed', [
             'reason' => 'invalid_page_response',
@@ -1411,9 +1434,9 @@ function wk_rh_validate_main_booking_selection( $passed, $product_id, $quantity 
         return $passed;
     }
 
-    $bm_id = function_exists( 'get_field' )
-        ? get_field( 'bmileisure_id', $product_id )
-        : get_post_meta( $product_id, 'bmileisure_id', true );
+    $bm_id = function_exists( 'wk_rh_get_product_bmileisure_id' )
+        ? wk_rh_get_product_bmileisure_id( $product_id )
+        : '';
 
     if ( empty( $bm_id ) ) {
         return $passed;
@@ -1731,7 +1754,9 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
         ],
     ];
 
-    $url = $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/payment/confirm';
+    $url = function_exists( 'wk_rh_build_bmi_client_url' )
+        ? wk_rh_build_bmi_client_url( $creds, 'api', 'payment/confirm' )
+        : $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/payment/confirm';
     $response = wk_rh_remote_request_with_retry(
         'POST',
         $url,
@@ -1742,7 +1767,7 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
                 'Accept-Language'      => $creds['accept_language'],
                 'Bmi-Subscription-Key' => $creds['subscription_key'],
             ],
-            'body'    => wp_json_encode( $payload ),
+            'body'    => wp_json_encode( function_exists( 'wk_rh_prepare_api_payload' ) ? wk_rh_prepare_api_payload( $payload ) : $payload ),
             'timeout' => 30,
         ],
         3,
@@ -1767,15 +1792,15 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
 
     $code = (int) wp_remote_retrieve_response_code( $response );
     $response_body = wp_remote_retrieve_body( $response );
-    $response_data = json_decode( $response_body, true );
+    $response_data = function_exists( 'wk_rh_normalize_api_response' ) ? wk_rh_normalize_api_response( json_decode( $response_body, true ) ) : json_decode( $response_body, true );
     $payment_success = ! is_array( $response_data ) || ! array_key_exists( 'success', $response_data ) || $response_data['success'] !== false;
 
     if ( $code >= 200 && $code < 300 && $payment_success ) {
         wk_rh_mark_payment_confirmed( $order, $response_body );
     } else {
         $error_message = 'Onsite booking payment/confirm failed';
-        if ( is_array( $response_data ) && ! empty( $response_data['errormessage'] ) ) {
-            $error_message .= ': ' . sanitize_text_field( (string) $response_data['errormessage'] );
+        if ( is_array( $response_data ) && ! empty( $response_data['errorMessage'] ) ) {
+            $error_message .= ': ' . sanitize_text_field( (string) $response_data['errorMessage'] );
         } else {
             $error_message .= ' with HTTP ' . $code;
         }
@@ -1816,14 +1841,18 @@ function wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location = '', 
     }
 
     $paths = [
-        '/api/' . rawurlencode( $creds['client_key'] ) . '/order/' . rawurlencode( (string) $upstream_order_id ) . '/cancel',
-        '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/bill/' . rawurlencode( (string) $upstream_order_id ) . '/cancel',
+        function_exists( 'wk_rh_build_bmi_client_url' )
+            ? wk_rh_build_bmi_client_url( $creds, 'api', 'order/' . rawurlencode( (string) $upstream_order_id ) . '/cancel' )
+            : $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/order/' . rawurlencode( (string) $upstream_order_id ) . '/cancel',
+        function_exists( 'wk_rh_build_bmi_client_url' )
+            ? wk_rh_build_bmi_client_url( $creds, 'booking', 'bill/' . rawurlencode( (string) $upstream_order_id ) . '/cancel' )
+            : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/bill/' . rawurlencode( (string) $upstream_order_id ) . '/cancel',
     ];
 
     foreach ( $paths as $path ) {
         $response = wk_rh_remote_request_with_retry(
             'DELETE',
-            $creds['base_url'] . $path,
+            $path,
             [
                 'headers' => [
                     'Authorization'        => 'Bearer ' . $token,
@@ -1848,7 +1877,7 @@ function wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location = '', 
 
         $code = (int) wp_remote_retrieve_response_code( $response );
         $response_body = wp_remote_retrieve_body( $response );
-        $response_data = json_decode( $response_body, true );
+        $response_data = function_exists( 'wk_rh_normalize_api_response' ) ? wk_rh_normalize_api_response( json_decode( $response_body, true ) ) : json_decode( $response_body, true );
         $cancel_success = $code >= 200 && $code < 300
             && ( ! is_array( $response_data ) || ! array_key_exists( 'success', $response_data ) || $response_data['success'] !== false );
 

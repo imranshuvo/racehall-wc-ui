@@ -10,10 +10,10 @@ if (!$product || !is_a($product, 'WC_Product')) {
 // --- Example Usage for Server-side Rendering (optional, not used by AJAX) ---
 $bm_id = function_exists( 'wk_rh_get_product_bmileisure_id' )
     ? wk_rh_get_product_bmileisure_id( $product->get_id() )
-    : ( function_exists( 'get_field' ) ? get_field( 'bmileisure_id', $product->get_id() ) : get_post_meta( $product->get_id(), 'bmileisure_id', true ) );
+    : '';
 $lokation = function_exists( 'wk_rh_get_product_booking_location' )
     ? wk_rh_get_product_booking_location( $product->get_id() )
-    : ( function_exists( 'get_field' ) ? get_field( 'lokation', $product->get_id() ) : get_post_meta( $product->get_id(), 'lokation', true ) );
+    : '';
 $availability = [];
 $timeslots = [];
 
@@ -75,6 +75,7 @@ window.RH_I18N = {
     adultKartLabel: <?php echo wp_json_encode( __( 'voksen karts', 'racehall-wc-ui' ) ); ?>,
     childKartLabel: <?php echo wp_json_encode( __( 'børne kart', 'racehall-wc-ui' ) ); ?>,
     twinKartLabel: <?php echo wp_json_encode( __( 'twin kart', 'racehall-wc-ui' ) ); ?>,
+    selectQuantityTimeslotsMessage: <?php echo wp_json_encode( __( 'Vælg antal personer for at se ledige tider. Det valgte antal bestemmer hvilke tider der vises.', 'racehall-wc-ui' ) ); ?>,
     monthNames: <?php echo wp_json_encode( [
         __( 'januar', 'racehall-wc-ui' ),
         __( 'februar', 'racehall-wc-ui' ),
@@ -195,11 +196,11 @@ window.RH_I18N = {
                         <?php
                         // Read ACF (fall back to postmeta). Adjust field keys if needed.
                         if ( function_exists( 'get_field' ) ) {
-                            $lokation  = function_exists( 'wk_rh_get_product_booking_location' ) ? wk_rh_get_product_booking_location( $product->get_id() ) : get_field( 'lokation', $product->get_id() );
+                            $lokation  = function_exists( 'wk_rh_get_product_booking_location' ) ? wk_rh_get_product_booking_location( $product->get_id() ) : '';
                             $event_tid = get_field( 'event_tid', $product->get_id() );
                             $banetid   = get_field( 'banetid', $product->get_id() );
                         } else {
-                            $lokation  = function_exists( 'wk_rh_get_product_booking_location' ) ? wk_rh_get_product_booking_location( $product->get_id() ) : get_post_meta( $product->get_id(), 'lokation', true );
+                            $lokation  = function_exists( 'wk_rh_get_product_booking_location' ) ? wk_rh_get_product_booking_location( $product->get_id() ) : '';
                             $event_tid = get_post_meta( $product->get_id(), 'event tid', true );
                             $banetid   = get_post_meta( $product->get_id(), 'banetid', true );
                         }

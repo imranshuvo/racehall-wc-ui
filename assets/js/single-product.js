@@ -555,7 +555,7 @@ async function scheduleTimeslotRefreshForCurrentDate() {
 
     if (getTotalQuantity() <= 0) {
         clearTimeslotsBusyState()
-        renderTimeslotsMessage('Vælg antal personer for at se ledige tider. Det valgte antal bestemmer hvilke tider der vises.')
+        renderTimeslotsMessage((window.RH_I18N && window.RH_I18N.selectQuantityTimeslotsMessage) || '')
         return
     }
 
@@ -573,7 +573,7 @@ async function scheduleTimeslotRefreshForCurrentDate() {
         }
         if (getTotalQuantity() <= 0) {
             clearTimeslotsBusyState()
-            renderTimeslotsMessage('Vælg antal personer for at se ledige tider. Det valgte antal bestemmer hvilke tider der vises.')
+            renderTimeslotsMessage((window.RH_I18N && window.RH_I18N.selectQuantityTimeslotsMessage) || '')
             return
         }
 

@@ -42,13 +42,15 @@ function wk_rh_normalize_direct_booking_compare_value( $value ) {
 function wk_rh_get_direct_booking_product_location( $product_id ) {
     $location = function_exists( 'wk_rh_get_product_booking_location' )
         ? wk_rh_get_product_booking_location( $product_id )
-        : ( function_exists( 'get_field' ) ? get_field( 'lokation', $product_id ) : get_post_meta( $product_id, 'lokation', true ) );
+        : '';
 
     return is_string( $location ) ? sanitize_text_field( $location ) : '';
 }
 
 function wk_rh_get_direct_booking_bm_product_id( $product_id ) {
-    $bm_product_id = function_exists( 'get_field' ) ? get_field( 'bmileisure_id', $product_id ) : get_post_meta( $product_id, 'bmileisure_id', true );
+    $bm_product_id = function_exists( 'wk_rh_get_product_bmileisure_id' )
+        ? wk_rh_get_product_bmileisure_id( $product_id )
+        : '';
 
     return is_scalar( $bm_product_id ) ? sanitize_text_field( (string) $bm_product_id ) : '';
 }
@@ -83,6 +85,9 @@ function wk_rh_resolve_direct_booking_product() {
 
         if ( ! empty( $posts[0] ) ) {
             $product_id = (int) $posts[0];
+            if ( function_exists( 'wk_rh_get_current_language_product_id' ) ) {
+                $product_id = wk_rh_get_current_language_product_id( $product_id );
+            }
         }
     }
 
@@ -178,7 +183,9 @@ function wk_rh_get_direct_booking_page_context( $token, $bm_product_id, $booking
         return new WP_Error( 'missing_api_credentials', __( 'Bookingopsætningen for lokationen er ikke komplet.', 'racehall-wc-ui' ) );
     }
 
-    $pages_url = $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/page?date=' . rawurlencode( $booking_date . 'T00:00:00.000Z' );
+    $pages_url = function_exists( 'wk_rh_build_bmi_client_url' )
+        ? wk_rh_build_bmi_client_url( $creds, 'booking', 'page', [ 'date' => $booking_date . 'T00:00:00.000Z' ] )
+        : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/page?date=' . rawurlencode( $booking_date . 'T00:00:00.000Z' );
     $response = wk_rh_remote_request_with_retry(
         'GET',
         $pages_url,
@@ -204,7 +211,7 @@ function wk_rh_get_direct_booking_page_context( $token, $bm_product_id, $booking
         return new WP_Error( 'page_lookup_failed', __( 'Kunne ikke hente ledige bookingpages.', 'racehall-wc-ui' ) );
     }
 
-    $pages = json_decode( wp_remote_retrieve_body( $response ), true );
+    $pages = function_exists( 'wk_rh_decode_api_response_body' ) ? wk_rh_decode_api_response_body( $response ) : json_decode( wp_remote_retrieve_body( $response ), true );
     if ( ! is_array( $pages ) ) {
         return new WP_Error( 'invalid_page_response', __( 'Bookingdata fra upstream kunne ikke læses.', 'racehall-wc-ui' ) );
     }

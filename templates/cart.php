@@ -18,7 +18,9 @@ if ( function_exists( 'WC' ) && ! WC()->cart->is_empty() ) {
         $prod     = $cart_item['data'];
         $prod_id  = $prod->get_id();
         $date     = $cart_item['booking_date'] ?? null;
-        $bm_value = function_exists( 'get_field' ) ? get_field( 'bmileisure_id', $prod_id ) : get_post_meta( $prod_id, 'bmileisure_id', true );
+        $bm_value = function_exists( 'wk_rh_get_product_bmileisure_id' )
+            ? wk_rh_get_product_bmileisure_id( $prod_id )
+            : '';
         if ( $bm_value ) {
             $racehall_product_id = intval( $bm_value );
             break;
