@@ -100,11 +100,14 @@ footer{
 }
 
 .product-info {
-    width: 412px;
+    width: 450px;
     padding: 0 0px;
     display: flex;
     flex-direction: column;
     gap: 20px;
+}
+.product-description h3 {
+    color: white;
 }
 
 .product-title {

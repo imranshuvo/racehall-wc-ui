@@ -37,6 +37,13 @@ const PARTY_HIDDEN_IDS = {
     children: 'booking_children',
     twin: 'booking_twin'
 }
+const LOCAL_BROWSER_CAPACITY_LIMITS = {
+    aarhus: { total: 34, adults: 34, children: 8, twin: 2 },
+    kobenhavn: { total: 38, adults: 38, children: 14, twin: 2 },
+    stockholm: { total: 34, adults: 34, children: 14, twin: 2 }
+}
+const FAMILY_RACE_NAME_TOKENS = ['family', 'familie', 'familj']
+const CLOSED_RACE_NAME_TOKENS = ['closed', 'lukket', 'stangd', 'stangt', 'sluten', 'slutet']
 
 function logBookingClientEvent(eventName, context = {}) {
     const logger = window.RH_LOGGER || null
@@ -175,11 +182,158 @@ function getCurrentBookingProductId(productId = null) {
     return String(window.RH_PRODUCT_ID || '').trim()
 }
 
+function normalizeRaceNameLookup(nameValue) {
+    let normalized = String(nameValue || '').trim().toLowerCase()
+    if (!normalized) return ''
+
+    normalized = normalized
+        .replace(/æ/g, 'ae')
+        .replace(/[øö]/g, 'o')
+        .replace(/[åä]/g, 'a')
+
+    if (typeof normalized.normalize === 'function') {
+        normalized = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    }
+
+    return normalized
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+}
+
+function productNameHasAnyToken(normalizedName, tokens) {
+    if (!normalizedName || !Array.isArray(tokens)) return false
+
+    return tokens.some((token) => token && normalizedName.includes(token))
+}
+
+function normalizeBrowserLocationKey(locationValue) {
+    let normalized = String(locationValue || '').trim().toLowerCase()
+    if (!normalized) return ''
+
+    normalized = normalized
+        .replace(/æ/g, 'ae')
+        .replace(/ø/g, 'o')
+        .replace(/å/g, 'aa')
+
+    if (typeof normalized.normalize === 'function') {
+        normalized = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    }
+
+    const spaced = normalized
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    const compact = spaced.replace(/\s+/g, '')
+
+    if (/\b(kobenhavn|copenhagen|kbh|cph)\b/.test(spaced) || compact.includes('kobenhavn') || compact.includes('copenhagen')) {
+        return 'kobenhavn'
+    }
+
+    if (/\b(stockholm)\b/.test(spaced) || compact.includes('stockholm')) {
+        return 'stockholm'
+    }
+
+    if (/\b(aarhus|arhus)\b/.test(spaced) || compact.includes('aarhus') || compact.includes('arhus')) {
+        return 'aarhus'
+    }
+
+    return ''
+}
+
 function getSelectedPageProduct(pageProducts, productId = null) {
     const resolvedProductId = getCurrentBookingProductId(productId)
     if (!resolvedProductId || !Array.isArray(pageProducts)) return null
 
     return pageProducts.find((pageProduct) => pageProduct && String(pageProduct.id || '').trim() === resolvedProductId) || null
+}
+
+function getCurrentBookingProductName(pageProducts = [], productId = null) {
+    const selectedPageProduct = getSelectedPageProduct(pageProducts, productId)
+    if (selectedPageProduct && selectedPageProduct.name) {
+        return String(selectedPageProduct.name)
+    }
+
+    const heading = document.querySelector('.product-title')
+    return heading && heading.textContent ? String(heading.textContent) : ''
+}
+
+function detectBrowserRaceType(pageProducts = [], productId = null) {
+    const productName = normalizeRaceNameLookup(getCurrentBookingProductName(pageProducts, productId))
+    if (!productName) return 'other'
+
+    if (productNameHasAnyToken(productName, FAMILY_RACE_NAME_TOKENS)) {
+        return 'family'
+    }
+
+    if (productNameHasAnyToken(productName, CLOSED_RACE_NAME_TOKENS)) {
+        return 'closed'
+    }
+
+    return 'other'
+}
+
+function isTwinSelectionAllowed(pageProducts = currentPageProducts, productId = null) {
+    const raceType = detectBrowserRaceType(pageProducts, productId)
+    return raceType === 'family' || raceType === 'closed'
+}
+
+function updateTwinFieldVisibility(pageProducts = currentPageProducts, productId = null) {
+    const isAllowed = isTwinSelectionAllowed(pageProducts, productId)
+    const twinInput = document.getElementById(PARTY_INPUT_IDS.twin)
+    const twinRow = twinInput ? twinInput.closest('.counter-row') : null
+
+    if (twinRow) {
+        twinRow.hidden = !isAllowed
+        twinRow.querySelectorAll('button, input').forEach((element) => {
+            if ('disabled' in element) {
+                element.disabled = !isAllowed
+            }
+        })
+    }
+
+    return isAllowed
+}
+
+function mergeRuleMax(rule, maxValue) {
+    if (!rule) return
+
+    const nextMax = parseRuleNumber(maxValue, null)
+    if (nextMax === null) return
+
+    const currentMax = parseRuleNumber(rule.max, null)
+    rule.max = currentMax === null ? nextMax : Math.min(currentMax, nextMax)
+
+    const min = parseRuleNumber(rule.min, 0)
+    if (parseRuleNumber(rule.max, null) !== null && rule.max < min) {
+        rule.max = min
+    }
+}
+
+function applyLocalBrowserCapacityRules(rules, pageProducts = [], productId = null) {
+    const locationKey = normalizeBrowserLocationKey(getBookingLocation())
+    const locationLimits = LOCAL_BROWSER_CAPACITY_LIMITS[locationKey] || null
+    if (!locationLimits) return rules
+
+    const raceType = detectBrowserRaceType(pageProducts, productId)
+    const totalMax = raceType === 'family'
+        ? Math.min(locationLimits.total, 25)
+        : locationLimits.total
+    const twinMax = raceType === 'family' || raceType === 'closed'
+        ? locationLimits.twin
+        : 0
+
+    mergeRuleMax(rules.total, totalMax)
+    mergeRuleMax(rules.adults, locationLimits.adults)
+    mergeRuleMax(rules.children, locationLimits.children)
+    mergeRuleMax(rules.twin, twinMax)
+
+    if (twinMax === 0) {
+        rules.twin.min = 0
+        rules.twin.quantity = 0
+    }
+
+    return rules
 }
 
 function resolveGroupTargetKey(group) {
@@ -296,7 +450,7 @@ function extractRulesFromSources(proposal, pageProductLimits = null, pageProduct
         }
     })
 
-    return rules
+    return applyLocalBrowserCapacityRules(rules, pageProducts, productId)
 }
 
 function clampByRule(value, rule) {
@@ -663,11 +817,23 @@ function setNumericInputRules(input, rule, value, fallbackMin = 0) {
 }
 
 function updateCounterButtonStates(counts) {
+    const twinAllowed = isTwinSelectionAllowed()
+
     PARTY_KEYS.forEach((key) => {
         const valueElement = document.getElementById(PARTY_INPUT_IDS[key])
         const controls = valueElement ? valueElement.parentElement : null
         const decButton = controls ? controls.querySelector('button:nth-of-type(1)') : null
         const incButton = controls ? controls.querySelector('button:nth-of-type(2)') : null
+
+        if (key === 'twin' && !twinAllowed) {
+            if (valueElement && 'disabled' in valueElement) valueElement.disabled = true
+            if (decButton) decButton.disabled = true
+            if (incButton) incButton.disabled = true
+            return
+        }
+
+        if (valueElement && 'disabled' in valueElement) valueElement.disabled = false
+
         const rule = currentQuantityRules[key] || { min: 0, max: null }
         const min = parseRuleNumber(rule.min, 0)
         const max = parseRuleNumber(rule.max, null)
@@ -693,6 +859,7 @@ function syncQuantityConstraintsToForm(counts) {
     setNumericInputRules(cartQuantityInput, currentQuantityRules.total, total, 1)
 
     updateCounterButtonStates(counts)
+    updateTwinFieldVisibility()
 }
 
 function applyPageQuantityRules(pageProductLimits = null, pageProducts = [], productId = null, changedKey = 'adults') {
@@ -821,6 +988,7 @@ function updateSummaryPeople() {
     const counts = enforceCountsByRules(getPartyCounts(), 'adults')
     applyCountsToUI(counts)
     const total = getTotalQuantity()
+    const showTwin = updateTwinFieldVisibility()
 
     const peopleEl = document.getElementById('summary-people')
     const i18n = window.RH_I18N || {}
@@ -832,12 +1000,20 @@ function updateSummaryPeople() {
     const twinKartLabel = i18n.twinKartLabel || ''
 
     if (peopleEl) {
-        peopleEl.innerHTML = `${counts.adults} ${adultsLabel}<br>${counts.children} ${childrenLabel}<br>${counts.twin} ${twinLabel}`
+        const lines = [`${counts.adults} ${adultsLabel}`, `${counts.children} ${childrenLabel}`]
+        if (showTwin) {
+            lines.push(`${counts.twin} ${twinLabel}`)
+        }
+        peopleEl.innerHTML = lines.join('<br>')
     }
 
     const kartsEl = document.getElementById('summary-karts')
     if (kartsEl) {
-        kartsEl.innerHTML = `${counts.adults} ${adultKartLabel}<br>${counts.children} ${childKartLabel}<br>${counts.twin} ${twinKartLabel}`
+        const lines = [`${counts.adults} ${adultKartLabel}`, `${counts.children} ${childKartLabel}`]
+        if (showTwin) {
+            lines.push(`${counts.twin} ${twinKartLabel}`)
+        }
+        kartsEl.innerHTML = lines.join('<br>')
     }
 
     syncQuantityConstraintsToForm(counts)

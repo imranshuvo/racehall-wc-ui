@@ -32,6 +32,9 @@ $hold_ctx = function_exists( 'wk_rh_get_cart_hold_expiry_context' )
     ? wk_rh_get_cart_hold_expiry_context()
     : [ 'expires_at' => 0, 'order_id' => '' ];
 $hold_expires_at = isset( $hold_ctx['expires_at'] ) ? (int) $hold_ctx['expires_at'] : 0;
+$booking_time_label = function_exists( 'wk_rh_get_booking_time_display_label' )
+    ? wk_rh_get_booking_time_display_label()
+    : __( 'Tidspunkt (Mødetid 30 minutter før.)', 'racehall-wc-ui' );
 ?>
 
 <script>
@@ -265,7 +268,7 @@ window.RH_CHECKOUT_I18N = {
 </div>
 
 <div class="summary-section">
-    <h3 class="summary-label"><?php esc_html_e( 'Tidspunkt', 'racehall-wc-ui' ); ?></h3>
+    <h3 class="summary-label"><?php echo esc_html( $booking_time_label ); ?></h3>
     <span class="summary-text"><?php echo esc_html( $time ); ?></span>
 </div>
 

@@ -389,7 +389,7 @@
                         <tr>
                             <td><code>location</code></td>
                             <td><span class="required">Yes</span></td>
-                            <td>Booking location. Must match the product's configured location. URL-encode special characters.</td>
+                            <td>Booking location. If the Woo product already has a configured location, that value is used and this parameter is ignored if different. If the product has no configured location, this parameter is required. URL-encode special characters.</td>
                             <td><code>Aarhus</code></td>
                         </tr>
                         <tr>
@@ -431,7 +431,7 @@
                     <div class="rules">
                         <div class="rule"><strong>Format:</strong> Use exact date and time formats only.</div>
                         <div class="rule"><strong>Totals:</strong> If <code>quantity</code> is provided, it must equal <code>adults + children + twin</code>.</div>
-                        <div class="rule"><strong>Location:</strong> The location must match the product configuration.</div>
+                        <div class="rule"><strong>Location:</strong> Product configuration takes precedence over the URL parameter.</div>
                         <div class="rule"><strong>Slot lookup:</strong> If the slot cannot be resolved upstream, the booking is rejected.</div>
                     </div>
                 </section>

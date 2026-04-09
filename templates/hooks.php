@@ -454,8 +454,8 @@ function wk_rh_remove_upstream_order_item( $location, $order_id, $order_item_id 
     }
 
     $url = function_exists( 'wk_rh_build_bmi_client_url' )
-        ? wk_rh_build_bmi_client_url( $creds, 'api', 'booking/removeItem' )
-        : $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/booking/removeItem';
+        ? wk_rh_build_bmi_client_url( $creds, 'booking', 'booking/removeItem' )
+        : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/booking/removeItem';
     $response = wk_rh_remote_request_with_retry(
         'POST',
         $url,
@@ -529,8 +529,8 @@ function wk_rh_send_order_memo( $order ) {
     }
 
     $url = function_exists( 'wk_rh_build_bmi_client_url' )
-        ? wk_rh_build_bmi_client_url( $creds, 'api', 'booking/memo' )
-        : $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/booking/memo';
+        ? wk_rh_build_bmi_client_url( $creds, 'booking', 'booking/memo' )
+        : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/booking/memo';
     $payload = [
         'orderId' => ctype_digit( (string) $upstream_order_id ) ? (int) $upstream_order_id : (string) $upstream_order_id,
         'memo'    => $memo,
@@ -1493,12 +1493,16 @@ function wk_rh_validate_main_booking_selection( $passed, $product_id, $quantity 
 }
 
 add_filter( 'woocommerce_get_item_data', 'wk_rh_show_booking_data_in_cart', 10, 2 );
+function wk_rh_get_booking_time_display_label() {
+    return __( 'Tidspunkt (Mødetid 30 minutter før.)', 'racehall-wc-ui' );
+}
+
 function wk_rh_show_booking_data_in_cart( $item_data, $cart_item ) {
     if ( isset( $cart_item['booking_date'] ) ) {
         $item_data[] = [ 'name' => 'Dato', 'value' => $cart_item['booking_date'] ];
     }
     if ( isset( $cart_item['booking_time'] ) ) {
-        $item_data[] = [ 'name' => 'Tidspunkt', 'value' => $cart_item['booking_time'] ];
+        $item_data[] = [ 'name' => wk_rh_get_booking_time_display_label(), 'value' => $cart_item['booking_time'] ];
     }
     if ( isset( $cart_item['booking_location'] ) ) {
         $item_data[] = [ 'name' => 'Lokation', 'value' => $cart_item['booking_location'] ];
@@ -1519,7 +1523,7 @@ function wk_rh_get_checkout_booking_details_text( $cart_item ) {
         $parts[] = 'Dato: ' . sanitize_text_field( $cart_item['booking_date'] );
     }
     if ( ! empty( $cart_item['booking_time'] ) ) {
-        $parts[] = 'Tidspunkt: ' . sanitize_text_field( $cart_item['booking_time'] );
+        $parts[] = wk_rh_get_booking_time_display_label() . ': ' . sanitize_text_field( $cart_item['booking_time'] );
     }
     if ( ! empty( $cart_item['booking_location'] ) ) {
         $parts[] = 'Lokation: ' . sanitize_text_field( $cart_item['booking_location'] );
@@ -1741,22 +1745,38 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
 
     $transaction_id = $order->get_transaction_id();
     $external_id    = $transaction_id ? $transaction_id : 'wc-' . $order->get_id() . '-' . time();
+    $payment_method = (string) $order->get_payment_method();
 
     $payload = [
-        'id'          => $external_id,
-        'paymentTime' => gmdate( 'c' ),
-        'amount'      => (float) $order->get_total(),
-        'orderId'     => ctype_digit( (string) $upstream_order_id ) ? (int) $upstream_order_id : $upstream_order_id,
-        'extraData'   => [
-            'wcOrderId'      => (string) $order->get_id(),
-            'paymentMethod'  => (string) $order->get_payment_method(),
-            'transactionId'  => (string) $transaction_id,
+        'Id'          => $external_id,
+        'PaymentTime' => gmdate( 'Y-m-d\TH:i:s\Z' ),
+        'Amount'      => (float) $order->get_total(),
+        'OrderId'     => ctype_digit( (string) $upstream_order_id ) ? (int) $upstream_order_id : $upstream_order_id,
+        'ExtraData'   => [
+            'provider'      => $payment_method,
+            'transactionId' => (string) $transaction_id,
         ],
     ];
 
+    if ( '' === $payload['ExtraData']['provider'] ) {
+        unset( $payload['ExtraData']['provider'] );
+    }
+
+    if ( '' === $payload['ExtraData']['transactionId'] ) {
+        unset( $payload['ExtraData']['transactionId'] );
+    }
+
+    if ( $payment_method === 'cod' ) {
+        unset( $payload['ExtraData'] );
+    }
+
+    if ( empty( $payload['ExtraData'] ) ) {
+        unset( $payload['ExtraData'] );
+    }
+
     $url = function_exists( 'wk_rh_build_bmi_client_url' )
-        ? wk_rh_build_bmi_client_url( $creds, 'api', 'payment/confirm' )
-        : $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/payment/confirm';
+        ? wk_rh_build_bmi_client_url( $creds, 'booking', 'payment/confirm' )
+        : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/payment/confirm';
     $response = wk_rh_remote_request_with_retry(
         'POST',
         $url,
@@ -1767,7 +1787,7 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
                 'Accept-Language'      => $creds['accept_language'],
                 'Bmi-Subscription-Key' => $creds['subscription_key'],
             ],
-            'body'    => wp_json_encode( function_exists( 'wk_rh_prepare_api_payload' ) ? wk_rh_prepare_api_payload( $payload ) : $payload ),
+            'body'    => wp_json_encode( $payload ),
             'timeout' => 30,
         ],
         3,
@@ -1853,11 +1873,8 @@ function wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location = '', 
 
     $paths = [
         function_exists( 'wk_rh_build_bmi_client_url' )
-            ? wk_rh_build_bmi_client_url( $creds, 'api', 'order/' . rawurlencode( (string) $upstream_order_id ) . '/cancel' )
-            : $creds['base_url'] . '/api/' . rawurlencode( $creds['client_key'] ) . '/order/' . rawurlencode( (string) $upstream_order_id ) . '/cancel',
-        function_exists( 'wk_rh_build_bmi_client_url' )
-            ? wk_rh_build_bmi_client_url( $creds, 'booking', 'bill/' . rawurlencode( (string) $upstream_order_id ) . '/cancel' )
-            : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/bill/' . rawurlencode( (string) $upstream_order_id ) . '/cancel',
+            ? wk_rh_build_bmi_client_url( $creds, 'booking', 'order/' . rawurlencode( (string) $upstream_order_id ) . '/cancel' )
+            : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/order/' . rawurlencode( (string) $upstream_order_id ) . '/cancel',
     ];
 
     foreach ( $paths as $path ) {

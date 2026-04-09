@@ -22,6 +22,6 @@
 - If WordPress or WP-CLI inspection is ever required, first locate the actual site separately and use an explicit `--path=/actual/wordpress/root`.
 
 ## API Reference
-- Only authoritative BMI public booking API reference for this project: https://bmileisure.atlassian.net/wiki/external/YTYwMTA3YjAyNWVkNDAzMmJhNDkxZWE5OWZiYTc5YmM
-- Use only the link above for API contract questions unless the user explicitly replaces it with a newer BMI doc.
-- Do not rely on older saved Confluence exports, local PDF/text extracts, or previous BMI doc links for contract validation.
+- Preferred authoritative BMI public booking API reference for this project: `doc/Full Public Booking API Documentation - Confluence.html` when that file exists in the repo.
+- If the checked-in HTML export is missing or the user explicitly asks for a fresh source validation, fall back to: https://bmileisure.atlassian.net/wiki/external/YTYwMTA3YjAyNWVkNDAzMmJhNDkxZWE5OWZiYTc5YmM
+- Do not rely on older PDF/text extracts or previous BMI doc links for contract validation when the checked-in HTML export is available.

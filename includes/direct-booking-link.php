@@ -429,7 +429,12 @@ function wk_rh_handle_direct_booking_request() {
     }
 
     if ( $product_location !== '' && $requested_location !== '' && wk_rh_normalize_direct_booking_compare_value( $product_location ) !== wk_rh_normalize_direct_booking_compare_value( $requested_location ) ) {
-        wk_rh_fail_direct_booking_request( new WP_Error( 'location_mismatch', __( 'Bookinglinkens lokation matcher ikke produktet.', 'racehall-wc-ui' ) ), $product_context['redirectUrl'] );
+        wk_rh_log_user_event( 'direct_booking.location_mismatch_ignored', [
+            'productId'         => $product_context['productId'],
+            'bmProductId'       => $product_context['bmProductId'],
+            'productLocation'   => $product_location,
+            'requestedLocation' => $requested_location,
+        ], 'warning' );
     }
 
     $participants = wk_rh_get_direct_booking_participants();

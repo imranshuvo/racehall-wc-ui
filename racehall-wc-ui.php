@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.04
+ * Version: 2.08
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -49,7 +49,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.04' );
+define( 'RACEHALL_WC_UI_VERSION', '2.08' );
 
 function wk_rh_get_bmi_route_namespace( $route_group ) {
     $route_group = sanitize_key( (string) $route_group );
@@ -3887,7 +3887,8 @@ function wk_rh_get_supplement_quantity_bounds( array $supplement ) {
     $max_qty = null;
     foreach ( [ 'maxQuantity', 'maxQty', 'maximumQuantity', 'maximumQty', 'maxAmount', 'maximumAmount', 'maxamount' ] as $key ) {
         if ( isset( $supplement[ $key ] ) && is_numeric( $supplement[ $key ] ) ) {
-            $max_qty = (int) round( (float) $supplement[ $key ] );
+            $candidate_max_qty = (int) round( (float) $supplement[ $key ] );
+            $max_qty = $candidate_max_qty > 0 ? $candidate_max_qty : null;
             break;
         }
     }
