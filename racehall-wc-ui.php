@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.08
+ * Version: 2.17
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -49,7 +49,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.08' );
+define( 'RACEHALL_WC_UI_VERSION', '2.17' );
 
 function wk_rh_get_bmi_route_namespace( $route_group ) {
     $route_group = sanitize_key( (string) $route_group );
@@ -226,6 +226,395 @@ function wk_rh_ensure_log_directory( $environment = '' ) {
     }
 
     return $dir;
+}
+
+function wk_rh_get_availability_cache_entry_key( $product_id, $location = '' ) {
+    $normalized_product_id = is_scalar( $product_id ) ? trim( (string) $product_id ) : '';
+    $normalized_location = wk_rh_normalize_location_key( $location );
+
+    return $normalized_product_id . '|' . $normalized_location;
+}
+
+function wk_rh_get_availability_cache_date_range() {
+    try {
+        $timezone = function_exists( 'wp_timezone' ) ? wp_timezone() : new DateTimeZone( 'UTC' );
+        $range_start = new DateTimeImmutable( 'first day of this month 00:00:00', $timezone );
+        $range_end = $range_start->modify( 'last day of this month' );
+    } catch ( Exception $exception ) {
+        $range_start = new DateTimeImmutable( gmdate( 'Y-m-01 00:00:00' ) );
+        $range_end = $range_start->modify( 'last day of this month' );
+    }
+
+    return [
+        'dateFrom' => $range_start->format( 'Y-m-d' ),
+        'dateTill' => $range_end->format( 'Y-m-d' ),
+    ];
+}
+
+function wk_rh_get_availability_cache_directory( $location = '', $date_from = '' ) {
+    $base_dir = wk_rh_ensure_log_directory();
+    if ( $base_dir === '' ) {
+        return '';
+    }
+
+    $directory = trailingslashit( $base_dir ) . 'availability';
+    if ( ! wp_mkdir_p( $directory ) ) {
+        return '';
+    }
+
+    $index_file = trailingslashit( $directory ) . 'index.php';
+    if ( ! file_exists( $index_file ) ) {
+        @file_put_contents( $index_file, "<?php\n// Silence is golden.\n" );
+    }
+
+    return $directory;
+}
+
+function wk_rh_get_availability_cache_file_name( $product_id, $location = '', $date_from = '' ) {
+    $normalized_product_id = is_scalar( $product_id ) ? trim( (string) $product_id ) : '';
+    if ( $normalized_product_id === '' ) {
+        return '';
+    }
+
+    return sanitize_file_name( $normalized_product_id . '.json' );
+}
+
+function wk_rh_get_availability_cache_file_path( $product_id, $location = '', $date_from = '' ) {
+    $directory = wk_rh_get_availability_cache_directory( $location, $date_from );
+    $file_name = wk_rh_get_availability_cache_file_name( $product_id, $location, $date_from );
+    if ( $directory === '' || $file_name === '' ) {
+        return '';
+    }
+
+    return trailingslashit( $directory ) . $file_name;
+}
+
+function wk_rh_get_availability_cache_url( $product_id, $location = '', $date_from = '' ) {
+    $file_name = wk_rh_get_availability_cache_file_name( $product_id, $location, $date_from );
+    if ( $file_name === '' ) {
+        return '';
+    }
+
+    $upload_dir = wp_upload_dir();
+    $base_url = isset( $upload_dir['baseurl'] ) ? (string) $upload_dir['baseurl'] : '';
+    if ( $base_url === '' ) {
+        return '';
+    }
+
+    $environment = wk_rh_get_log_environment() === 'live' ? 'live' : 'testapi';
+
+    return trailingslashit( $base_url ) . 'onsite-booking/' . $environment . '/availability/' . rawurlencode( $file_name );
+}
+
+function wk_rh_normalize_upstream_products_response( $products_response ) {
+    if ( ! is_array( $products_response ) ) {
+        return [];
+    }
+
+    if ( isset( $products_response[0] ) && is_array( $products_response[0] ) ) {
+        return $products_response;
+    }
+
+    if ( isset( $products_response['items'] ) && is_array( $products_response['items'] ) ) {
+        return $products_response['items'];
+    }
+
+    if ( isset( $products_response['products'] ) && is_array( $products_response['products'] ) ) {
+        return $products_response['products'];
+    }
+
+    return [];
+}
+
+function wk_rh_get_availability_cache_products() {
+    if ( ! function_exists( 'wk_rh_get_token' ) || ! function_exists( 'wk_rh_get_products' ) ) {
+        return [];
+    }
+
+    $profiles = wk_rh_get_location_profiles();
+    if ( empty( $profiles ) ) {
+        return [];
+    }
+
+    $products = [];
+    foreach ( $profiles as $profile ) {
+        if ( ! is_array( $profile ) ) {
+            continue;
+        }
+
+        $location = isset( $profile['location'] ) ? wk_rh_sanitize_location_value( $profile['location'] ) : '';
+        $creds = wk_rh_get_profile_api_credentials( $profile );
+        $client_key = isset( $creds['client_key'] ) ? trim( (string) $creds['client_key'] ) : '';
+        if ( $client_key === '' ) {
+            continue;
+        }
+
+        $token = wk_rh_get_token( $location, $creds );
+        if ( ! $token ) {
+            wk_rh_log_user_event( 'availability_cache.catalog_skipped', [
+                'reason' => 'missing_token',
+                'location' => $location,
+                'clientKey' => $client_key,
+            ], 'warning' );
+            continue;
+        }
+
+        $catalog = wk_rh_normalize_upstream_products_response( wk_rh_get_products( $token, $location, $creds ) );
+        if ( empty( $catalog ) ) {
+            wk_rh_log_user_event( 'availability_cache.catalog_skipped', [
+                'reason' => 'empty_products_response',
+                'location' => $location,
+                'clientKey' => $client_key,
+            ], 'warning' );
+            continue;
+        }
+
+        foreach ( $catalog as $product ) {
+            if ( ! is_array( $product ) ) {
+                continue;
+            }
+
+            $bm_product_id = isset( $product['id'] ) ? trim( (string) $product['id'] ) : '';
+            if ( $bm_product_id === '' ) {
+                continue;
+            }
+
+            if ( ! isset( $products[ $bm_product_id ] ) ) {
+                $products[ $bm_product_id ] = [
+                    'productId' => (string) $bm_product_id,
+                    'location'  => (string) $location,
+                    'clientKey' => (string) $client_key,
+                    'token' => (string) $token,
+                    'credentials' => $creds,
+                ];
+                continue;
+            }
+
+            if ( $products[ $bm_product_id ]['location'] === '' && $location !== '' ) {
+                $products[ $bm_product_id ]['location'] = (string) $location;
+            }
+        }
+    }
+
+    return array_values( $products );
+}
+
+function wk_rh_normalize_availability_cache_activities( $activities ) {
+    if ( ! is_array( $activities ) ) {
+        return [];
+    }
+
+    $normalized = [];
+    foreach ( $activities as $activity ) {
+        if ( ! is_array( $activity ) || ! isset( $activity['date'] ) ) {
+            continue;
+        }
+
+        $date = sanitize_text_field( (string) $activity['date'] );
+        if ( $date === '' ) {
+            continue;
+        }
+
+        $normalized[] = [
+            'date'   => $date,
+            'status' => isset( $activity['status'] ) ? (int) $activity['status'] : 1,
+        ];
+    }
+
+    return $normalized;
+}
+
+function wk_rh_prepare_availability_cache_payload( $product_id, $location, array $availability, $date_from, $date_till ) {
+    if ( ! isset( $availability['activities'] ) || ! is_array( $availability['activities'] ) ) {
+        return [];
+    }
+
+    return [
+        'version' => 1,
+        'environment' => wk_rh_get_log_environment(),
+        'generatedAt' => gmdate( 'c' ),
+        'productId' => is_scalar( $product_id ) ? trim( (string) $product_id ) : '',
+        'location' => is_scalar( $location ) ? (string) $location : '',
+        'dateFrom' => is_scalar( $date_from ) ? trim( (string) $date_from ) : '',
+        'dateTill' => is_scalar( $date_till ) ? trim( (string) $date_till ) : '',
+        'activities' => wk_rh_normalize_availability_cache_activities( $availability['activities'] ),
+    ];
+}
+
+function wk_rh_build_availability_cache_payload( $product_id, $location, $token = '', array $range = [], array $creds = [] ) {
+    $product_id = is_scalar( $product_id ) ? trim( (string) $product_id ) : '';
+    $location = is_scalar( $location ) ? (string) $location : '';
+    if ( $product_id === '' ) {
+        return [];
+    }
+
+    if ( empty( $range['dateFrom'] ) || empty( $range['dateTill'] ) ) {
+        $range = wk_rh_get_availability_cache_date_range();
+    }
+
+    if ( ! $token ) {
+        $token = wk_rh_get_token( $location, $creds );
+    }
+
+    if ( ! $token ) {
+        wk_rh_log_user_event( 'availability_cache.product_skipped', [
+            'reason' => 'missing_token',
+            'productId' => $product_id,
+            'location' => $location,
+            'clientKey' => isset( $creds['client_key'] ) ? (string) $creds['client_key'] : '',
+        ], 'warning' );
+        return [];
+    }
+
+    $availability = wk_rh_get_availability( $token, $product_id, $range['dateFrom'], $range['dateTill'], $location, $creds );
+    if ( ! is_array( $availability ) || ! isset( $availability['activities'] ) || ! is_array( $availability['activities'] ) ) {
+        wk_rh_log_user_event( 'availability_cache.product_skipped', [
+            'reason' => 'invalid_upstream_response',
+            'productId' => $product_id,
+            'location' => $location,
+            'clientKey' => isset( $creds['client_key'] ) ? (string) $creds['client_key'] : '',
+        ], 'warning' );
+        return [];
+    }
+
+    return wk_rh_prepare_availability_cache_payload( $product_id, $location, $availability, $range['dateFrom'], $range['dateTill'] );
+}
+
+function wk_rh_read_availability_cache_payload( $product_id, $location = '', $date_from = '' ) {
+    $file_path = wk_rh_get_availability_cache_file_path( $product_id, $location, $date_from );
+    if ( $file_path === '' || ! is_file( $file_path ) ) {
+        return [];
+    }
+
+    $raw_contents = @file_get_contents( $file_path );
+    if ( ! is_string( $raw_contents ) || $raw_contents === '' ) {
+        return [];
+    }
+
+    $decoded = json_decode( $raw_contents, true );
+    return is_array( $decoded ) ? $decoded : [];
+}
+
+function wk_rh_write_availability_cache_payload( $product_id, $location, array $payload ) {
+    $date_from = isset( $payload['dateFrom'] ) ? (string) $payload['dateFrom'] : '';
+    $file_path = wk_rh_get_availability_cache_file_path( $product_id, $location, $date_from );
+    if ( $file_path === '' ) {
+        return false;
+    }
+
+    $json = wp_json_encode( $payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+    if ( ! is_string( $json ) || $json === '' ) {
+        return false;
+    }
+
+    $temp_file = $file_path . '.tmp';
+    if ( file_put_contents( $temp_file, $json, LOCK_EX ) === false ) {
+        return false;
+    }
+
+    if ( @rename( $temp_file, $file_path ) ) {
+        return true;
+    }
+
+    @unlink( $temp_file );
+
+    return file_put_contents( $file_path, $json, LOCK_EX ) !== false;
+}
+
+function wk_rh_has_current_month_availability_cache_files() {
+    $base_dir = wk_rh_ensure_log_directory();
+    if ( $base_dir === '' ) {
+        return false;
+    }
+
+    $availability_dir = trailingslashit( $base_dir ) . 'availability';
+    if ( ! is_dir( $availability_dir ) ) {
+        return false;
+    }
+
+    $files = glob( trailingslashit( $availability_dir ) . '*.json' );
+    return is_array( $files ) && ! empty( $files );
+}
+
+function wk_rh_schedule_availability_cache_prime() {
+    $next_prime = wp_next_scheduled( 'wk_rh_prime_availability_cache_event' );
+    if ( $next_prime && $next_prime <= ( time() + 300 ) ) {
+        return;
+    }
+
+    wp_schedule_single_event( time() + 10, 'wk_rh_prime_availability_cache_event' );
+}
+
+function wk_rh_refresh_availability_cache_run() {
+    $range = wk_rh_get_availability_cache_date_range();
+    $products = wk_rh_get_availability_cache_products();
+    $stats = [
+        'processed' => 0,
+        'written' => 0,
+        'failed' => 0,
+        'dateFrom' => $range['dateFrom'],
+        'dateTill' => $range['dateTill'],
+    ];
+
+    if ( empty( $products ) ) {
+        wk_rh_log_user_event( 'availability_cache.refresh_skipped', [
+            'reason' => 'no_mapped_products',
+            'dateFrom' => $range['dateFrom'],
+            'dateTill' => $range['dateTill'],
+        ], 'warning' );
+        return $stats;
+    }
+
+    foreach ( $products as $product ) {
+        $product_id = isset( $product['productId'] ) ? (string) $product['productId'] : '';
+        $location = isset( $product['location'] ) ? (string) $product['location'] : '';
+        $token = isset( $product['token'] ) ? (string) $product['token'] : '';
+        $creds = isset( $product['credentials'] ) && is_array( $product['credentials'] ) ? $product['credentials'] : [];
+        if ( $product_id === '' ) {
+            continue;
+        }
+
+        $stats['processed']++;
+        $payload = wk_rh_build_availability_cache_payload( $product_id, $location, $token, $range, $creds );
+        if ( empty( $payload ) ) {
+            $stats['failed']++;
+            continue;
+        }
+
+        if ( wk_rh_write_availability_cache_payload( $product_id, $location, $payload ) ) {
+            $stats['written']++;
+            continue;
+        }
+
+        $stats['failed']++;
+    }
+
+    wk_rh_log_user_event( $stats['written'] > 0 ? 'availability_cache.refresh_succeeded' : 'availability_cache.refresh_failed', [
+        'processed' => $stats['processed'],
+        'written' => $stats['written'],
+        'failed' => $stats['failed'],
+        'dateFrom' => $stats['dateFrom'],
+        'dateTill' => $stats['dateTill'],
+    ], $stats['written'] > 0 ? 'info' : 'error' );
+
+    return $stats;
+}
+
+function wk_rh_refresh_availability_cache() {
+    $stats = wk_rh_refresh_availability_cache_run();
+    return (int) $stats['written'] > 0;
+}
+
+if ( defined( 'WP_CLI' ) && WP_CLI ) {
+    WP_CLI::add_command( 'racehall availability-cache refresh', function() {
+        $stats = wk_rh_refresh_availability_cache_run();
+
+        if ( (int) $stats['written'] < 1 ) {
+            WP_CLI::error( sprintf( 'No cache files written. Processed: %1$d, failed: %2$d.', (int) $stats['processed'], (int) $stats['failed'] ) );
+        }
+
+        WP_CLI::success( sprintf( 'Wrote %1$d current-month cache files for %2$s to %3$s.', (int) $stats['written'], (string) $stats['dateFrom'], (string) $stats['dateTill'] ) );
+    } );
 }
 
 function wk_rh_normalize_log_channel( $channel ) {
@@ -1023,6 +1412,17 @@ function wk_rh_get_location_profiles() {
     return $normalized;
 }
 
+function wk_rh_get_profile_api_credentials( array $profile ) {
+    return [
+        'base_url'         => wk_rh_get_base_url(),
+        'accept_language'  => wk_rh_get_accept_language(),
+        'client_key'       => isset( $profile['client_key'] ) ? sanitize_text_field( (string) $profile['client_key'] ) : '',
+        'subscription_key' => isset( $profile['subscription_key'] ) ? sanitize_text_field( (string) $profile['subscription_key'] ) : '',
+        'username'         => isset( $profile['username'] ) ? sanitize_text_field( (string) $profile['username'] ) : '',
+        'password'         => isset( $profile['password'] ) ? (string) $profile['password'] : '',
+    ];
+}
+
 function wk_rh_get_effective_location_name( $location = '' ) {
     if ( ! empty( $location ) ) {
         return wk_rh_sanitize_location_value( $location );
@@ -1093,6 +1493,7 @@ function wk_rh_normalize_location_key( $location ) {
 function wk_rh_get_location_profile( $location = '' ) {
     $profiles      = wk_rh_get_location_profiles();
     $location_name = wk_rh_get_effective_location_name( $location );
+    $location_key  = wk_rh_normalize_location_key( $location_name );
 
     if ( $location_name === '' ) {
         if ( function_exists( 'wk_rh_log_upstream_event' ) ) {
@@ -1111,7 +1512,16 @@ function wk_rh_get_location_profile( $location = '' ) {
     }
 
     foreach ( $profiles as $profile ) {
-        if ( ! empty( $profile['location'] ) && strcasecmp( $profile['location'], $location_name ) === 0 ) {
+        $profile_location = isset( $profile['location'] ) ? (string) $profile['location'] : '';
+        if ( $profile_location === '' ) {
+            continue;
+        }
+
+        if ( strcasecmp( $profile_location, $location_name ) === 0 ) {
+            return $profile;
+        }
+
+        if ( $location_key !== '' && wk_rh_normalize_location_key( $profile_location ) === $location_key ) {
             return $profile;
         }
     }
@@ -1120,6 +1530,7 @@ function wk_rh_get_location_profile( $location = '' ) {
         wk_rh_log_upstream_event( 'error', 'No credential profile found for booking location', [
             'operation' => 'resolve_location_profile',
             'location' => (string) $location_name,
+            'normalizedLocation' => (string) $location_key,
         ] );
     }
 
@@ -1151,14 +1562,7 @@ function wk_rh_get_accept_language() {
 
 function wk_rh_get_api_credentials( $location = '' ) {
     $profile = wk_rh_get_location_profile( $location );
-    return [
-        'base_url'         => wk_rh_get_base_url(),
-        'accept_language'  => wk_rh_get_accept_language(),
-        'client_key'       => $profile['client_key'] ?? '',
-        'subscription_key' => $profile['subscription_key'] ?? '',
-        'username'         => $profile['username'] ?? '',
-        'password'         => $profile['password'] ?? '',
-    ];
+    return wk_rh_get_profile_api_credentials( is_array( $profile ) ? $profile : [] );
 }
 
 function wk_rh_sanitize_locations_json( $raw_json, $error_key ) {
@@ -1872,6 +2276,7 @@ function wk_rh_render_settings_page() {
     if ( ! current_user_can( 'manage_options' ) ) {
         return;
     }
+
     $settings = wk_rh_get_settings();
     ?>
     <div class="wrap">
@@ -1968,6 +2373,7 @@ function wk_rh_render_settings_page() {
             </table>
             <?php submit_button(); ?>
         </form>
+
         <script>
             (function () {
                 var envSelect = document.getElementById('wk_rh_environment');
@@ -2044,11 +2450,26 @@ add_action( 'init', function() {
     if ( ! wp_next_scheduled( 'wk_rh_expire_booking_holds_event' ) ) {
         wp_schedule_event( time() + 60, 'wk_rh_every_five_minutes', 'wk_rh_expire_booking_holds_event' );
     }
+
+    if ( ! wp_next_scheduled( 'wk_rh_refresh_availability_cache_event' ) ) {
+        wp_schedule_event( time() + 60, 'hourly', 'wk_rh_refresh_availability_cache_event' );
+    }
+
+    if ( ! wk_rh_has_current_month_availability_cache_files() ) {
+        wk_rh_schedule_availability_cache_prime();
+
+        if ( function_exists( 'spawn_cron' ) && ! wp_doing_cron() ) {
+            spawn_cron();
+        }
+    }
 } );
 
 add_action( 'wk_rh_expire_booking_holds_event', function() {
     wk_rh_process_expired_active_holds( 'cron' );
 } );
+
+add_action( 'wk_rh_refresh_availability_cache_event', 'wk_rh_refresh_availability_cache' );
+add_action( 'wk_rh_prime_availability_cache_event', 'wk_rh_refresh_availability_cache' );
 
 function wk_rh_get_upstream_products_cache_key( $location = '' ) {
     $settings = wk_rh_get_settings();
@@ -2424,9 +2845,16 @@ add_action('wp_enqueue_scripts', function() {
             RACEHALL_WC_UI_VERSION,
             true
         );
+        $product_id = get_queried_object_id();
+        $bm_product_id = $product_id > 0 ? wk_rh_get_product_bmileisure_id( $product_id ) : '';
+        $booking_location = $product_id > 0 ? wk_rh_get_product_booking_location( $product_id ) : '';
+        $availability_cache_range = wk_rh_get_availability_cache_date_range();
         wp_localize_script('racehall-single-product-js', 'my_ajax_object', [
             'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce'    => wp_create_nonce('my_ajax_nonce')
+            'nonce'    => wp_create_nonce('my_ajax_nonce'),
+            'availability_cache_url' => $bm_product_id !== '' ? wk_rh_get_availability_cache_url( $bm_product_id, $booking_location, $availability_cache_range['dateFrom'] ) : '',
+            'availability_cache_date_from' => $availability_cache_range['dateFrom'],
+            'availability_cache_date_till' => $availability_cache_range['dateTill'],
         ]);
         wp_localize_script( 'racehall-single-product-js', 'RH_LOGGER', array_merge( $logger_config, [ 'page_type' => 'product' ] ) );
     }

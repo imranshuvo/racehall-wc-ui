@@ -25,6 +25,8 @@ let pageRulesCache = {}
 let pendingPageRulesRequests = {}
 let activeTimeslotRequestController = null
 let latestTimeslotRequestId = 0
+let availabilityCachePayload = null
+let availabilityCachePromise = null
 const TIMESLOT_REFRESH_DEBOUNCE_MS = 450
 const PARTY_KEYS = ['adults', 'children', 'twin']
 const PARTY_INPUT_IDS = {
@@ -42,7 +44,7 @@ const LOCAL_BROWSER_CAPACITY_LIMITS = {
     kobenhavn: { total: 38, adults: 38, children: 14, twin: 2 },
     stockholm: { total: 34, adults: 34, children: 14, twin: 2 }
 }
-const FAMILY_RACE_NAME_TOKENS = ['family', 'familie', 'familj']
+const FAMILY_RACE_NAME_TOKENS = ['family', 'familie', 'familj','familje']
 const CLOSED_RACE_NAME_TOKENS = ['closed', 'lukket', 'stangd', 'stangt', 'sluten', 'slutet']
 
 function logBookingClientEvent(eventName, context = {}) {
@@ -705,13 +707,13 @@ async function scheduleTimeslotRefreshForCurrentDate() {
         return
     }
 
-    const pageRulesPromise = fetchPageQuantityRulesForDate(dateKey)
-
     if (getTotalQuantity() <= 0) {
         clearTimeslotsBusyState()
         renderTimeslotsMessage((window.RH_I18N && window.RH_I18N.selectQuantityTimeslotsMessage) || '')
         return
     }
+
+    const pageRulesPromise = fetchPageQuantityRulesForDate(dateKey)
 
     pendingTimeslotRefresh = window.setTimeout(async () => {
         pendingTimeslotRefresh = null
@@ -1272,6 +1274,133 @@ function getBookingLocation() {
     return field && field.value ? field.value : (window.RH_BOOKING_LOCATION || '')
 }
 
+function getAvailabilityCacheUrl() {
+    if (!window.my_ajax_object || !window.my_ajax_object.availability_cache_url) return ''
+    return String(window.my_ajax_object.availability_cache_url).trim()
+}
+
+function getAvailabilityCacheDateFrom() {
+    if (!window.my_ajax_object || !window.my_ajax_object.availability_cache_date_from) return ''
+    return String(window.my_ajax_object.availability_cache_date_from).trim()
+}
+
+function getAvailabilityCacheDateTill() {
+    if (!window.my_ajax_object || !window.my_ajax_object.availability_cache_date_till) return ''
+    return String(window.my_ajax_object.availability_cache_date_till).trim()
+}
+
+function buildAvailabilityCacheRequestUrl() {
+    const baseUrl = getAvailabilityCacheUrl()
+    if (!baseUrl) return ''
+
+    const separator = baseUrl.includes('?') ? '&' : '?'
+    return `${baseUrl}${separator}_=${Date.now()}`
+}
+
+async function loadAvailabilityCachePayload() {
+    if (availabilityCachePayload) return availabilityCachePayload
+
+    const requestUrl = buildAvailabilityCacheRequestUrl()
+    if (!requestUrl) return null
+
+    if (availabilityCachePromise) return availabilityCachePromise
+
+    availabilityCachePromise = (async () => {
+        try {
+            const res = await fetch(requestUrl, {
+                method: 'GET',
+                credentials: 'same-origin',
+                cache: 'no-store'
+            })
+            if (!res.ok) return null
+
+            const data = await res.json()
+            if (!data || typeof data !== 'object') return null
+
+            availabilityCachePayload = data
+            return availabilityCachePayload
+        } catch (e) {
+            availabilityCachePayload = null
+            return null
+        } finally {
+            availabilityCachePromise = null
+        }
+    })()
+
+    return availabilityCachePromise
+}
+
+function normalizeAvailabilityActivities(data) {
+    if (Array.isArray(data)) return data
+    if (data && Array.isArray(data.activities)) return data.activities
+    return null
+}
+
+function applyAvailabilityActivities(activities) {
+    availabilityMap = {}
+
+    if (Array.isArray(activities) && activities.length > 0) {
+        availabilityState = 'ok'
+        activities.forEach((activity) => {
+            const dateKey = String(activity && activity.date ? activity.date : '').split('T')[0]
+            if (!dateKey) return
+
+            const rawStatus = Number(activity && activity.status)
+            availabilityMap[dateKey] = Number.isFinite(rawStatus) ? rawStatus : 1
+        })
+    } else {
+        availabilityState = 'empty'
+    }
+
+    return availabilityMap
+}
+
+async function fetchAvailabilityFromCache(firstDay, lastDay) {
+    const cachePayload = await loadAvailabilityCachePayload()
+    if (!cachePayload) return null
+
+    const cacheFrom = getAvailabilityCacheDateFrom()
+    const cacheTill = getAvailabilityCacheDateTill()
+    if (!cacheFrom || !cacheTill || firstDay !== cacheFrom || lastDay !== cacheTill) return null
+
+    const activities = normalizeAvailabilityActivities(cachePayload)
+    return activities === null ? null : activities
+}
+
+async function fetchAvailabilityFromAjax(firstDay, lastDay) {
+    const res = await fetch(window.my_ajax_object.ajax_url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: new URLSearchParams({
+            action: 'rh_get_availability',
+            productId: window.RH_PRODUCT_ID,
+            dateFrom: firstDay,
+            dateTill: lastDay,
+            bookingLocation: getBookingLocation(),
+            nonce: window.my_ajax_object.nonce || ''
+        })
+    })
+
+    const text = await res.text()
+    let data
+    try {
+        data = JSON.parse(text)
+    } catch (e) {
+        throw new Error('invalid_calendar_payload')
+    }
+
+    const activities = normalizeAvailabilityActivities(data)
+    if (activities === null) {
+        throw new Error('invalid_calendar_payload')
+    }
+
+    return activities
+}
+
 async function fetchAvailabilityForMonth(month, year) {
     if (!isBookingProductAvailable()) {
         availabilityState = 'error'
@@ -1293,42 +1422,20 @@ async function fetchAvailabilityForMonth(month, year) {
     const firstDay = `${yyyy}-${mm}-01`
     const lastDay = `${yyyy}-${mm}-${new Date(year, month + 1, 0).getDate()}`
     try {
-        const res = await fetch(window.my_ajax_object.ajax_url, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            body: new URLSearchParams({
-                action: 'rh_get_availability',
-                productId: window.RH_PRODUCT_ID,
-                dateFrom: firstDay,
-                dateTill: lastDay,
-                bookingLocation: getBookingLocation(),
-                nonce: window.my_ajax_object.nonce || ''
-            })
-        })
-        const text = await res.text()
-        let data
-        try {
-            data = JSON.parse(text)
-        } catch (e) {
+        const cachedActivities = await fetchAvailabilityFromCache(firstDay, lastDay)
+        if (cachedActivities !== null) {
+            return applyAvailabilityActivities(cachedActivities)
+        }
+
+        const ajaxActivities = await fetchAvailabilityFromAjax(firstDay, lastDay)
+        return applyAvailabilityActivities(ajaxActivities)
+    } catch (err) {
+        if (err && err.message === 'invalid_calendar_payload') {
             availabilityState = 'error'
             showCalendarError('Fejl i kalenderdata. Prøv at genindlæse siden.')
             return {}
         }
-        availabilityMap = {}
-        if (Array.isArray(data.activities) && data.activities.length > 0) {
-            availabilityState = 'ok'
-            data.activities.forEach(a => {
-                availabilityMap[a.date.split('T')[0]] = a.status
-            })
-        } else {
-            availabilityState = 'empty'
-        }
-        return availabilityMap
-    } catch (err) {
+
         availabilityState = 'error'
         showCalendarError('Netværksfejl ved hentning af kalender.')
         return {}

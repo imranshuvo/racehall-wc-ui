@@ -71,10 +71,18 @@ function wk_rh_remote_request_with_retry( $method, $url, array $args = [], $atte
     return $last_response;
 }
 
-function wk_rh_get_token( $location = '' ) {
+function wk_rh_is_initial_calendar_month_request( $date_from, $date_till ) {
+    $range = function_exists( 'wk_rh_get_availability_cache_date_range' )
+        ? wk_rh_get_availability_cache_date_range()
+        : [ 'dateFrom' => '', 'dateTill' => '' ];
+
+    return (string) $date_from === $range['dateFrom'] && (string) $date_till === $range['dateTill'];
+}
+
+function wk_rh_get_token( $location = '', array $creds_override = [] ) {
     static $runtime_cache = [];
 
-    $creds = wk_rh_get_api_credentials( $location );
+    $creds = ! empty( $creds_override ) ? $creds_override : wk_rh_get_api_credentials( $location );
     if ( empty( $creds['base_url'] ) || empty( $creds['client_key'] ) || empty( $creds['subscription_key'] ) || empty( $creds['username'] ) || empty( $creds['password'] ) ) {
         return false;
     }
@@ -109,6 +117,7 @@ function wk_rh_get_token( $location = '' ) {
         [
             'operation' => 'auth',
             'location'  => (string) $location,
+            'clientKey' => (string) $creds['client_key'],
         ]
     );
 
@@ -593,8 +602,8 @@ function wk_rh_send_order_memo( $order ) {
     }
 }
 
-function wk_rh_get_products( $token, $location = '' ) {
-    $creds = wk_rh_get_api_credentials( $location );
+function wk_rh_get_products( $token, $location = '', array $creds_override = [] ) {
+    $creds = ! empty( $creds_override ) ? $creds_override : wk_rh_get_api_credentials( $location );
     if ( empty( $token ) || empty( $creds['base_url'] ) || empty( $creds['client_key'] ) || empty( $creds['subscription_key'] ) ) {
         return [];
     }
@@ -619,6 +628,7 @@ function wk_rh_get_products( $token, $location = '' ) {
         [
             'operation' => 'products_get',
             'location' => (string) $location,
+            'clientKey' => (string) $creds['client_key'],
         ]
     );
 
@@ -628,6 +638,7 @@ function wk_rh_get_products( $token, $location = '' ) {
             'method' => 'GET',
             'url' => $url,
             'location' => (string) $location,
+            'clientKey' => (string) $creds['client_key'],
             'error' => $response->get_error_message(),
         ] );
         return [];
@@ -635,8 +646,8 @@ function wk_rh_get_products( $token, $location = '' ) {
     return function_exists( 'wk_rh_decode_api_response_body' ) ? wk_rh_decode_api_response_body( $response ) : json_decode( wp_remote_retrieve_body( $response ), true );
 }
 
-function wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $location = '' ) {
-    $creds = wk_rh_get_api_credentials( $location );
+function wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $location = '', array $creds_override = [] ) {
+    $creds = ! empty( $creds_override ) ? $creds_override : wk_rh_get_api_credentials( $location );
     if ( empty( $token ) || empty( $creds['base_url'] ) || empty( $creds['client_key'] ) || empty( $creds['subscription_key'] ) ) {
         return [];
     }
@@ -672,6 +683,7 @@ function wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $l
             'operation' => 'availability_get',
             'location' => (string) $location,
             'productId' => (int) $product_id,
+            'clientKey' => (string) $creds['client_key'],
         ]
     );
 
@@ -682,6 +694,7 @@ function wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $l
             'url' => $url,
             'location' => (string) $location,
             'productId' => (int) $product_id,
+            'clientKey' => (string) $creds['client_key'],
             'error' => $response->get_error_message(),
         ] );
         return [];
@@ -710,6 +723,19 @@ function wk_rh_ajax_get_availability() {
     }
 
     $booking_location = isset( $_POST['bookingLocation'] ) ? sanitize_text_field( $_POST['bookingLocation'] ) : '';
+    $use_initial_month_cache = wk_rh_is_initial_calendar_month_request( $date_from, $date_till );
+    if ( $use_initial_month_cache && function_exists( 'wk_rh_read_availability_cache_payload' ) ) {
+        $cached_result = wk_rh_read_availability_cache_payload( $product_id, $booking_location, $date_from );
+        if ( is_array( $cached_result ) && isset( $cached_result['activities'] ) && is_array( $cached_result['activities'] ) ) {
+            wk_rh_log_user_event( 'availability.current_month_cache_hit', [
+                'productId' => $product_id,
+                'dateFrom' => $date_from,
+                'dateTill' => $date_till,
+                'bookingLocation' => $booking_location,
+            ] );
+            wp_send_json( $cached_result );
+        }
+    }
 
     $token = wk_rh_get_token( $booking_location );
     if ( ! $token ) {
@@ -724,6 +750,12 @@ function wk_rh_ajax_get_availability() {
     }
 
     $result = wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $booking_location );
+    if ( $use_initial_month_cache && function_exists( 'wk_rh_prepare_availability_cache_payload' ) && function_exists( 'wk_rh_write_availability_cache_payload' ) ) {
+        $cache_payload = wk_rh_prepare_availability_cache_payload( $product_id, $booking_location, is_array( $result ) ? $result : [], $date_from, $date_till );
+        if ( ! empty( $cache_payload ) ) {
+            wk_rh_write_availability_cache_payload( $product_id, $booking_location, $cache_payload );
+        }
+    }
     wk_rh_log_user_event( 'availability.request_succeeded', [
         'productId' => $product_id,
         'dateFrom' => $date_from,
@@ -1764,10 +1796,6 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
 
     if ( '' === $payload['ExtraData']['transactionId'] ) {
         unset( $payload['ExtraData']['transactionId'] );
-    }
-
-    if ( $payment_method === 'cod' ) {
-        unset( $payload['ExtraData'] );
     }
 
     if ( empty( $payload['ExtraData'] ) ) {
