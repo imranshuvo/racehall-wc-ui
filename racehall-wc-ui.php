@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.17
+ * Version: 2.19
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -49,7 +49,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.17' );
+define( 'RACEHALL_WC_UI_VERSION', '2.19' );
 
 function wk_rh_get_bmi_route_namespace( $route_group ) {
     $route_group = sanitize_key( (string) $route_group );
@@ -545,24 +545,129 @@ function wk_rh_schedule_availability_cache_prime() {
     wp_schedule_single_event( time() + 10, 'wk_rh_prime_availability_cache_event' );
 }
 
-function wk_rh_refresh_availability_cache_run() {
+function wk_rh_schedule_availability_cache_continue() {
+    if ( wp_next_scheduled( 'wk_rh_continue_availability_cache_event' ) ) {
+        return;
+    }
+
+    wp_schedule_single_event( time() + 15, 'wk_rh_continue_availability_cache_event' );
+}
+
+function wk_rh_clear_scheduled_availability_cache_continue() {
+    while ( $timestamp = wp_next_scheduled( 'wk_rh_continue_availability_cache_event' ) ) {
+        wp_unschedule_event( $timestamp, 'wk_rh_continue_availability_cache_event' );
+    }
+}
+
+function wk_rh_get_availability_cache_refresh_batch_size() {
+    $batch_size = (int) apply_filters( 'wk_rh_availability_cache_refresh_batch_size', 3 );
+
+    if ( $batch_size < 1 ) {
+        return 1;
+    }
+
+    return min( 10, $batch_size );
+}
+
+function wk_rh_sort_availability_cache_products( array $products ) {
+    usort( $products, function( $left, $right ) {
+        $left_id  = isset( $left['productId'] ) ? (string) $left['productId'] : '';
+        $right_id = isset( $right['productId'] ) ? (string) $right['productId'] : '';
+
+        return strnatcmp( $left_id, $right_id );
+    } );
+
+    return $products;
+}
+
+function wk_rh_get_availability_cache_refresh_state() {
+    $state = get_option( 'wk_rh_availability_cache_refresh_state', [] );
+
+    return is_array( $state ) ? $state : [];
+}
+
+function wk_rh_update_availability_cache_refresh_state( array $state ) {
+    update_option( 'wk_rh_availability_cache_refresh_state', $state, false );
+}
+
+function wk_rh_clear_availability_cache_refresh_state() {
+    delete_option( 'wk_rh_availability_cache_refresh_state' );
+}
+
+function wk_rh_has_pending_availability_cache_refresh() {
+    $state = wk_rh_get_availability_cache_refresh_state();
     $range = wk_rh_get_availability_cache_date_range();
-    $products = wk_rh_get_availability_cache_products();
+
+    $offset = isset( $state['offset'] ) ? (int) $state['offset'] : 0;
+
+    return $offset > 0
+        && isset( $state['dateFrom'], $state['dateTill'] )
+        && (string) $state['dateFrom'] === (string) $range['dateFrom']
+        && (string) $state['dateTill'] === (string) $range['dateTill'];
+}
+
+function wk_rh_get_availability_cache_refresh_lock_key() {
+    return 'wk_rh_availability_cache_refresh_lock';
+}
+
+function wk_rh_acquire_availability_cache_refresh_lock() {
+    $lock_key = wk_rh_get_availability_cache_refresh_lock_key();
+    if ( get_transient( $lock_key ) ) {
+        return false;
+    }
+
+    return set_transient( $lock_key, time(), 10 * MINUTE_IN_SECONDS );
+}
+
+function wk_rh_release_availability_cache_refresh_lock() {
+    delete_transient( wk_rh_get_availability_cache_refresh_lock_key() );
+}
+
+function wk_rh_refresh_availability_cache_run( $process_all = false ) {
+    $range = wk_rh_get_availability_cache_date_range();
+    $products = wk_rh_sort_availability_cache_products( wk_rh_get_availability_cache_products() );
+    $total_products = count( $products );
+    $batch_size = $process_all ? max( 1, $total_products ) : wk_rh_get_availability_cache_refresh_batch_size();
     $stats = [
         'processed' => 0,
         'written' => 0,
         'failed' => 0,
         'dateFrom' => $range['dateFrom'],
         'dateTill' => $range['dateTill'],
+        'total' => $total_products,
+        'batchSize' => $batch_size,
+        'offset' => 0,
+        'nextOffset' => 0,
+        'remaining' => 0,
+        'hasMore' => false,
+        'isFullRefresh' => (bool) $process_all,
     ];
 
     if ( empty( $products ) ) {
+        wk_rh_clear_availability_cache_refresh_state();
         wk_rh_log_user_event( 'availability_cache.refresh_skipped', [
             'reason' => 'no_mapped_products',
             'dateFrom' => $range['dateFrom'],
             'dateTill' => $range['dateTill'],
         ], 'warning' );
         return $stats;
+    }
+
+    if ( ! $process_all ) {
+        $state = wk_rh_get_availability_cache_refresh_state();
+        if (
+            isset( $state['dateFrom'], $state['dateTill'] )
+            && (string) $state['dateFrom'] === (string) $range['dateFrom']
+            && (string) $state['dateTill'] === (string) $range['dateTill']
+        ) {
+            $stats['offset'] = max( 0, (int) ( $state['offset'] ?? 0 ) );
+        }
+
+        if ( $stats['offset'] >= $total_products ) {
+            $stats['offset'] = 0;
+        }
+
+        $products = array_slice( $products, $stats['offset'], $batch_size );
     }
 
     foreach ( $products as $product ) {
@@ -589,31 +694,77 @@ function wk_rh_refresh_availability_cache_run() {
         $stats['failed']++;
     }
 
+    $stats['nextOffset'] = $process_all ? $total_products : ( $stats['offset'] + count( $products ) );
+    $stats['remaining'] = max( 0, $total_products - $stats['nextOffset'] );
+    $stats['hasMore'] = ! $process_all && $stats['nextOffset'] < $total_products;
+
+    if ( $stats['hasMore'] ) {
+        wk_rh_update_availability_cache_refresh_state( [
+            'dateFrom' => $range['dateFrom'],
+            'dateTill' => $range['dateTill'],
+            'offset' => $stats['nextOffset'],
+            'total' => $total_products,
+            'updatedAt' => gmdate( 'c' ),
+        ] );
+    } else {
+        wk_rh_clear_availability_cache_refresh_state();
+    }
+
     wk_rh_log_user_event( $stats['written'] > 0 ? 'availability_cache.refresh_succeeded' : 'availability_cache.refresh_failed', [
         'processed' => $stats['processed'],
         'written' => $stats['written'],
         'failed' => $stats['failed'],
         'dateFrom' => $stats['dateFrom'],
         'dateTill' => $stats['dateTill'],
+        'total' => $stats['total'],
+        'batchSize' => $stats['batchSize'],
+        'offset' => $stats['offset'],
+        'nextOffset' => $stats['nextOffset'],
+        'remaining' => $stats['remaining'],
+        'hasMore' => $stats['hasMore'],
+        'isFullRefresh' => $stats['isFullRefresh'],
     ], $stats['written'] > 0 ? 'info' : 'error' );
 
     return $stats;
 }
 
 function wk_rh_refresh_availability_cache() {
-    $stats = wk_rh_refresh_availability_cache_run();
+    if ( ! wk_rh_acquire_availability_cache_refresh_lock() ) {
+        wk_rh_log_user_event( 'availability_cache.refresh_skipped', [
+            'reason' => 'refresh_already_running',
+        ], 'warning' );
+
+        return false;
+    }
+
+    try {
+        $stats = wk_rh_refresh_availability_cache_run();
+    } finally {
+        wk_rh_release_availability_cache_refresh_lock();
+    }
+
+    if ( ! empty( $stats['hasMore'] ) ) {
+        wk_rh_schedule_availability_cache_continue();
+
+        if ( function_exists( 'spawn_cron' ) && ! wp_doing_cron() ) {
+            spawn_cron();
+        }
+    } else {
+        wk_rh_clear_scheduled_availability_cache_continue();
+    }
+
     return (int) $stats['written'] > 0;
 }
 
 if ( defined( 'WP_CLI' ) && WP_CLI ) {
     WP_CLI::add_command( 'racehall availability-cache refresh', function() {
-        $stats = wk_rh_refresh_availability_cache_run();
+        $stats = wk_rh_refresh_availability_cache_run( true );
 
         if ( (int) $stats['written'] < 1 ) {
             WP_CLI::error( sprintf( 'No cache files written. Processed: %1$d, failed: %2$d.', (int) $stats['processed'], (int) $stats['failed'] ) );
         }
 
-        WP_CLI::success( sprintf( 'Wrote %1$d current-month cache files for %2$s to %3$s.', (int) $stats['written'], (string) $stats['dateFrom'], (string) $stats['dateTill'] ) );
+        WP_CLI::success( sprintf( 'Processed %1$d products and wrote %2$d current-month cache files for %3$s to %4$s. Failed: %5$d.', (int) $stats['processed'], (int) $stats['written'], (string) $stats['dateFrom'], (string) $stats['dateTill'], (int) $stats['failed'] ) );
     } );
 }
 
@@ -2461,6 +2612,12 @@ add_action( 'init', function() {
         if ( function_exists( 'spawn_cron' ) && ! wp_doing_cron() ) {
             spawn_cron();
         }
+    } elseif ( wk_rh_has_pending_availability_cache_refresh() ) {
+        wk_rh_schedule_availability_cache_continue();
+
+        if ( function_exists( 'spawn_cron' ) && ! wp_doing_cron() ) {
+            spawn_cron();
+        }
     }
 } );
 
@@ -2470,6 +2627,7 @@ add_action( 'wk_rh_expire_booking_holds_event', function() {
 
 add_action( 'wk_rh_refresh_availability_cache_event', 'wk_rh_refresh_availability_cache' );
 add_action( 'wk_rh_prime_availability_cache_event', 'wk_rh_refresh_availability_cache' );
+add_action( 'wk_rh_continue_availability_cache_event', 'wk_rh_refresh_availability_cache' );
 
 function wk_rh_get_upstream_products_cache_key( $location = '' ) {
     $settings = wk_rh_get_settings();
@@ -3418,6 +3576,71 @@ function wk_rh_is_nexi_gateway_id( $gateway_id ) {
     return false;
 }
 
+/**
+ * Resolve the booking location a Frisbii Pay (Reepay) gateway belongs to.
+ *
+ * The client runs three Frisbii Pay plugin instances, one per location, and each
+ * instance prefixes every one of its gateway IDs:
+ *   - reepay_copenhagen_*  => Copenhagen (kobenhavn)   [frisbii-pay-copenhagen]
+ *   - reepay_stockholm_*   => Stockholm                [frisbii-pay-stockholm]
+ *   - reepay_*             => Aarhus                   [reepay-checkout-gateway, original]
+ *
+ * Matching by prefix (instead of an explicit ID list) means every current and
+ * future Frisbii gateway is gated automatically.
+ *
+ * @param string $gateway_id Gateway ID.
+ *
+ * @return string|null Normalized location key, or null if not a Frisbii gateway.
+ */
+function wk_rh_get_frisbii_gateway_location( $gateway_id ) {
+    $gateway_id = (string) $gateway_id;
+
+    if ( strpos( $gateway_id, 'reepay_' ) !== 0 ) {
+        return null;
+    }
+
+    if ( strpos( $gateway_id, 'reepay_copenhagen_' ) === 0 ) {
+        return 'kobenhavn';
+    }
+
+    if ( strpos( $gateway_id, 'reepay_stockholm_' ) === 0 ) {
+        return 'stockholm';
+    }
+
+    return 'aarhus';
+}
+
+/**
+ * Resolve the booking location a payment gateway is locked to, covering both the
+ * Nexi Checkout instances (explicit ID map) and the Frisbii Pay instances (ID
+ * prefix).
+ *
+ * @param string $gateway_id Gateway ID.
+ *
+ * @return string|null Normalized location key, or null if the gateway is not
+ *                     location-managed.
+ */
+function wk_rh_get_gateway_managed_location( $gateway_id ) {
+    foreach ( wk_rh_get_nexi_gateway_location_map() as $location => $gateway_ids ) {
+        if ( in_array( $gateway_id, $gateway_ids, true ) ) {
+            return $location;
+        }
+    }
+
+    return wk_rh_get_frisbii_gateway_location( $gateway_id );
+}
+
+/**
+ * Whether a gateway is managed by the booking-location filter (Nexi or Frisbii).
+ *
+ * @param string $gateway_id Gateway ID.
+ *
+ * @return bool
+ */
+function wk_rh_is_location_managed_gateway_id( $gateway_id ) {
+    return null !== wk_rh_get_gateway_managed_location( (string) $gateway_id );
+}
+
 function wk_rh_get_cart_nexi_gateway_location_context() {
     if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
         return [
@@ -3530,25 +3753,26 @@ function wk_rh_filter_nexi_gateways_by_booking_location( $available_gateways ) {
         return $available_gateways;
     }
 
-    $allowed_gateway_ids = [];
-    if ( 'ok' === $context['status'] ) {
-        $gateway_map = wk_rh_get_nexi_gateway_location_map();
-        $allowed_gateway_ids = $gateway_map[ $context['location'] ] ?? [];
-    }
+    $cart_location = ( 'ok' === $context['status'] ) ? $context['location'] : '';
 
     foreach ( array_keys( $available_gateways ) as $gateway_id ) {
-        if ( ! wk_rh_is_nexi_gateway_id( $gateway_id ) ) {
+        $managed_location = wk_rh_get_gateway_managed_location( $gateway_id );
+        if ( null === $managed_location ) {
             continue;
         }
 
-        if ( ! in_array( $gateway_id, $allowed_gateway_ids, true ) ) {
+        // Keep a managed gateway only when the cart resolves to a single
+        // supported location and the gateway belongs to that location. For any
+        // other status (mixed / missing / unsupported) every managed gateway is
+        // removed, matching the existing behaviour.
+        if ( '' === $cart_location || $managed_location !== $cart_location ) {
             unset( $available_gateways[ $gateway_id ] );
         }
     }
 
     if ( function_exists( 'WC' ) && WC()->session ) {
         $chosen_payment_method = WC()->session->get( 'chosen_payment_method' );
-        if ( wk_rh_is_nexi_gateway_id( $chosen_payment_method ) && ! isset( $available_gateways[ $chosen_payment_method ] ) ) {
+        if ( wk_rh_is_location_managed_gateway_id( $chosen_payment_method ) && ! isset( $available_gateways[ $chosen_payment_method ] ) ) {
             WC()->session->set( 'chosen_payment_method', '' );
         }
     }

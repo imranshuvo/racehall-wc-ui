@@ -676,9 +676,9 @@ function wk_rh_get_availability( $token, $product_id, $date_from, $date_till, $l
                 'Content-Type'         => 'application/json',
                 'Accept-Language'      => $creds['accept_language'],
             ],
-            'timeout' => 15,
+            'timeout' => 30,
         ],
-        1,
+        2,
         [
             'operation' => 'availability_get',
             'location' => (string) $location,
@@ -1628,6 +1628,11 @@ function wk_rh_add_booking_data_to_order_items( $item, $cart_item_key, $values, 
     if ( isset( $values['booking_location'] ) ) {
         $item->add_meta_data( 'Lokation', $values['booking_location'], true );
         $item->add_meta_data( '_wk_rh_booking_location', $values['booking_location'], true );
+
+        $order_location = $order->get_meta( '_wk_rh_booking_location', true );
+        if ( $order_location === '' ) {
+            $order->update_meta_data( '_wk_rh_booking_location', sanitize_text_field( (string) $values['booking_location'] ) );
+        }
     }
     if ( isset( $values['booking_adults'] ) ) {
         $item->add_meta_data( 'Voksne', (int) $values['booking_adults'], true );
@@ -1702,6 +1707,11 @@ function wk_rh_save_proposal() {
 }
 
 function wk_rh_get_order_booking_location( WC_Order $order ) {
+    $order_location = $order->get_meta( '_wk_rh_booking_location', true );
+    if ( ! empty( $order_location ) ) {
+        return sanitize_text_field( (string) $order_location );
+    }
+
     foreach ( $order->get_items() as $item ) {
         $raw = $item->get_meta( '_wk_rh_booking_location', true );
         if ( ! empty( $raw ) ) {
@@ -1731,6 +1741,81 @@ function wk_rh_get_order_upstream_order_id( WC_Order $order ) {
     return '';
 }
 
+function wk_rh_add_admin_order_list_columns( $columns ) {
+    if ( ! is_array( $columns ) ) {
+        return $columns;
+    }
+
+    $new_columns = [];
+    $inserted = false;
+
+    foreach ( $columns as $key => $label ) {
+        if ( 'order_date' === (string) $key ) {
+            $new_columns['wk_rh_order_location'] = __( 'Location', 'racehall-wc-ui' );
+            $new_columns['wk_rh_bmi_order_id'] = __( 'BMI Order ID', 'racehall-wc-ui' );
+            $inserted = true;
+        }
+
+        $new_columns[ $key ] = $label;
+    }
+
+    if ( ! $inserted ) {
+        $new_columns['wk_rh_order_location'] = __( 'Location', 'racehall-wc-ui' );
+        $new_columns['wk_rh_bmi_order_id'] = __( 'BMI Order ID', 'racehall-wc-ui' );
+    }
+
+    return $new_columns;
+}
+add_filter( 'manage_edit-shop_order_columns', 'wk_rh_add_admin_order_list_columns', 20 );
+add_filter( 'manage_woocommerce_page_wc-orders_columns', 'wk_rh_add_admin_order_list_columns', 20 );
+
+function wk_rh_output_admin_order_list_column( $column, WC_Order $order ) {
+    if ( 'wk_rh_order_location' === $column ) {
+        $value = wk_rh_get_order_booking_location( $order );
+        echo $value !== '' ? esc_html( $value ) : '&mdash;';
+        return;
+    }
+
+    if ( 'wk_rh_bmi_order_id' === $column ) {
+        $value = wk_rh_get_order_upstream_order_id( $order );
+        echo $value !== '' ? esc_html( $value ) : '&mdash;';
+    }
+}
+
+function wk_rh_render_legacy_admin_order_list_column( $column ) {
+    if ( ! in_array( $column, [ 'wk_rh_order_location', 'wk_rh_bmi_order_id' ], true ) ) {
+        return;
+    }
+
+    global $post;
+
+    if ( ! $post || ! function_exists( 'wc_get_order' ) ) {
+        return;
+    }
+
+    $order = wc_get_order( $post->ID );
+    if ( ! $order instanceof WC_Order ) {
+        return;
+    }
+
+    wk_rh_output_admin_order_list_column( $column, $order );
+}
+add_action( 'manage_shop_order_posts_custom_column', 'wk_rh_render_legacy_admin_order_list_column', 20 );
+
+function wk_rh_render_hpos_admin_order_list_column( $column, $order_or_id ) {
+    if ( ! in_array( $column, [ 'wk_rh_order_location', 'wk_rh_bmi_order_id' ], true ) || ! function_exists( 'wc_get_order' ) ) {
+        return;
+    }
+
+    $order = $order_or_id instanceof WC_Order ? $order_or_id : wc_get_order( $order_or_id );
+    if ( ! $order instanceof WC_Order ) {
+        return;
+    }
+
+    wk_rh_output_admin_order_list_column( $column, $order );
+}
+add_action( 'manage_woocommerce_page_wc-orders_custom_column', 'wk_rh_render_hpos_admin_order_list_column', 20, 2 );
+
 function wk_rh_mark_payment_confirmed( WC_Order $order, $response_body = '' ) {
     $order->update_meta_data( '_wk_rh_payment_confirmed', 'yes' );
     $order->save();
@@ -1759,7 +1844,8 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
         return;
     }
 
-    if ( $order->get_payment_method() === 'cod' && ! $order->has_status( 'completed' ) ) {
+    //if ( $order->get_payment_method() === 'cod' && ! $order->has_status( 'completed' ) ) {
+    if ( $order->get_payment_method() === 'cod' ) {
         return;
     }
 
