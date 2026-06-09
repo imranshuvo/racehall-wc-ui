@@ -6,3 +6,6 @@
 # Local build artifacts (never commit)
 .builds/
 
+# Saved API reference exports (internal reading material — do not commit), anywhere
+Full Public Booking API Documentation*
+

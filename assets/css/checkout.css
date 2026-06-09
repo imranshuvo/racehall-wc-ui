@@ -759,6 +759,16 @@ body {
   color: rgba(217, 217, 217, 0.5);
 }
 
+
+div#cfw-cart-summary-coupons { display: none;}
+.woocommerce-order-received div#order_review div.title h5 {
+    display: none !important;
+}
+.woocommerce-order-received div#order_review div.title {
+    display: flex;
+    align-items: center;
+}
+
 /* ================= BUTTONS ================= */
 
 .book-button,

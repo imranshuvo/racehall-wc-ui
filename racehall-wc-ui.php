@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.19
+ * Version: 2.22
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -49,7 +49,16 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.19' );
+define( 'RACEHALL_WC_UI_VERSION', '2.22' );
+
+// Declare WooCommerce High-Performance Order Storage (HPOS) compatibility. All order
+// access in this plugin uses the WC CRUD API (wc_get_order/wc_get_orders/$order->*),
+// so it is compatible with custom order tables.
+add_action( 'before_woocommerce_init', function() {
+    if ( class_exists( \Automattic\WooCommerce\Utilities\FeaturesUtil::class ) ) {
+        \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'custom_order_tables', __FILE__, true );
+    }
+} );
 
 function wk_rh_get_bmi_route_namespace( $route_group ) {
     $route_group = sanitize_key( (string) $route_group );
@@ -1049,6 +1058,7 @@ function wk_rh_get_settings_defaults() {
         'addon_product_id'    => 0,
         'product_page_booking_mode' => 'new_only',
         'booking_hold_timeout_minutes' => 15,
+        'pay_on_site_enabled' => 'yes',
         'required_supplement_name_markers' => 'obligatorisk,obligatory,required,mandatory',
         'test_locations_json' => '[]',
         'live_locations_json' => '[]',
@@ -1246,6 +1256,14 @@ function wk_rh_allow_booking_products_to_be_purchasable( $purchasable, $product 
 
     if ( ! $product instanceof WC_Product ) {
         return $purchasable;
+    }
+
+    // The add-on carrier may be a "private" (or zero-priced) product, which WooCommerce
+    // would otherwise treat as not purchasable for the public. Force it purchasable.
+    // wk_rh_is_configured_addon_product() is current-language aware, so this holds for
+    // every WPML translation of the carrier.
+    if ( wk_rh_is_configured_addon_product( $product->get_id() ) ) {
+        return true;
     }
 
     if ( ! $product->is_type( 'external' ) ) {
@@ -1746,6 +1764,15 @@ function wk_rh_sanitize_settings( $input ) {
             $addon_product_id = 0;
         }
     }
+    if ( $addon_product_id > 0 ) {
+        // Store the default-language id so WPML translation resolves in every direction,
+        // and stamp the marker meta so the failsafe can recover/rebuild it later.
+        $default_carrier_id = wk_rh_get_default_language_product_id( $addon_product_id );
+        if ( $default_carrier_id > 0 ) {
+            $addon_product_id = $default_carrier_id;
+        }
+        update_post_meta( $addon_product_id, '_wk_rh_addon_carrier', '1' );
+    }
 
     $sanitized = [
         'environment'         => in_array( $input['environment'] ?? 'test', [ 'test', 'live' ], true ) ? $input['environment'] : 'test',
@@ -1758,6 +1785,7 @@ function wk_rh_sanitize_settings( $input ) {
             ? sanitize_key( (string) $input['product_page_booking_mode'] )
             : $defaults['product_page_booking_mode'],
         'booking_hold_timeout_minutes' => max( 5, min( 120, (int) ( $input['booking_hold_timeout_minutes'] ?? $defaults['booking_hold_timeout_minutes'] ) ) ),
+        'pay_on_site_enabled' => ! empty( $input['pay_on_site_enabled'] ) && $input['pay_on_site_enabled'] === 'yes' ? 'yes' : 'no',
         'required_supplement_name_markers' => sanitize_text_field( $input['required_supplement_name_markers'] ?? $defaults['required_supplement_name_markers'] ),
         'test_locations_json' => wk_rh_sanitize_locations_json( $input['test_locations_json'] ?? '[]', 'wk_rh_test_locations_json_invalid' ),
         'live_locations_json' => wk_rh_sanitize_locations_json( $input['live_locations_json'] ?? '[]', 'wk_rh_live_locations_json_invalid' ),
@@ -1766,21 +1794,88 @@ function wk_rh_sanitize_settings( $input ) {
     return $sanitized;
 }
 
-function wk_rh_get_configured_addon_product_id() {
+function wk_rh_is_pay_on_site_enabled() {
     $settings = wk_rh_get_settings();
+    $value    = isset( $settings['pay_on_site_enabled'] ) ? $settings['pay_on_site_enabled'] : 'yes';
+
+    return apply_filters( 'wk_rh_is_pay_on_site_enabled', $value === 'yes' );
+}
+
+function wk_rh_addon_carrier_post_is_usable( $product_id ) {
+    $product_id = absint( $product_id );
+    if ( $product_id <= 0 ) {
+        return false;
+    }
+
+    if ( get_post_type( $product_id ) !== 'product' ) {
+        return false;
+    }
+
+    return in_array( get_post_status( $product_id ), [ 'publish', 'private' ], true );
+}
+
+/**
+ * Find a carrier product by our marker meta, regardless of language.
+ *
+ * Recovers the carrier when the stored setting was cleared or points at a missing
+ * product. Returns the default-language id (when WPML is active) so translation
+ * resolves correctly in every direction. Cached per request; never creates anything.
+ *
+ * @return int Carrier product id, or 0 if none flagged.
+ */
+function wk_rh_find_addon_carrier_by_flag() {
+    static $cached = null;
+    if ( $cached !== null ) {
+        return $cached;
+    }
+
+    $cached = 0;
+    if ( ! class_exists( 'WP_Query' ) ) {
+        return 0;
+    }
+
+    $query = new WP_Query( [
+        'post_type'      => 'product',
+        'post_status'    => [ 'publish', 'private' ],
+        'posts_per_page' => 1,
+        'fields'         => 'ids',
+        'no_found_rows'  => true,
+        'orderby'        => 'ID',
+        'order'          => 'ASC',
+        'meta_key'       => '_wk_rh_addon_carrier',
+        'meta_value'     => '1',
+    ] );
+
+    if ( ! empty( $query->posts ) ) {
+        $found   = (int) $query->posts[0];
+        $default = wk_rh_get_default_language_product_id( $found );
+        $cached  = $default > 0 ? $default : $found;
+    }
+
+    return $cached;
+}
+
+function wk_rh_get_configured_addon_product_id() {
+    $settings   = wk_rh_get_settings();
     $product_id = isset( $settings['addon_product_id'] ) ? absint( $settings['addon_product_id'] ) : 0;
+
+    // Failsafe: if the configured product is missing/invalid, recover the carrier by its
+    // marker meta (handles a cleared or changed setting). No creation happens here.
+    if ( $product_id <= 0 || ! wk_rh_addon_carrier_post_is_usable( $product_id ) ) {
+        $recovered = wk_rh_find_addon_carrier_by_flag();
+        if ( $recovered > 0 ) {
+            $product_id = $recovered;
+        }
+    }
+
     if ( $product_id <= 0 ) {
         return 0;
     }
 
-    if ( has_filter( 'wpml_object_id' ) ) {
-        $translated_product_id = apply_filters( 'wpml_object_id', $product_id, 'product', true );
-        if ( is_numeric( $translated_product_id ) && (int) $translated_product_id > 0 ) {
-            $product_id = (int) $translated_product_id;
-        }
-    }
+    // WPML: resolve to the current-language product (falls back to the original).
+    $translated = wk_rh_get_current_language_product_id( $product_id );
 
-    return $product_id;
+    return $translated > 0 ? $translated : $product_id;
 }
 
 function wk_rh_get_configured_addon_product() {
@@ -1806,18 +1901,17 @@ function wk_rh_get_addon_carrier_validation_error( $product = null ) {
         return __( 'Selected add-on product does not exist.', 'racehall-wc-ui' );
     }
 
-    if ( 'publish' !== $product->get_status() ) {
-        return __( 'Add-on carrier product must be published.', 'racehall-wc-ui' );
+    if ( ! in_array( $product->get_status(), [ 'publish', 'private' ], true ) ) {
+        return __( 'Add-on carrier product must be published or private.', 'racehall-wc-ui' );
     }
 
     if ( ! $product->is_type( 'simple' ) ) {
         return __( 'Add-on carrier product must be a simple product.', 'racehall-wc-ui' );
     }
 
-    if ( ! $product->is_purchasable() ) {
-        return __( 'Add-on carrier product must be purchasable.', 'racehall-wc-ui' );
-    }
-
+    // Note: a "private" product is not publicly purchasable by default; the plugin
+    // forces purchasability for the configured carrier via woocommerce_is_purchasable,
+    // so we intentionally do not require is_purchasable() here.
     if ( $product->is_sold_individually() ) {
         return __( 'Add-on carrier product cannot be sold individually.', 'racehall-wc-ui' );
     }
@@ -1839,7 +1933,7 @@ function wk_rh_get_settings_product_options() {
     }
 
     $products = wc_get_products( [
-        'status' => [ 'publish' ],
+        'status' => [ 'publish', 'private' ],
         'limit'  => -1,
         'orderby' => 'title',
         'order'   => 'ASC',
@@ -1865,7 +1959,8 @@ function wk_rh_get_settings_product_options() {
             continue;
         }
 
-        $options[ $product_id ] = sprintf( '%s (#%d)', $product->get_name(), $product_id );
+        $status_suffix = $product->get_status() === 'private' ? ' — ' . __( 'private', 'racehall-wc-ui' ) : '';
+        $options[ $product_id ] = sprintf( '%s (#%d)%s', $product->get_name(), $product_id, $status_suffix );
     }
 
     return $options;
@@ -1879,6 +1974,98 @@ function wk_rh_is_configured_addon_product( $product_id ) {
 
     return $product_id === wk_rh_get_configured_addon_product_id();
 }
+
+function wk_rh_update_addon_product_setting( $product_id ) {
+    $product_id = absint( $product_id );
+    $settings   = get_option( 'wk_rh_settings', [] );
+    if ( ! is_array( $settings ) ) {
+        $settings = [];
+    }
+
+    if ( (int) ( $settings['addon_product_id'] ?? 0 ) === $product_id ) {
+        return;
+    }
+
+    $settings['addon_product_id'] = $product_id;
+    update_option( 'wk_rh_settings', $settings );
+}
+
+/**
+ * Failsafe: guarantee a usable add-on carrier product exists.
+ *
+ * 1) If the configured product is usable, keep it (and ensure it carries the marker meta).
+ * 2) Otherwise recover any product flagged as the carrier (handles a cleared setting).
+ * 3) Otherwise recreate a hidden, private, zero-priced simple product in the default language.
+ *
+ * Runs in admin/cron/activation contexts only — never on a customer request.
+ *
+ * @param bool $allow_create Whether to create a new carrier when none can be recovered.
+ *                           Repair-only (false) on admin_init so it never preempts a
+ *                           product the admin is about to select.
+ * @return int Carrier product id, or 0 if WooCommerce is unavailable / none yet.
+ */
+function wk_rh_ensure_addon_carrier( $allow_create = true ) {
+    if ( ! function_exists( 'wc_get_product' ) || ! class_exists( 'WC_Product_Simple' ) ) {
+        return 0;
+    }
+
+    $settings   = get_option( 'wk_rh_settings', [] );
+    $configured = is_array( $settings ) && isset( $settings['addon_product_id'] ) ? absint( $settings['addon_product_id'] ) : 0;
+
+    // 1) Configured product still usable.
+    if ( $configured > 0 && wk_rh_addon_carrier_post_is_usable( $configured ) ) {
+        if ( get_post_meta( $configured, '_wk_rh_addon_carrier', true ) !== '1' ) {
+            update_post_meta( $configured, '_wk_rh_addon_carrier', '1' );
+        }
+        return $configured;
+    }
+
+    // 2) Recover an existing flagged carrier (e.g. setting was cleared).
+    $found = wk_rh_find_addon_carrier_by_flag();
+    if ( $found > 0 && wk_rh_addon_carrier_post_is_usable( $found ) ) {
+        wk_rh_update_addon_product_setting( $found );
+        return $found;
+    }
+
+    // 3) Recreate from scratch (skipped in repair-only mode).
+    if ( ! $allow_create ) {
+        return 0;
+    }
+
+    $product = new WC_Product_Simple();
+    $product->set_name( __( 'BMI Add-on (carrier)', 'racehall-wc-ui' ) );
+    $product->set_status( 'private' );
+    $product->set_catalog_visibility( 'hidden' );
+    $product->set_regular_price( '0' );
+    $product->set_price( '0' );
+    $product->set_sold_individually( false );
+    $product->set_virtual( true );
+    $product->set_manage_stock( false );
+    $product->set_stock_status( 'instock' );
+    $new_id = (int) $product->save();
+
+    if ( $new_id <= 0 ) {
+        return 0;
+    }
+
+    update_post_meta( $new_id, '_wk_rh_addon_carrier', '1' );
+    wk_rh_update_addon_product_setting( $new_id );
+
+    if ( function_exists( 'wk_rh_log_user_event' ) ) {
+        wk_rh_log_user_event( 'addon.carrier_recreated', [ 'productId' => $new_id ], 'warning' );
+    }
+
+    return $new_id;
+}
+// Repair-only on admin page loads so it never preempts a manual selection.
+function wk_rh_admin_init_repair_addon_carrier() {
+    wk_rh_ensure_addon_carrier( false );
+}
+add_action( 'admin_init', 'wk_rh_admin_init_repair_addon_carrier' );
+// Create-if-missing failsafe runs on the existing 5-minute cron (passes no args, so
+// $allow_create defaults to true). Selecting a carrier in Settings creates/flags it
+// immediately, so no activation hook is needed.
+add_action( 'wk_rh_expire_booking_holds_event', 'wk_rh_ensure_addon_carrier' );
 
 function wk_rh_get_booking_hold_timeout_minutes() {
     $settings = wk_rh_get_settings();
@@ -2261,8 +2448,8 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                     $display_qty = $current_qty > 0 ? $current_qty : $min_qty;
                     $price_amount = wk_rh_get_supplement_price_amount( $supplement );
                     $is_required_supplement = wk_rh_is_required_supplement( $supplement );
-                    $addon_image = function_exists( 'wk_rh_get_product_image_data_uri' )
-                        ? wk_rh_get_product_image_data_uri( $location, $upstream_id )
+                    $addon_image_url = function_exists( 'wk_rh_get_product_image_url' )
+                        ? wk_rh_get_product_image_url( $location, $upstream_id )
                         : '';
                     ?>
                     <div
@@ -2275,9 +2462,9 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                         <?php if ( $max_qty > 0 ) : ?>data-max-qty="<?php echo esc_attr( $max_qty ); ?>"<?php else : ?>data-max-qty="0"<?php endif; ?>
                     >
                         <div class="info-container">
-                            <?php if ( $addon_image !== '' ) : ?>
+                            <?php if ( $addon_image_url !== '' ) : ?>
                                 <div class="addon-img">
-                                    <img src="<?php echo esc_attr( $addon_image ); ?>" alt="<?php echo esc_attr( wp_strip_all_tags( $name ) ); ?>" loading="lazy" />
+                                    <img src="<?php echo esc_url( $addon_image_url ); ?>" alt="<?php echo esc_attr( wp_strip_all_tags( $name ) ); ?>" loading="lazy" onerror="this.closest('.addon-img').style.display='none';" />
                                 </div>
                             <?php endif; ?>
 
@@ -2429,131 +2616,141 @@ function wk_rh_render_settings_page() {
     }
 
     $settings = wk_rh_get_settings();
+    $sections = [
+        'environment' => __( 'Environment & API', 'racehall-wc-ui' ),
+        'booking'     => __( 'Booking behaviour', 'racehall-wc-ui' ),
+        'payonsite'   => __( 'Pay on site', 'racehall-wc-ui' ),
+        'credentials' => __( 'Location credentials', 'racehall-wc-ui' ),
+    ];
+
+    wk_rh_render_admin_shell_header( 'wk-rh-settings', $sections );
+    settings_errors( 'wk_rh_settings' );
     ?>
-    <div class="wrap">
-        <h1><?php esc_html_e( 'Onsite Booking System Settings', 'racehall-wc-ui' ); ?></h1>
-        <?php settings_errors( 'wk_rh_settings' ); ?>
-        <form method="post" action="options.php">
-            <?php settings_fields( 'wk_rh_settings_group' ); ?>
-            <table class="form-table" role="presentation">
-                <tr>
-                    <th scope="row"><label for="wk_rh_environment"><?php esc_html_e( 'Environment', 'racehall-wc-ui' ); ?></label></th>
-                    <td>
-                        <select id="wk_rh_environment" name="wk_rh_settings[environment]">
-                            <option value="test" <?php selected( $settings['environment'], 'test' ); ?>><?php esc_html_e( 'Test', 'racehall-wc-ui' ); ?></option>
-                            <option value="live" <?php selected( $settings['environment'], 'live' ); ?>><?php esc_html_e( 'Live', 'racehall-wc-ui' ); ?></option>
-                        </select>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="wk_rh_test_base_url"><?php esc_html_e( 'Test Base URL', 'racehall-wc-ui' ); ?></label></th>
-                    <td><input class="regular-text" type="url" id="wk_rh_test_base_url" name="wk_rh_settings[test_base_url]" value="<?php echo esc_attr( $settings['test_base_url'] ); ?>"></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="wk_rh_live_base_url"><?php esc_html_e( 'Live Base URL', 'racehall-wc-ui' ); ?></label></th>
-                    <td><input class="regular-text" type="url" id="wk_rh_live_base_url" name="wk_rh_settings[live_base_url]" value="<?php echo esc_attr( $settings['live_base_url'] ); ?>"></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="wk_rh_accept_language"><?php esc_html_e( 'Accept-Language', 'racehall-wc-ui' ); ?></label></th>
-                    <td><input class="regular-text" type="text" id="wk_rh_accept_language" name="wk_rh_settings[accept_language]" value="<?php echo esc_attr( $settings['accept_language'] ); ?>"></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="wk_rh_logging_enabled"><?php esc_html_e( 'Enable logging', 'racehall-wc-ui' ); ?></label></th>
-                    <td>
-                        <label for="wk_rh_logging_enabled">
-                            <input type="checkbox" id="wk_rh_logging_enabled" name="wk_rh_settings[logging_enabled]" value="yes" <?php checked( $settings['logging_enabled'] ?? 'yes', 'yes' ); ?>>
-                            <?php esc_html_e( 'Write API and user-action logs to uploads/onsite-booking.', 'racehall-wc-ui' ); ?>
-                        </label>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="wk_rh_addon_product_id"><?php esc_html_e( 'Add-on carrier product', 'racehall-wc-ui' ); ?></label></th>
-                    <td>
-                        <select id="wk_rh_addon_product_id" name="wk_rh_settings[addon_product_id]">
-                            <option value="0"><?php esc_html_e( '— Select WooCommerce product —', 'racehall-wc-ui' ); ?></option>
-                            <?php foreach ( wk_rh_get_settings_product_options() as $product_id => $product_label ) : ?>
-                                <option value="<?php echo esc_attr( $product_id ); ?>" <?php selected( absint( $settings['addon_product_id'] ?? 0 ), $product_id ); ?>><?php echo esc_html( $product_label ); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <p class="description"><?php esc_html_e( 'Choose one hidden WooCommerce product to carry all add-ons in the cart. The customer-facing add-on name and price still come from the upstream response.', 'racehall-wc-ui' ); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="wk_rh_product_page_booking_mode"><?php esc_html_e( 'Product page rollout mode', 'racehall-wc-ui' ); ?></label></th>
-                    <td>
-                        <select id="wk_rh_product_page_booking_mode" name="wk_rh_settings[product_page_booking_mode]">
-                            <?php foreach ( wk_rh_get_product_page_booking_mode_options() as $mode_value => $mode_label ) : ?>
-                                <option value="<?php echo esc_attr( $mode_value ); ?>" <?php selected( $settings['product_page_booking_mode'] ?? 'new_only', $mode_value ); ?>><?php echo esc_html( $mode_label ); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <p class="description"><?php esc_html_e( 'Controls whether this plugin replaces the standard WooCommerce product page. In dual modes, customers can switch with rh_booking_mode=old or rh_booking_mode=new.', 'racehall-wc-ui' ); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="wk_rh_booking_hold_timeout_minutes"><?php esc_html_e( 'Booking hold timeout (minutes)', 'racehall-wc-ui' ); ?></label></th>
-                    <td>
-                        <input class="small-text" type="number" min="5" max="120" step="1" id="wk_rh_booking_hold_timeout_minutes" name="wk_rh_settings[booking_hold_timeout_minutes]" value="<?php echo esc_attr( wk_rh_get_booking_hold_timeout_minutes() ); ?>">
-                        <p class="description"><?php esc_html_e( 'Recommended range is 10–20 minutes. When exceeded, held bookings are cancelled upstream and users must start again.', 'racehall-wc-ui' ); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="wk_rh_required_supplement_name_markers"><?php esc_html_e( 'Required supplement name markers', 'racehall-wc-ui' ); ?></label></th>
-                    <td>
-                        <input class="regular-text" type="text" id="wk_rh_required_supplement_name_markers" name="wk_rh_settings[required_supplement_name_markers]" value="<?php echo esc_attr( $settings['required_supplement_name_markers'] ?? '' ); ?>">
-                        <p class="description"><?php esc_html_e( 'Comma-separated words or phrases to look for in supplement names, for example: obligatorisk, obligatory, required.', 'racehall-wc-ui' ); ?></p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="wk_rh_test_locations_json"><?php esc_html_e( 'Test Location Credential Map (JSON)', 'racehall-wc-ui' ); ?></label></th>
-                    <td>
-                        <textarea class="large-text code" rows="12" id="wk_rh_test_locations_json" name="wk_rh_settings[test_locations_json]"><?php echo esc_textarea( $settings['test_locations_json'] ?? '[]' ); ?></textarea>
-                        <p class="description">
-                            <?php esc_html_e( 'Used only when Environment = Test.', 'racehall-wc-ui' ); ?>
-                        </p>
-                    </td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="wk_rh_live_locations_json"><?php esc_html_e( 'Live Location Credential Map (JSON)', 'racehall-wc-ui' ); ?></label></th>
-                    <td>
-                        <textarea class="large-text code" rows="12" id="wk_rh_live_locations_json" name="wk_rh_settings[live_locations_json]"><?php echo esc_textarea( $settings['live_locations_json'] ?? '[]' ); ?></textarea>
-                        <p class="description">
-                            <?php esc_html_e( 'Format: [{"location":"Copenhagen","client_key":"...","subscription_key":"...","username":"...","password":"..."}]', 'racehall-wc-ui' ); ?>
-                        </p>
-                    </td>
-                </tr>
-            </table>
-            <?php submit_button(); ?>
-        </form>
+    <form method="post" action="options.php" class="wkrh-form">
+        <?php settings_fields( 'wk_rh_settings_group' ); ?>
 
-        <script>
-            (function () {
-                var envSelect = document.getElementById('wk_rh_environment');
-                var testArea = document.getElementById('wk_rh_test_locations_json');
-                var liveArea = document.getElementById('wk_rh_live_locations_json');
+        <section class="wkrh-panel is-active" id="wkrh-section-environment" data-section="environment">
+            <div class="wkrh-card">
+                <h2 class="wkrh-card__title"><?php esc_html_e( 'Environment & API', 'racehall-wc-ui' ); ?></h2>
+                <p class="wkrh-card__intro"><?php esc_html_e( 'Choose the active environment and the BMI API endpoints used for upstream requests.', 'racehall-wc-ui' ); ?></p>
+                <div class="wkrh-fields">
+                    <div class="wkrh-field">
+                        <label class="wkrh-field__label" for="wk_rh_environment"><?php esc_html_e( 'Environment', 'racehall-wc-ui' ); ?></label>
+                        <div class="wkrh-field__control">
+                            <select id="wk_rh_environment" name="wk_rh_settings[environment]">
+                                <option value="test" <?php selected( $settings['environment'], 'test' ); ?>><?php esc_html_e( 'Test', 'racehall-wc-ui' ); ?></option>
+                                <option value="live" <?php selected( $settings['environment'], 'live' ); ?>><?php esc_html_e( 'Live', 'racehall-wc-ui' ); ?></option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="wkrh-field">
+                        <label class="wkrh-field__label" for="wk_rh_test_base_url"><?php esc_html_e( 'Test Base URL', 'racehall-wc-ui' ); ?></label>
+                        <div class="wkrh-field__control"><input type="url" id="wk_rh_test_base_url" name="wk_rh_settings[test_base_url]" value="<?php echo esc_attr( $settings['test_base_url'] ); ?>"></div>
+                    </div>
+                    <div class="wkrh-field">
+                        <label class="wkrh-field__label" for="wk_rh_live_base_url"><?php esc_html_e( 'Live Base URL', 'racehall-wc-ui' ); ?></label>
+                        <div class="wkrh-field__control"><input type="url" id="wk_rh_live_base_url" name="wk_rh_settings[live_base_url]" value="<?php echo esc_attr( $settings['live_base_url'] ); ?>"></div>
+                    </div>
+                    <div class="wkrh-field">
+                        <label class="wkrh-field__label" for="wk_rh_accept_language"><?php esc_html_e( 'Accept-Language', 'racehall-wc-ui' ); ?></label>
+                        <div class="wkrh-field__control"><input type="text" id="wk_rh_accept_language" name="wk_rh_settings[accept_language]" value="<?php echo esc_attr( $settings['accept_language'] ); ?>"></div>
+                    </div>
+                    <div class="wkrh-field">
+                        <label class="wkrh-field__label"><?php esc_html_e( 'Logging', 'racehall-wc-ui' ); ?></label>
+                        <div class="wkrh-field__control">
+                            <label class="wkrh-check">
+                                <input type="checkbox" id="wk_rh_logging_enabled" name="wk_rh_settings[logging_enabled]" value="yes" <?php checked( $settings['logging_enabled'] ?? 'yes', 'yes' ); ?>>
+                                <span><?php esc_html_e( 'Write API and user-action logs to uploads/onsite-booking.', 'racehall-wc-ui' ); ?></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-                if (!envSelect || !testArea || !liveArea) {
-                    return;
-                }
+        <section class="wkrh-panel" id="wkrh-section-booking" data-section="booking">
+            <div class="wkrh-card">
+                <h2 class="wkrh-card__title"><?php esc_html_e( 'Booking behaviour', 'racehall-wc-ui' ); ?></h2>
+                <div class="wkrh-fields">
+                    <div class="wkrh-field">
+                        <label class="wkrh-field__label" for="wk_rh_addon_product_id"><?php esc_html_e( 'Add-on carrier product', 'racehall-wc-ui' ); ?></label>
+                        <div class="wkrh-field__control">
+                            <select id="wk_rh_addon_product_id" name="wk_rh_settings[addon_product_id]">
+                                <option value="0"><?php esc_html_e( '— Select WooCommerce product —', 'racehall-wc-ui' ); ?></option>
+                                <?php foreach ( wk_rh_get_settings_product_options() as $product_id => $product_label ) : ?>
+                                    <option value="<?php echo esc_attr( $product_id ); ?>" <?php selected( absint( $settings['addon_product_id'] ?? 0 ), $product_id ); ?>><?php echo esc_html( $product_label ); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'One hidden WooCommerce product (Published or Private) carries all add-ons in the cart; the add-on name and price come from the upstream response. Works across all languages (WPML). If left empty or the product ever goes missing, a hidden private carrier is created and used automatically.', 'racehall-wc-ui' ); ?></p>
+                    </div>
+                    <div class="wkrh-field">
+                        <label class="wkrh-field__label" for="wk_rh_product_page_booking_mode"><?php esc_html_e( 'Product page rollout mode', 'racehall-wc-ui' ); ?></label>
+                        <div class="wkrh-field__control">
+                            <select id="wk_rh_product_page_booking_mode" name="wk_rh_settings[product_page_booking_mode]">
+                                <?php foreach ( wk_rh_get_product_page_booking_mode_options() as $mode_value => $mode_label ) : ?>
+                                    <option value="<?php echo esc_attr( $mode_value ); ?>" <?php selected( $settings['product_page_booking_mode'] ?? 'new_only', $mode_value ); ?>><?php echo esc_html( $mode_label ); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'Controls whether this plugin replaces the standard WooCommerce product page. In dual modes, customers can switch with rh_booking_mode=old or rh_booking_mode=new.', 'racehall-wc-ui' ); ?></p>
+                    </div>
+                    <div class="wkrh-field">
+                        <label class="wkrh-field__label" for="wk_rh_booking_hold_timeout_minutes"><?php esc_html_e( 'Booking hold timeout (minutes)', 'racehall-wc-ui' ); ?></label>
+                        <div class="wkrh-field__control"><input type="number" min="5" max="120" step="1" id="wk_rh_booking_hold_timeout_minutes" name="wk_rh_settings[booking_hold_timeout_minutes]" value="<?php echo esc_attr( wk_rh_get_booking_hold_timeout_minutes() ); ?>"></div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'Recommended range is 10–20 minutes. When exceeded, held bookings are cancelled upstream and users must start again.', 'racehall-wc-ui' ); ?></p>
+                    </div>
+                    <div class="wkrh-field">
+                        <label class="wkrh-field__label" for="wk_rh_required_supplement_name_markers"><?php esc_html_e( 'Required supplement name markers', 'racehall-wc-ui' ); ?></label>
+                        <div class="wkrh-field__control"><input type="text" id="wk_rh_required_supplement_name_markers" name="wk_rh_settings[required_supplement_name_markers]" value="<?php echo esc_attr( $settings['required_supplement_name_markers'] ?? '' ); ?>"></div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'Comma-separated words or phrases to look for in supplement names, for example: obligatorisk, obligatory, required.', 'racehall-wc-ui' ); ?></p>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-                var testRow = testArea.closest('tr');
-                var liveRow = liveArea.closest('tr');
+        <section class="wkrh-panel" id="wkrh-section-payonsite" data-section="payonsite">
+            <div class="wkrh-card">
+                <h2 class="wkrh-card__title"><?php esc_html_e( 'Pay on site (pay at venue)', 'racehall-wc-ui' ); ?></h2>
+                <div class="wkrh-fields">
+                    <div class="wkrh-field">
+                        <div class="wkrh-field__control">
+                            <label class="wkrh-check">
+                                <input type="checkbox" id="wk_rh_pay_on_site_enabled" name="wk_rh_settings[pay_on_site_enabled]" value="yes" <?php checked( wk_rh_is_pay_on_site_enabled() ); ?>>
+                                <span><?php esc_html_e( 'Enable "Betal ved ankomst" (finalize bookings upstream via payOnSite)', 'racehall-wc-ui' ); ?></span>
+                            </label>
+                        </div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'When enabled, choosing "Betal ved ankomst" (WooCommerce COD) confirms the booking upstream as pay-on-site. Disable to stop sending pay-on-site confirmations without removing the checkout button.', 'racehall-wc-ui' ); ?></p>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-                function refreshRows() {
-                    var env = envSelect.value;
-                    if (testRow) {
-                        testRow.style.opacity = env === 'test' ? '1' : '0.55';
-                    }
-                    if (liveRow) {
-                        liveRow.style.opacity = env === 'live' ? '1' : '0.55';
-                    }
-                }
+        <section class="wkrh-panel" id="wkrh-section-credentials" data-section="credentials">
+            <div class="wkrh-card">
+                <h2 class="wkrh-card__title"><?php esc_html_e( 'Location credentials', 'racehall-wc-ui' ); ?></h2>
+                <p class="wkrh-card__intro"><?php esc_html_e( 'Per-location BMI API credentials. The field for the active environment is highlighted.', 'racehall-wc-ui' ); ?></p>
+                <div class="wkrh-fields">
+                    <div class="wkrh-field">
+                        <label class="wkrh-field__label" for="wk_rh_test_locations_json"><?php esc_html_e( 'Test Location Credential Map (JSON)', 'racehall-wc-ui' ); ?></label>
+                        <div class="wkrh-field__control"><textarea class="code" rows="10" id="wk_rh_test_locations_json" name="wk_rh_settings[test_locations_json]"><?php echo esc_textarea( $settings['test_locations_json'] ?? '[]' ); ?></textarea></div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'Used only when Environment = Test.', 'racehall-wc-ui' ); ?></p>
+                    </div>
+                    <div class="wkrh-field">
+                        <label class="wkrh-field__label" for="wk_rh_live_locations_json"><?php esc_html_e( 'Live Location Credential Map (JSON)', 'racehall-wc-ui' ); ?></label>
+                        <div class="wkrh-field__control"><textarea class="code" rows="10" id="wk_rh_live_locations_json" name="wk_rh_settings[live_locations_json]"><?php echo esc_textarea( $settings['live_locations_json'] ?? '[]' ); ?></textarea></div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'Format: [{"location":"Copenhagen","client_key":"...","subscription_key":"...","username":"...","password":"..."}]', 'racehall-wc-ui' ); ?></p>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-                envSelect.addEventListener('change', refreshRows);
-                refreshRows();
-            })();
-        </script>
-    </div>
+        <div class="wkrh-actions">
+            <?php submit_button( __( 'Save changes', 'racehall-wc-ui' ), 'primary', 'submit', false ); ?>
+        </div>
+    </form>
     <?php
+    wk_rh_render_admin_shell_footer();
 }
 
 function wk_rh_register_admin_menu() {
@@ -2586,6 +2783,84 @@ function wk_rh_register_admin_menu() {
     );
 }
 add_action( 'admin_menu', 'wk_rh_register_admin_menu' );
+
+function wk_rh_get_admin_page_slugs() {
+    return [ 'wk-rh-settings', 'wk-rh-diagnostics', 'wk-rh-upstream-data' ];
+}
+
+function wk_rh_enqueue_admin_assets( $hook_suffix ) {
+    $page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : '';
+    if ( ! in_array( $page, wk_rh_get_admin_page_slugs(), true ) ) {
+        return;
+    }
+
+    $version = defined( 'RACEHALL_WC_UI_VERSION' ) ? RACEHALL_WC_UI_VERSION : false;
+    wp_enqueue_style( 'wk-rh-admin', RACEHALL_WC_UI_URL . 'assets/css/admin.css', [ 'dashicons' ], $version );
+    wp_enqueue_script( 'wk-rh-admin', RACEHALL_WC_UI_URL . 'assets/js/admin.js', [], $version, true );
+}
+add_action( 'admin_enqueue_scripts', 'wk_rh_enqueue_admin_assets' );
+
+function wk_rh_get_admin_pages_nav() {
+    return [
+        'wk-rh-settings'      => __( 'Settings', 'racehall-wc-ui' ),
+        'wk-rh-diagnostics'   => __( 'Diagnostics', 'racehall-wc-ui' ),
+        'wk-rh-upstream-data' => __( 'Upstream Data', 'racehall-wc-ui' ),
+    ];
+}
+
+/**
+ * Open the shared modern admin shell: header bar + sidebar + content wrapper.
+ *
+ * @param string $active_slug Current page slug (for nav highlight).
+ * @param array  $sections    Optional in-page section nav as [ key => label ] (Settings page only).
+ */
+function wk_rh_render_admin_shell_header( $active_slug, array $sections = [] ) {
+    $settings = wk_rh_get_settings();
+    $env      = ( $settings['environment'] ?? 'test' ) === 'live' ? 'live' : 'test';
+    $version  = defined( 'RACEHALL_WC_UI_VERSION' ) ? RACEHALL_WC_UI_VERSION : '';
+    ?>
+    <div class="wrap wkrh-admin">
+        <div class="wkrh-header">
+            <div class="wkrh-header__brand">
+                <span class="wkrh-header__logo" aria-hidden="true"><span class="dashicons dashicons-calendar-alt"></span></span>
+                <div class="wkrh-header__titles">
+                    <h1 class="wkrh-header__title"><?php esc_html_e( 'Onsite Booking System', 'racehall-wc-ui' ); ?></h1>
+                    <p class="wkrh-header__sub"><?php esc_html_e( 'BMI Leisure booking integration', 'racehall-wc-ui' ); ?></p>
+                </div>
+            </div>
+            <div class="wkrh-header__meta">
+                <span class="wkrh-badge wkrh-badge--<?php echo esc_attr( $env ); ?>"><?php echo esc_html( strtoupper( $env ) ); ?></span>
+                <?php if ( $version !== '' ) : ?>
+                    <span class="wkrh-version">v<?php echo esc_html( $version ); ?></span>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="wkrh-layout">
+            <aside class="wkrh-sidebar">
+                <?php if ( ! empty( $sections ) ) : ?>
+                    <nav class="wkrh-nav" aria-label="<?php esc_attr_e( 'Settings sections', 'racehall-wc-ui' ); ?>">
+                        <?php $first = true; foreach ( $sections as $key => $label ) : ?>
+                            <a class="wkrh-nav__item<?php echo $first ? ' is-active' : ''; ?>" data-section="<?php echo esc_attr( $key ); ?>" href="#wkrh-section-<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $label ); ?></a>
+                        <?php $first = false; endforeach; ?>
+                    </nav>
+                <?php endif; ?>
+                <nav class="wkrh-nav wkrh-nav--pages" aria-label="<?php esc_attr_e( 'Plugin pages', 'racehall-wc-ui' ); ?>">
+                    <?php foreach ( wk_rh_get_admin_pages_nav() as $slug => $label ) : ?>
+                        <a class="wkrh-nav__page<?php echo $slug === $active_slug ? ' is-current' : ''; ?>" href="<?php echo esc_url( admin_url( 'admin.php?page=' . $slug ) ); ?>"><?php echo esc_html( $label ); ?></a>
+                    <?php endforeach; ?>
+                </nav>
+            </aside>
+            <div class="wkrh-content">
+    <?php
+}
+
+function wk_rh_render_admin_shell_footer() {
+    ?>
+            </div><!-- .wkrh-content -->
+        </div><!-- .wkrh-layout -->
+    </div><!-- .wrap.wkrh-admin -->
+    <?php
+}
 
 add_filter( 'cron_schedules', function( $schedules ) {
     if ( ! isset( $schedules['wk_rh_every_five_minutes'] ) ) {
@@ -2719,10 +2994,10 @@ function wk_rh_render_upstream_data_page() {
         'wk_rh_refresh_products_' . $selected_location
     );
     ?>
-    <div class="wrap">
-        <h1><?php esc_html_e( 'Onsite Booking Upstream Data', 'racehall-wc-ui' ); ?></h1>
-
-        <form method="get" style="margin:12px 0;display:flex;gap:8px;align-items:center;">
+    <?php wk_rh_render_admin_shell_header( 'wk-rh-upstream-data' ); ?>
+        <div class="wkrh-card">
+            <h2 class="wkrh-card__title"><?php esc_html_e( 'Upstream Products', 'racehall-wc-ui' ); ?></h2>
+            <form method="get" class="wkrh-toolbar">
             <input type="hidden" name="page" value="wk-rh-upstream-data">
             <label for="wk_rh_location_select"><strong><?php esc_html_e( 'Location', 'racehall-wc-ui' ); ?>:</strong></label>
             <select id="wk_rh_location_select" name="location">
@@ -2742,7 +3017,6 @@ function wk_rh_render_upstream_data_page() {
             <a class="button" href="<?php echo esc_url( $refresh_url ); ?>"><?php esc_html_e( 'Refresh Products', 'racehall-wc-ui' ); ?></a>
         </form>
 
-        <h2><?php esc_html_e( 'Upstream Products', 'racehall-wc-ui' ); ?></h2>
         <?php if ( ! empty( $products_data['error'] ) ) : ?>
             <div class="notice notice-error"><p><?php echo esc_html( $products_data['error'] ); ?></p></div>
         <?php endif; ?>
@@ -2784,7 +3058,10 @@ function wk_rh_render_upstream_data_page() {
             </tbody>
         </table>
 
-        <h2 style="margin-top:24px;"><?php esc_html_e( 'Booking Sync State (Woo → Upstream)', 'racehall-wc-ui' ); ?></h2>
+        </div>
+
+        <div class="wkrh-card">
+            <h2 class="wkrh-card__title"><?php esc_html_e( 'Booking Sync State (Woo → Upstream)', 'racehall-wc-ui' ); ?></h2>
         <table class="widefat striped">
             <thead>
                 <tr>
@@ -2850,8 +3127,9 @@ function wk_rh_render_upstream_data_page() {
             <?php endif; ?>
             </tbody>
         </table>
-    </div>
+        </div>
     <?php
+    wk_rh_render_admin_shell_footer();
 }
 
 function wk_rh_render_diagnostics_page() {
@@ -2870,11 +3148,12 @@ function wk_rh_render_diagnostics_page() {
     $logs = wk_rh_get_recent_log_entries( [ 'api', 'user-actions' ], 250, $environment );
     $logging_enabled = wk_rh_is_logging_enabled();
     ?>
-    <div class="wrap">
-        <h1><?php esc_html_e( 'Onsite Booking Diagnostics', 'racehall-wc-ui' ); ?></h1>
-        <p><?php esc_html_e( 'Recent booking lifecycle logs (latest first).', 'racehall-wc-ui' ); ?></p>
-        <p>
-            <strong><?php esc_html_e( 'Logging:', 'racehall-wc-ui' ); ?></strong>
+    <?php wk_rh_render_admin_shell_header( 'wk-rh-diagnostics' ); ?>
+        <div class="wkrh-card">
+            <h2 class="wkrh-card__title"><?php esc_html_e( 'Booking lifecycle logs', 'racehall-wc-ui' ); ?></h2>
+            <p class="wkrh-card__intro"><?php esc_html_e( 'Recent booking lifecycle logs (latest first).', 'racehall-wc-ui' ); ?></p>
+            <p class="wkrh-meta-list">
+                <strong><?php esc_html_e( 'Logging:', 'racehall-wc-ui' ); ?></strong>
             <?php echo esc_html( $logging_enabled ? __( 'Enabled', 'racehall-wc-ui' ) : __( 'Disabled', 'racehall-wc-ui' ) ); ?>
             <br>
             <strong><?php esc_html_e( 'Active log environment:', 'racehall-wc-ui' ); ?></strong>
@@ -2929,8 +3208,9 @@ function wk_rh_render_diagnostics_page() {
             <?php endif; ?>
             </tbody>
         </table>
-    </div>
+        </div>
     <?php
+    wk_rh_render_admin_shell_footer();
 }
 
 require_once RACEHALL_WC_UI_PATH . 'templates/hooks.php';
@@ -5828,6 +6108,13 @@ function wk_rh_add_bmi_ids_to_order_item( $item, $cart_item_key, $values, $order
             $item->add_meta_data( '_wk_rh_addon_upstream_id', $addon_upstream_id, true );
         }
 
+        // The supplement id is the image-bearing product (not remapped at checkout);
+        // persist it so the order-item image resolver can fall back to it.
+        $addon_supplement_id = isset( $values['addon_supplement_id'] ) ? sanitize_text_field( (string) $values['addon_supplement_id'] ) : '';
+        if ( $addon_supplement_id !== '' ) {
+            $item->add_meta_data( '_wk_rh_addon_supplement_id', $addon_supplement_id, true );
+        }
+
         if ( isset( $values['addon_display_name'] ) ) {
             $item->add_meta_data( '_wk_rh_addon_display_name', sanitize_text_field( (string) $values['addon_display_name'] ), true );
         }
@@ -5857,9 +6144,9 @@ function wk_rh_add_bmi_ids_to_order_item( $item, $cart_item_key, $values, $order
     }
 }
 
-function wk_rh_get_hidden_order_item_meta_keys() {
-    return [
-        'bmi_order_id',
+function wk_rh_get_hidden_order_item_meta_keys( $context = 'customer' ) {
+    // Internal/technical line-item meta that should never render as raw rows.
+    $keys = [
         'bmi_order_item_id',
         'Upstream orderId',
         'Upstream orderItemId',
@@ -5870,37 +6157,46 @@ function wk_rh_get_hidden_order_item_meta_keys() {
         'wk_rh_addon_sell_response',
         '_wk_rh_is_addon',
         '_wk_rh_addon_upstream_id',
+        '_wk_rh_addon_supplement_id',
         '_wk_rh_addon_display_name',
         '_wk_rh_addon_unit_price',
     ];
+
+    // Admins keep the raw BMI order id on the order screen; customers never see it.
+    if ( 'admin' !== $context ) {
+        $keys[] = 'bmi_order_id';
+    }
+
+    return $keys;
 }
 
-function wk_rh_should_hide_customer_order_item_meta() {
-    return ! is_admin();
-}
-
+// Admin order-edit screen: hide the technical meta (keeps bmi_order_id + Booking reference visible).
 add_filter( 'woocommerce_hidden_order_itemmeta', function( $hidden_meta ) {
     if ( ! is_array( $hidden_meta ) ) {
         $hidden_meta = [];
     }
 
-    if ( ! wk_rh_should_hide_customer_order_item_meta() ) {
-        return $hidden_meta;
-    }
-
-    return array_values( array_unique( array_merge( $hidden_meta, wk_rh_get_hidden_order_item_meta_keys() ) ) );
+    return array_values( array_unique( array_merge( $hidden_meta, wk_rh_get_hidden_order_item_meta_keys( 'admin' ) ) ) );
 }, 20 );
 
+// Hide technical meta, and rewrite the "Booking reference" row to the human reservation
+// number. Runs for both admin (meta box) and customer-facing views (received page,
+// emails, My Account); admins keep bmi_order_id, customers do not.
 add_filter( 'woocommerce_order_item_get_formatted_meta_data', function( $formatted_meta, $item ) {
     if ( empty( $formatted_meta ) || ! is_array( $formatted_meta ) ) {
         return $formatted_meta;
     }
 
-    if ( ! wk_rh_should_hide_customer_order_item_meta() ) {
-        return $formatted_meta;
-    }
+    $context     = is_admin() ? 'admin' : 'customer';
+    $hidden_keys = array_map( 'strval', wk_rh_get_hidden_order_item_meta_keys( $context ) );
 
-    $hidden_keys = array_map( 'strval', wk_rh_get_hidden_order_item_meta_keys() );
+    $reservation_number = '';
+    if ( is_callable( [ $item, 'get_order' ] ) ) {
+        $order = $item->get_order();
+        if ( $order instanceof WC_Order ) {
+            $reservation_number = (string) $order->get_meta( '_wk_rh_reservation_number', true );
+        }
+    }
 
     foreach ( $formatted_meta as $meta_id => $meta ) {
         $meta_key = '';
@@ -5911,8 +6207,26 @@ add_filter( 'woocommerce_order_item_get_formatted_meta_data', function( $formatt
             $meta_key = (string) $meta['key'];
         }
 
-        if ( $meta_key !== '' && in_array( $meta_key, $hidden_keys, true ) ) {
+        if ( $meta_key === '' ) {
+            continue;
+        }
+
+        if ( in_array( $meta_key, $hidden_keys, true ) ) {
             unset( $formatted_meta[ $meta_id ] );
+            continue;
+        }
+
+        if ( 'Booking reference' === $meta_key ) {
+            // Show the human reservation number; never expose the raw upstream id.
+            if ( $reservation_number === '' ) {
+                unset( $formatted_meta[ $meta_id ] );
+                continue;
+            }
+
+            if ( is_object( $meta ) ) {
+                $meta->value         = $reservation_number;
+                $meta->display_value = esc_html( $reservation_number );
+            }
         }
     }
 

@@ -196,6 +196,63 @@ function wk_rh_detect_image_content_type( $body, $content_type = '' ) {
     return 'image/jpeg';
 }
 
+/**
+ * Best-effort downscale of a product image to a thumbnail before it is cached/served.
+ * BMI returns full-resolution images, but they are only ever shown as small thumbnails,
+ * so this drastically cuts transfer size. Falls back to the original bytes if the GD
+ * image functions are unavailable or anything goes wrong.
+ *
+ * @return array{0:string,1:string} [ binary, content_type ]
+ */
+function wk_rh_maybe_downscale_image( $binary, $content_type, $max_dimension = 480 ) {
+    if ( ! function_exists( 'imagecreatefromstring' ) || ! is_string( $binary ) || $binary === '' ) {
+        return [ $binary, $content_type ];
+    }
+
+    $src = @imagecreatefromstring( $binary );
+    if ( ! $src ) {
+        return [ $binary, $content_type ];
+    }
+
+    $width  = imagesx( $src );
+    $height = imagesy( $src );
+    if ( $width <= $max_dimension && $height <= $max_dimension ) {
+        imagedestroy( $src );
+        return [ $binary, $content_type ];
+    }
+
+    $ratio      = min( $max_dimension / $width, $max_dimension / $height );
+    $new_width  = max( 1, (int) round( $width * $ratio ) );
+    $new_height = max( 1, (int) round( $height * $ratio ) );
+
+    $dst = imagecreatetruecolor( $new_width, $new_height );
+    imagealphablending( $dst, false );
+    imagesavealpha( $dst, true );
+    imagecopyresampled( $dst, $src, 0, 0, 0, 0, $new_width, $new_height, $width, $height );
+
+    ob_start();
+    if ( strpos( (string) $content_type, 'png' ) !== false ) {
+        imagepng( $dst, null, 6 );
+        $out_type = 'image/png';
+    } elseif ( strpos( (string) $content_type, 'webp' ) !== false && function_exists( 'imagewebp' ) ) {
+        imagewebp( $dst, null, 82 );
+        $out_type = 'image/webp';
+    } else {
+        imagejpeg( $dst, null, 82 );
+        $out_type = 'image/jpeg';
+    }
+    $resized = ob_get_clean();
+
+    imagedestroy( $src );
+    imagedestroy( $dst );
+
+    if ( ! is_string( $resized ) || $resized === '' ) {
+        return [ $binary, $content_type ];
+    }
+
+    return [ $resized, $out_type ];
+}
+
 function wk_rh_get_product_image_data_uri( $location, $product_id ) {
     static $runtime_image_cache = [];
 
@@ -204,12 +261,12 @@ function wk_rh_get_product_image_data_uri( $location, $product_id ) {
         return '';
     }
 
-    $runtime_key = md5( (string) $location . '|' . $product_id );
+    $runtime_key = md5( 'v2|' . (string) $location . '|' . $product_id );
     if ( isset( $runtime_image_cache[ $runtime_key ] ) ) {
         return (string) $runtime_image_cache[ $runtime_key ];
     }
 
-    $cache_key = 'wk_rh_img_' . md5( (string) $location . '|' . $product_id );
+    $cache_key = 'wk_rh_img_' . md5( 'v2|' . (string) $location . '|' . $product_id );
     $cached = get_transient( $cache_key );
     if ( is_string( $cached ) && $cached !== '' ) {
         $runtime_image_cache[ $runtime_key ] = $cached;
@@ -266,6 +323,8 @@ function wk_rh_get_product_image_data_uri( $location, $product_id ) {
     $content_type = wp_remote_retrieve_header( $response, 'content-type' );
     $content_type = wk_rh_detect_image_content_type( $body, is_string( $content_type ) ? $content_type : '' );
 
+    list( $body, $content_type ) = wk_rh_maybe_downscale_image( $body, $content_type );
+
     $data_uri = 'data:' . $content_type . ';base64,' . base64_encode( $body );
     set_transient( $cache_key, $data_uri, 12 * HOUR_IN_SECONDS );
     $runtime_image_cache[ $runtime_key ] = $data_uri;
@@ -273,21 +332,178 @@ function wk_rh_get_product_image_data_uri( $location, $product_id ) {
     return $data_uri;
 }
 
-function wk_rh_get_product_image_html( $location, $product_id, $alt = '', $class_name = 'wk-rh-product-image' ) {
-    $data_uri = wk_rh_get_product_image_data_uri( $location, $product_id );
-    if ( $data_uri === '' ) {
+/**
+ * Filesystem cache for downscaled product images. After the first fetch each image is
+ * a plain static file served by the web server — no WordPress boot, no BMI round-trip —
+ * and fully browser/CDN cacheable.
+ */
+function wk_rh_get_addon_image_cache_paths() {
+    static $paths = null;
+    if ( $paths !== null ) {
+        return $paths;
+    }
+
+    $uploads = wp_get_upload_dir();
+    if ( ! empty( $uploads['error'] ) ) {
+        $paths = false;
+        return $paths;
+    }
+
+    $paths = [
+        'dir' => trailingslashit( $uploads['basedir'] ) . 'wk-rh-addon-images',
+        'url' => trailingslashit( $uploads['baseurl'] ) . 'wk-rh-addon-images',
+    ];
+
+    return $paths;
+}
+
+function wk_rh_get_addon_image_basename( $location, $product_id ) {
+    return md5( 'v2|' . (string) $location . '|' . (string) $product_id );
+}
+
+function wk_rh_image_extension_from_content_type( $content_type ) {
+    $content_type = strtolower( (string) $content_type );
+    if ( strpos( $content_type, 'png' ) !== false ) {
+        return 'png';
+    }
+    if ( strpos( $content_type, 'webp' ) !== false ) {
+        return 'webp';
+    }
+    if ( strpos( $content_type, 'gif' ) !== false ) {
+        return 'gif';
+    }
+    return 'jpg';
+}
+
+function wk_rh_find_cached_addon_image_url( $location, $product_id ) {
+    $paths = wk_rh_get_addon_image_cache_paths();
+    if ( ! $paths ) {
         return '';
     }
 
-    $classes = trim( (string) $class_name );
+    $base = wk_rh_get_addon_image_basename( $location, $product_id );
+    foreach ( [ 'jpg', 'png', 'webp', 'gif' ] as $ext ) {
+        if ( file_exists( $paths['dir'] . '/' . $base . '.' . $ext ) ) {
+            return $paths['url'] . '/' . $base . '.' . $ext;
+        }
+    }
+
+    return '';
+}
+
+/**
+ * URL for a BMI product image. Prefers the cached static file (fast, no PHP); otherwise
+ * returns a signed proxy URL that fetches once, writes the static file, and redirects to
+ * it. The signature (site auth salt) prevents the proxy fetching arbitrary product ids.
+ */
+function wk_rh_get_product_image_url( $location, $product_id ) {
+    $product_id = trim( (string) $product_id );
+    $location   = (string) $location;
+    if ( $product_id === '' ) {
+        return '';
+    }
+
+    $cached_url = wk_rh_find_cached_addon_image_url( $location, $product_id );
+    if ( $cached_url !== '' ) {
+        return $cached_url;
+    }
+
+    return add_query_arg(
+        [
+            'wk_rh_img' => 1,
+            'loc'       => rawurlencode( $location ),
+            'pid'       => rawurlencode( $product_id ),
+            'sig'       => hash_hmac( 'sha256', $location . '|' . $product_id, wp_salt( 'auth' ) ),
+        ],
+        home_url( '/' )
+    );
+}
+
+function wk_rh_get_product_image_html( $location, $product_id, $alt = '', $class_name = 'wk-rh-product-image' ) {
+    $cached_url = wk_rh_find_cached_addon_image_url( $location, $product_id );
+
+    // If not cached yet, confirm the image exists upstream before emitting an <img> (so
+    // we never render a broken image). Once a static file exists, skip the fetch entirely.
+    if ( $cached_url === '' && wk_rh_get_product_image_data_uri( $location, $product_id ) === '' ) {
+        return '';
+    }
+
+    $url = $cached_url !== '' ? $cached_url : wk_rh_get_product_image_url( $location, $product_id );
+    if ( $url === '' ) {
+        return '';
+    }
 
     return sprintf(
         '<img src="%1$s" alt="%2$s" class="%3$s" loading="lazy" />',
-        esc_attr( $data_uri ),
+        esc_url( $url ),
         esc_attr( wp_strip_all_tags( (string) $alt ) ),
-        esc_attr( $classes )
+        esc_attr( trim( (string) $class_name ) )
     );
 }
+
+/**
+ * Cacheable image proxy: serves the BMI product image behind the signed URL above.
+ * Fetches server-side (creds stay server-side), reuses the existing 12h transient
+ * cache, and sends public cache headers so the browser/CDN cache it. Returns the
+ * binary and exits; only ever triggers on its own signed query.
+ */
+function wk_rh_handle_product_image_proxy() {
+    if ( ! isset( $_GET['wk_rh_img'] ) ) {
+        return;
+    }
+
+    $location   = isset( $_GET['loc'] ) ? sanitize_text_field( rawurldecode( wp_unslash( (string) $_GET['loc'] ) ) ) : '';
+    $product_id = isset( $_GET['pid'] ) ? sanitize_text_field( rawurldecode( wp_unslash( (string) $_GET['pid'] ) ) ) : '';
+    $sig        = isset( $_GET['sig'] ) ? (string) wp_unslash( $_GET['sig'] ) : '';
+
+    $expected = hash_hmac( 'sha256', $location . '|' . $product_id, wp_salt( 'auth' ) );
+    if ( $product_id === '' || $sig === '' || ! hash_equals( $expected, $sig ) ) {
+        status_header( 403 );
+        exit;
+    }
+
+    // A concurrent request may have already written the file; hand it off if so.
+    $cached_url = wk_rh_find_cached_addon_image_url( $location, $product_id );
+    if ( $cached_url !== '' ) {
+        wp_safe_redirect( $cached_url, 302 );
+        exit;
+    }
+
+    $data_uri = wk_rh_get_product_image_data_uri( $location, $product_id );
+    if ( $data_uri === '' || ! preg_match( '#^data:([^;]+);base64,(.*)$#s', $data_uri, $matches ) ) {
+        status_header( 404 );
+        exit;
+    }
+
+    $binary = base64_decode( $matches[2], true );
+    if ( $binary === false || $binary === '' ) {
+        status_header( 404 );
+        exit;
+    }
+
+    // Persist as a static file so every subsequent load skips WordPress and BMI entirely.
+    $paths = wk_rh_get_addon_image_cache_paths();
+    if ( $paths && wp_mkdir_p( $paths['dir'] ) ) {
+        $filename = wk_rh_get_addon_image_basename( $location, $product_id ) . '.' . wk_rh_image_extension_from_content_type( $matches[1] );
+        if ( file_put_contents( $paths['dir'] . '/' . $filename, $binary ) !== false ) {
+            wp_safe_redirect( $paths['url'] . '/' . $filename, 302 );
+            exit;
+        }
+    }
+
+    // Fallback: stream inline if the static file could not be written.
+    if ( ! headers_sent() ) {
+        header_remove( 'Pragma' );
+        header( 'Content-Type: ' . $matches[1] );
+        header( 'Content-Length: ' . strlen( $binary ) );
+        header( 'Cache-Control: public, max-age=43200, immutable' );
+        header( 'X-Content-Type-Options: nosniff' );
+    }
+
+    echo $binary; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- raw image bytes.
+    exit;
+}
+add_action( 'template_redirect', 'wk_rh_handle_product_image_proxy', 1 );
 
 function wk_rh_get_order_item_upstream_image_html( $item, $class_name = 'wk-rh-order-item-image' ) {
     if ( ! $item instanceof WC_Order_Item_Product ) {
@@ -298,12 +514,19 @@ function wk_rh_get_order_item_upstream_image_html( $item, $class_name = 'wk-rh-o
         return '';
     }
 
-    $product_id = trim( (string) $item->get_meta( '_wk_rh_addon_upstream_id', true ) );
-    if ( $product_id === '' ) {
-        $product_id = trim( (string) $item->get_meta( '_wk_rh_addon_upstream_product_id', true ) );
+    // Try every known identifier for this add-on. The supplement id captured at
+    // add-to-cart is the image-bearing product; the upstream id is remapped to the
+    // sell product id at checkout and may not have an upstream image. Use the first
+    // candidate that actually returns an image.
+    $candidate_ids = [];
+    foreach ( [ '_wk_rh_addon_supplement_id', '_wk_rh_addon_upstream_id', '_wk_rh_addon_upstream_product_id' ] as $meta_key ) {
+        $candidate = trim( (string) $item->get_meta( $meta_key, true ) );
+        if ( $candidate !== '' && ! in_array( $candidate, $candidate_ids, true ) ) {
+            $candidate_ids[] = $candidate;
+        }
     }
 
-    if ( $product_id === '' ) {
+    if ( empty( $candidate_ids ) ) {
         return '';
     }
 
@@ -319,7 +542,14 @@ function wk_rh_get_order_item_upstream_image_html( $item, $class_name = 'wk-rh-o
         return '';
     }
 
-    return wk_rh_get_product_image_html( $location, $product_id, $item->get_name(), $class_name );
+    foreach ( $candidate_ids as $candidate_id ) {
+        $image_html = wk_rh_get_product_image_html( $location, $candidate_id, $item->get_name(), $class_name );
+        if ( $image_html !== '' ) {
+            return $image_html;
+        }
+    }
+
+    return '';
 }
 
 function wk_rh_get_cart_item_upstream_image_html( array $cart_item, $class_name = 'wk-rh-order-item-image' ) {
@@ -1752,7 +1982,7 @@ function wk_rh_add_admin_order_list_columns( $columns ) {
     foreach ( $columns as $key => $label ) {
         if ( 'order_date' === (string) $key ) {
             $new_columns['wk_rh_order_location'] = __( 'Location', 'racehall-wc-ui' );
-            $new_columns['wk_rh_bmi_order_id'] = __( 'BMI Order ID', 'racehall-wc-ui' );
+            $new_columns['wk_rh_booking_reference'] = __( 'BMI Booking Reference', 'racehall-wc-ui' );
             $inserted = true;
         }
 
@@ -1761,7 +1991,7 @@ function wk_rh_add_admin_order_list_columns( $columns ) {
 
     if ( ! $inserted ) {
         $new_columns['wk_rh_order_location'] = __( 'Location', 'racehall-wc-ui' );
-        $new_columns['wk_rh_bmi_order_id'] = __( 'BMI Order ID', 'racehall-wc-ui' );
+        $new_columns['wk_rh_booking_reference'] = __( 'BMI Booking Reference', 'racehall-wc-ui' );
     }
 
     return $new_columns;
@@ -1776,14 +2006,14 @@ function wk_rh_output_admin_order_list_column( $column, WC_Order $order ) {
         return;
     }
 
-    if ( 'wk_rh_bmi_order_id' === $column ) {
-        $value = wk_rh_get_order_upstream_order_id( $order );
-        echo $value !== '' ? esc_html( $value ) : '&mdash;';
+    if ( 'wk_rh_booking_reference' === $column ) {
+        $details = wk_rh_get_order_reservation_details( $order );
+        echo $details['number'] !== '' ? esc_html( $details['number'] ) : '&mdash;';
     }
 }
 
 function wk_rh_render_legacy_admin_order_list_column( $column ) {
-    if ( ! in_array( $column, [ 'wk_rh_order_location', 'wk_rh_bmi_order_id' ], true ) ) {
+    if ( ! in_array( $column, [ 'wk_rh_order_location', 'wk_rh_booking_reference' ], true ) ) {
         return;
     }
 
@@ -1803,7 +2033,7 @@ function wk_rh_render_legacy_admin_order_list_column( $column ) {
 add_action( 'manage_shop_order_posts_custom_column', 'wk_rh_render_legacy_admin_order_list_column', 20 );
 
 function wk_rh_render_hpos_admin_order_list_column( $column, $order_or_id ) {
-    if ( ! in_array( $column, [ 'wk_rh_order_location', 'wk_rh_bmi_order_id' ], true ) || ! function_exists( 'wc_get_order' ) ) {
+    if ( ! in_array( $column, [ 'wk_rh_order_location', 'wk_rh_booking_reference' ], true ) || ! function_exists( 'wc_get_order' ) ) {
         return;
     }
 
@@ -1816,10 +2046,10 @@ function wk_rh_render_hpos_admin_order_list_column( $column, $order_or_id ) {
 }
 add_action( 'manage_woocommerce_page_wc-orders_custom_column', 'wk_rh_render_hpos_admin_order_list_column', 20, 2 );
 
-function wk_rh_mark_payment_confirmed( WC_Order $order, $response_body = '' ) {
+function wk_rh_mark_payment_confirmed( WC_Order $order, $response_body = '', $note = '' ) {
     $order->update_meta_data( '_wk_rh_payment_confirmed', 'yes' );
     $order->save();
-    $order->add_order_note( 'Onsite booking: payment/confirm synced to upstream.' );
+    $order->add_order_note( $note !== '' ? $note : 'Onsite booking: payment/confirm synced to upstream.' );
     wk_rh_log_user_event( 'order.payment_confirmed', [
         'wcOrderId' => (string) $order->get_id(),
         'orderId' => (string) wk_rh_get_order_upstream_order_id( $order ),
@@ -1844,8 +2074,10 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
         return;
     }
 
-    //if ( $order->get_payment_method() === 'cod' && ! $order->has_status( 'completed' ) ) {
+    // "Betal ved ankomst" maps to the WooCommerce COD gateway. Instead of an online
+    // payment/confirm, finalize the booking upstream via the pay-on-site endpoint.
     if ( $order->get_payment_method() === 'cod' ) {
+        wk_rh_pay_on_site_for_order( $order );
         return;
     }
 
@@ -1937,6 +2169,7 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
     }
 
     if ( $code >= 200 && $code < 300 && $payment_success ) {
+        wk_rh_store_reservation_details( $order, $response_data );
         wk_rh_mark_payment_confirmed( $order, $response_body );
     } else {
         $error_message = 'Onsite booking payment/confirm failed';
@@ -1972,6 +2205,304 @@ function wk_rh_confirm_payment_for_order( $order_id ) {
 add_action( 'woocommerce_payment_complete', 'wk_rh_confirm_payment_for_order', 20 );
 add_action( 'woocommerce_order_status_processing', 'wk_rh_confirm_payment_for_order', 20 );
 add_action( 'woocommerce_order_status_completed', 'wk_rh_confirm_payment_for_order', 20 );
+
+/**
+ * Finalize a "Betal ved ankomst" (pay-on-site) order upstream.
+ *
+ * Mirrors wk_rh_confirm_payment_for_order(), but calls the BMI payOnSite endpoint
+ * which closes the bill as "Billed" and creates the booking task. The response is
+ * the same PublicPaymentResult shape as payment/confirm (Status 0 = Confirmed).
+ *
+ * @param WC_Order|int $order Order object or ID.
+ */
+function wk_rh_pay_on_site_for_order( $order ) {
+    if ( ! $order instanceof WC_Order ) {
+        $order = wc_get_order( $order );
+    }
+    if ( ! $order instanceof WC_Order ) {
+        return;
+    }
+
+    if ( ! wk_rh_is_pay_on_site_enabled() ) {
+        return;
+    }
+
+    if ( $order->get_meta( '_wk_rh_payment_confirmed', true ) === 'yes' ) {
+        return;
+    }
+
+    $upstream_order_id = wk_rh_get_order_upstream_order_id( $order );
+    if ( empty( $upstream_order_id ) ) {
+        wk_rh_handle_pay_on_site_unattempted(
+            $order,
+            'missing_upstream_order_id',
+            'Onsite booking pay-on-site skipped: no upstream BMI order id on the order; the booking was NOT finalized upstream.',
+            [ 'location' => (string) wk_rh_get_order_booking_location( $order ) ]
+        );
+        return;
+    }
+
+    $location = wk_rh_get_order_booking_location( $order );
+    $token    = wk_rh_get_token( $location );
+    $creds    = wk_rh_get_api_credentials( $location );
+    if ( ! $token || empty( $creds['client_key'] ) || empty( $creds['subscription_key'] ) ) {
+        wk_rh_handle_pay_on_site_unattempted(
+            $order,
+            'missing_token_or_credentials',
+            'Onsite booking pay-on-site skipped: missing API token/credentials for this location; the booking was NOT finalized upstream.',
+            [ 'orderId' => (string) $upstream_order_id, 'location' => (string) $location ]
+        );
+        return;
+    }
+
+    $payload = [
+        'OrderId' => ctype_digit( (string) $upstream_order_id ) ? (int) $upstream_order_id : $upstream_order_id,
+    ];
+
+    $url = function_exists( 'wk_rh_build_bmi_client_url' )
+        ? wk_rh_build_bmi_client_url( $creds, 'booking', 'payment/payOnSite' )
+        : $creds['base_url'] . '/public-booking/' . rawurlencode( $creds['client_key'] ) . '/payment/payOnSite';
+    $response = wk_rh_remote_request_with_retry(
+        'POST',
+        $url,
+        [
+            'headers' => [
+                'Authorization'        => 'Bearer ' . $token,
+                'Content-Type'         => 'application/json',
+                'Accept-Language'      => $creds['accept_language'],
+                'Bmi-Subscription-Key' => $creds['subscription_key'],
+            ],
+            'body'    => wp_json_encode( $payload ),
+            'timeout' => 30,
+        ],
+        3,
+        [
+            'operation' => 'payment_pay_on_site',
+            'orderId' => (string) $upstream_order_id,
+            'wcOrderId' => (string) $order->get_id(),
+            'location' => (string) $location,
+        ]
+    );
+
+    if ( is_wp_error( $response ) ) {
+        $order->add_order_note( 'Onsite booking payment/payOnSite failed: ' . $response->get_error_message() );
+        wk_rh_log_user_event( 'order.pay_on_site_failed', [
+            'wcOrderId' => (string) $order->get_id(),
+            'orderId' => (string) $upstream_order_id,
+            'location' => (string) $location,
+            'error' => $response->get_error_message(),
+        ], 'error' );
+        if ( ! $order->has_status( 'on-hold' ) ) {
+            $order->update_status( 'on-hold', 'Pay-on-site finalization failed (transport error); needs manual review. ' );
+        }
+        return;
+    }
+
+    $code = (int) wp_remote_retrieve_response_code( $response );
+    $response_body = wp_remote_retrieve_body( $response );
+    $response_data = function_exists( 'wk_rh_normalize_api_response' ) ? wk_rh_normalize_api_response( json_decode( $response_body, true ) ) : json_decode( $response_body, true );
+    $payment_status = is_array( $response_data ) && isset( $response_data['status'] ) && is_numeric( $response_data['status'] )
+        ? (int) $response_data['status']
+        : null;
+    $payment_success = $payment_status === 0;
+
+    if ( $payment_status === null && is_array( $response_data ) && array_key_exists( 'success', $response_data ) ) {
+        $payment_success = $response_data['success'] !== false;
+    }
+
+    if ( $code >= 200 && $code < 300 && $payment_success ) {
+        wk_rh_store_reservation_details( $order, $response_data );
+        wk_rh_mark_payment_confirmed( $order, $response_body, 'Onsite booking: pay-on-site (payOnSite) confirmed upstream.' );
+    } else {
+        $error_message = 'Onsite booking payment/payOnSite failed';
+        if ( is_array( $response_data ) && ! empty( $response_data['errorMessage'] ) ) {
+            $error_message .= ': ' . sanitize_text_field( (string) $response_data['errorMessage'] );
+        } elseif ( $payment_status !== null ) {
+            $error_message .= ' with status ' . $payment_status;
+        } else {
+            $error_message .= ' with HTTP ' . $code;
+        }
+
+        wk_rh_log_user_event( 'order.pay_on_site_failed', [
+            'wcOrderId' => (string) $order->get_id(),
+            'orderId' => (string) $upstream_order_id,
+            'location' => (string) $location,
+            'httpCode' => $code,
+            'status' => $payment_status,
+            'body' => is_array( $response_data ) ? $response_data : $response_body,
+        ], 'error' );
+        wk_rh_log_upstream_event( 'error', 'Upstream payment/payOnSite failed', [
+            'operation' => 'payment_pay_on_site',
+            'orderId' => (string) $upstream_order_id,
+            'wcOrderId' => (string) $order->get_id(),
+            'location' => (string) $location,
+            'httpCode' => $code,
+            'status' => $payment_status,
+            'body' => is_array( $response_data ) ? $response_data : $response_body,
+        ] );
+        $order->add_order_note( $error_message );
+        if ( ! $order->has_status( 'on-hold' ) ) {
+            $order->update_status( 'on-hold', 'Pay-on-site finalization failed; needs manual review. ' );
+        }
+    }
+}
+
+/**
+ * Surface a pay-on-site finalization that could not even be attempted.
+ *
+ * These are the "can't even try" bails (no upstream order id, no token/credentials):
+ * the COD order would otherwise sit in `processing` while its booking silently never
+ * gets finalized upstream and the hold expires. We log it, leave an order note, and
+ * move the order to on-hold for parity with the attempted-but-failed paths so staff see it.
+ *
+ * @param WC_Order $order   Order.
+ * @param string   $reason  Machine-readable reason code.
+ * @param string   $note    Human-readable order note.
+ * @param array    $context Extra log context.
+ */
+function wk_rh_handle_pay_on_site_unattempted( WC_Order $order, $reason, $note, array $context = [] ) {
+    $order->add_order_note( $note );
+    wk_rh_log_user_event( 'order.pay_on_site_failed', array_merge( [
+        'wcOrderId' => (string) $order->get_id(),
+        'reason'    => $reason,
+    ], $context ), 'error' );
+
+    if ( ! $order->has_status( 'on-hold' ) ) {
+        $order->update_status( 'on-hold', 'Pay-on-site finalization could not be attempted (' . $reason . '); needs manual review. ' );
+    }
+}
+
+/**
+ * Persist the BMI reservation reference returned by payment/confirm or payment/payOnSite.
+ *
+ * @param WC_Order $order         Order to update.
+ * @param mixed    $response_data Normalized API response (keys are lcfirst'd).
+ */
+function wk_rh_store_reservation_details( WC_Order $order, $response_data ) {
+    if ( ! is_array( $response_data ) ) {
+        return;
+    }
+
+    $number = isset( $response_data['reservationNumber'] ) ? sanitize_text_field( (string) $response_data['reservationNumber'] ) : '';
+    $code   = isset( $response_data['reservationCode'] ) ? sanitize_text_field( (string) $response_data['reservationCode'] ) : '';
+
+    $changed = false;
+    if ( $number !== '' && $order->get_meta( '_wk_rh_reservation_number', true ) !== $number ) {
+        $order->update_meta_data( '_wk_rh_reservation_number', $number );
+        $changed = true;
+    }
+    if ( $code !== '' && $order->get_meta( '_wk_rh_reservation_code', true ) !== $code ) {
+        $order->update_meta_data( '_wk_rh_reservation_code', $code );
+        $changed = true;
+    }
+
+    if ( $changed ) {
+        $order->save();
+    }
+}
+
+/**
+ * Read the stored BMI reservation reference for an order.
+ *
+ * @param WC_Order $order Order.
+ * @return array{number:string,code:string}
+ */
+function wk_rh_get_order_reservation_details( $order ) {
+    if ( ! $order instanceof WC_Order ) {
+        return [ 'number' => '', 'code' => '' ];
+    }
+
+    return [
+        'number' => (string) $order->get_meta( '_wk_rh_reservation_number', true ),
+        'code'   => (string) $order->get_meta( '_wk_rh_reservation_code', true ),
+    ];
+}
+
+/**
+ * Build the BMI reservation reference markup shown to customers/staff.
+ *
+ * @param WC_Order $order Order.
+ * @param bool     $plain Render as plain text (for plain-text emails).
+ * @return string
+ */
+function wk_rh_build_reservation_reference_html( $order, $plain = false ) {
+    $details = wk_rh_get_order_reservation_details( $order );
+    // Only the human-readable reservation number is shown; the rXXXX reservation code
+    // (QR payload) is stored but intentionally not displayed.
+    if ( $details['number'] === '' ) {
+        return '';
+    }
+
+    $heading    = __( 'Booking reference', 'racehall-wc-ui' );
+    $number_lbl = __( 'Reservation number', 'racehall-wc-ui' );
+
+    if ( $plain ) {
+        return $heading . "\n" . $number_lbl . ': ' . $details['number'] . "\n";
+    }
+
+    return '<section class="wk-rh-reservation-reference"><h3>' . esc_html( $heading ) . '</h3>'
+        . '<p class="wk-rh-reservation-number"><strong>' . esc_html( $number_lbl ) . ':</strong> ' . esc_html( $details['number'] ) . '</p>'
+        . '</section>';
+}
+
+/**
+ * Thank-you page + customer My Account order view (both fire this action).
+ *
+ * @param WC_Order $order Order.
+ */
+function wk_rh_render_reservation_reference_frontend( $order ) {
+    if ( ! $order instanceof WC_Order ) {
+        return;
+    }
+
+    // CheckoutWC may fire woocommerce_order_details_after_order_table more than once
+    // on the thank-you page; render at most once per order per request.
+    static $rendered = [];
+    $order_id = $order->get_id();
+    if ( isset( $rendered[ $order_id ] ) ) {
+        return;
+    }
+    $rendered[ $order_id ] = true;
+
+    echo wk_rh_build_reservation_reference_html( $order ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in builder.
+}
+add_action( 'woocommerce_order_details_after_order_table', 'wk_rh_render_reservation_reference_frontend', 20 );
+
+/**
+ * Order confirmation emails.
+ *
+ * @param WC_Order $order         Order.
+ * @param bool     $sent_to_admin Whether the email is to the admin.
+ * @param bool     $plain_text    Whether the email is plain text.
+ */
+function wk_rh_render_reservation_reference_email( $order, $sent_to_admin = false, $plain_text = false ) {
+    if ( ! $order instanceof WC_Order ) {
+        return;
+    }
+    $markup = wk_rh_build_reservation_reference_html( $order, (bool) $plain_text );
+    if ( $markup === '' ) {
+        return;
+    }
+    echo $plain_text ? "\n" . $markup : wp_kses_post( $markup ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+}
+add_action( 'woocommerce_email_after_order_table', 'wk_rh_render_reservation_reference_email', 20, 3 );
+
+/**
+ * Admin order-edit screen.
+ *
+ * @param WC_Order $order Order.
+ */
+function wk_rh_render_reservation_reference_admin( $order ) {
+    $details = wk_rh_get_order_reservation_details( $order );
+    if ( $details['number'] === '' ) {
+        return;
+    }
+    echo '<div class="wk-rh-reservation-reference-admin">';
+    echo '<h4 style="margin-bottom:4px;">' . esc_html__( 'BMI booking reference', 'racehall-wc-ui' ) . '</h4>';
+    echo '<p style="margin:0;"><strong>' . esc_html__( 'Reservation number', 'racehall-wc-ui' ) . ':</strong> ' . esc_html( $details['number'] ) . '</p>';
+    echo '</div>';
+}
+add_action( 'woocommerce_admin_order_data_after_order_details', 'wk_rh_render_reservation_reference_admin', 20 );
 
 function wk_rh_cancel_upstream_order_by_id( $upstream_order_id, $location = '', array $extra_context = [] ) {
     $upstream_order_id = trim( (string) $upstream_order_id );
