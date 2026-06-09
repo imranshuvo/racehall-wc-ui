@@ -768,6 +768,9 @@ div#cfw-cart-summary-coupons { display: none;}
     display: flex;
     align-items: center;
 }
+p#woo_ml_subscribe_field label {
+    color: white;
+}
 
 /* ================= BUTTONS ================= */
 
