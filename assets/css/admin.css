@@ -1,0 +1,409 @@
+/* Onsite Booking System — modern admin theme (Racehall brand) */
+
+.wkrh-admin {
+    --wkrh-red: #c8102e;
+    --wkrh-red-dark: #a70b24;
+    --wkrh-ink: #221f20;
+    --wkrh-border: #e3e4e7;
+    --wkrh-bg: #f3f4f5;
+    --wkrh-muted: #6b6f76;
+    --wkrh-radius: 10px;
+    --wkrh-shadow: 0 1px 2px rgba(34, 31, 32, .06), 0 4px 18px rgba(34, 31, 32, .06);
+    max-width: 1180px;
+    margin-right: 20px;
+}
+
+.wkrh-admin * {
+    box-sizing: border-box;
+}
+
+/* Hide the default WP page title (we render our own header). */
+.wkrh-admin > h1:first-child {
+    display: none;
+}
+
+/* ---- Header bar ---- */
+.wkrh-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    background: var(--wkrh-ink);
+    color: #fff;
+    border-radius: var(--wkrh-radius);
+    padding: 18px 22px;
+    margin: 16px 0 18px;
+    box-shadow: var(--wkrh-shadow);
+}
+
+.wkrh-header__brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.wkrh-header__logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--wkrh-red);
+    color: #fff;
+    flex: none;
+}
+
+.wkrh-header__logo .dashicons {
+    font-size: 24px;
+    width: 24px;
+    height: 24px;
+}
+
+.wkrh-header__title {
+    margin: 0;
+    padding: 0;
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #fff;
+}
+
+.wkrh-header__sub {
+    margin: 2px 0 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, .68);
+}
+
+.wkrh-header__meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.wkrh-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    padding: 4px 10px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    background: rgba(255, 255, 255, .14);
+    color: #fff;
+}
+
+.wkrh-badge--test {
+    background: #c79910;
+    color: #2a2100;
+}
+
+.wkrh-badge--live {
+    background: #1f8f52;
+    color: #fff;
+}
+
+.wkrh-version {
+    font-size: 12px;
+    color: rgba(255, 255, 255, .6);
+}
+
+/* ---- Layout: sidebar + content ---- */
+.wkrh-layout {
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+}
+
+.wkrh-sidebar {
+    background: #fff;
+    border: 1px solid var(--wkrh-border);
+    border-radius: var(--wkrh-radius);
+    box-shadow: var(--wkrh-shadow);
+    padding: 10px;
+    position: sticky;
+    top: 46px;
+}
+
+.wkrh-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.wkrh-nav__item {
+    display: block;
+    padding: 9px 12px;
+    border-radius: 7px;
+    border-left: 3px solid transparent;
+    color: var(--wkrh-ink);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 13.5px;
+    cursor: pointer;
+}
+
+.wkrh-nav__item:hover {
+    background: #f6e9ec;
+    color: var(--wkrh-red-dark);
+}
+
+.wkrh-nav__item.is-active {
+    background: #fbe9ec;
+    border-left-color: var(--wkrh-red);
+    color: var(--wkrh-red-dark);
+    font-weight: 600;
+}
+
+.wkrh-nav--pages {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--wkrh-border);
+}
+
+.wkrh-nav__page {
+    display: block;
+    padding: 7px 12px;
+    border-radius: 7px;
+    color: var(--wkrh-muted);
+    text-decoration: none;
+    font-size: 13px;
+}
+
+.wkrh-nav__page:hover {
+    background: var(--wkrh-bg);
+    color: var(--wkrh-ink);
+}
+
+.wkrh-nav__page.is-current {
+    color: var(--wkrh-ink);
+    font-weight: 600;
+}
+
+.wkrh-content {
+    min-width: 0;
+}
+
+/* ---- Cards ---- */
+.wkrh-card {
+    background: #fff;
+    border: 1px solid var(--wkrh-border);
+    border-radius: var(--wkrh-radius);
+    box-shadow: var(--wkrh-shadow);
+    padding: 22px 24px;
+    margin: 0 0 18px;
+}
+
+.wkrh-card__title {
+    margin: 0 0 4px;
+    padding: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--wkrh-ink);
+}
+
+.wkrh-card__intro {
+    margin: 0 0 18px;
+    color: var(--wkrh-muted);
+    font-size: 13px;
+}
+
+.wkrh-card__title + .wkrh-fields,
+.wkrh-card__title + .wkrh-card__intro {
+    margin-top: 16px;
+}
+
+/* ---- Fields ---- */
+.wkrh-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.wkrh-field {
+    display: block;
+}
+
+.wkrh-field.is-dimmed {
+    opacity: .5;
+}
+
+.wkrh-field__label {
+    display: block;
+    font-weight: 600;
+    font-size: 13.5px;
+    color: var(--wkrh-ink);
+    margin-bottom: 6px;
+}
+
+.wkrh-field__control input[type="text"],
+.wkrh-field__control input[type="url"],
+.wkrh-field__control input[type="number"],
+.wkrh-field__control select,
+.wkrh-field__control textarea {
+    border: 1px solid #c7cace;
+    border-radius: 8px;
+    padding: 7px 11px;
+    font-size: 13.5px;
+    background: #fff;
+    box-shadow: none;
+    min-height: 38px;
+}
+
+.wkrh-field__control input[type="url"],
+.wkrh-field__control input[type="text"] {
+    width: 100%;
+    max-width: 440px;
+}
+
+.wkrh-field__control select {
+    min-width: 220px;
+}
+
+.wkrh-field__control textarea {
+    width: 100%;
+    font-family: Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+
+.wkrh-field__control input:focus,
+.wkrh-field__control select:focus,
+.wkrh-field__control textarea:focus {
+    border-color: var(--wkrh-red);
+    outline: 2px solid rgba(200, 16, 46, .18);
+    outline-offset: 0;
+}
+
+.wkrh-field__desc {
+    margin: 7px 0 0;
+    color: var(--wkrh-muted);
+    font-size: 12.5px;
+    max-width: 620px;
+}
+
+/* Checkbox/toggle field */
+.wkrh-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13.5px;
+    color: var(--wkrh-ink);
+}
+
+.wkrh-check input[type="checkbox"] {
+    margin-top: 2px;
+}
+
+/* ---- Actions bar ---- */
+.wkrh-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #fff;
+    border: 1px solid var(--wkrh-border);
+    border-radius: var(--wkrh-radius);
+    box-shadow: var(--wkrh-shadow);
+    padding: 14px 18px;
+    position: sticky;
+    bottom: 0;
+}
+
+.wkrh-actions .button-primary,
+.wkrh-admin .wkrh-actions #submit {
+    background: var(--wkrh-red);
+    border-color: var(--wkrh-red-dark);
+    box-shadow: none;
+    text-shadow: none;
+    border-radius: 8px;
+    padding: 4px 22px;
+    height: auto;
+    min-height: 38px;
+}
+
+.wkrh-actions .button-primary:hover {
+    background: var(--wkrh-red-dark);
+    border-color: var(--wkrh-red-dark);
+}
+
+.wkrh-actions p.submit {
+    margin: 0;
+    padding: 0;
+}
+
+/* ---- Section panels (JS show/hide; visible when JS off) ---- */
+.wkrh-js .wkrh-panel {
+    display: none;
+}
+
+.wkrh-js .wkrh-panel.is-active {
+    display: block;
+}
+
+/* ---- Tables inside cards (Diagnostics / Upstream) ---- */
+.wkrh-card .widefat {
+    border: 1px solid var(--wkrh-border);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: none;
+}
+
+.wkrh-card .widefat thead th {
+    background: var(--wkrh-bg);
+    font-weight: 600;
+    color: var(--wkrh-ink);
+}
+
+.wkrh-card .widefat td code {
+    font-size: 11.5px;
+    background: var(--wkrh-bg);
+    padding: 2px 5px;
+    border-radius: 4px;
+}
+
+.wkrh-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin: 0 0 16px;
+}
+
+.wkrh-meta-list {
+    margin: 0 0 16px;
+    padding: 14px 16px;
+    background: var(--wkrh-bg);
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.wkrh-meta-list strong {
+    color: var(--wkrh-ink);
+}
+
+.wrap.wkrh-admin .notice, .wrap.wkrh-admin .error {
+    display: none !important;
+}
+
+/* ---- Responsive ---- */
+@media screen and (max-width: 900px) {
+    .wkrh-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .wkrh-sidebar {
+        position: static;
+    }
+
+    .wkrh-nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .wkrh-actions {
+        position: static;
+    }
+}
