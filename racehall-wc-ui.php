@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.22
+ * Version: 2.23
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -49,7 +49,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.22' );
+define( 'RACEHALL_WC_UI_VERSION', '2.23' );
 
 // Declare WooCommerce High-Performance Order Storage (HPOS) compatibility. All order
 // access in this plugin uses the WC CRUD API (wc_get_order/wc_get_orders/$order->*),
@@ -1059,6 +1059,7 @@ function wk_rh_get_settings_defaults() {
         'product_page_booking_mode' => 'new_only',
         'booking_hold_timeout_minutes' => 15,
         'pay_on_site_enabled' => 'yes',
+        'flat_participant_groups_enabled' => 'yes',
         'required_supplement_name_markers' => 'obligatorisk,obligatory,required,mandatory',
         'test_locations_json' => '[]',
         'live_locations_json' => '[]',
@@ -1786,6 +1787,7 @@ function wk_rh_sanitize_settings( $input ) {
             : $defaults['product_page_booking_mode'],
         'booking_hold_timeout_minutes' => max( 5, min( 120, (int) ( $input['booking_hold_timeout_minutes'] ?? $defaults['booking_hold_timeout_minutes'] ) ) ),
         'pay_on_site_enabled' => ! empty( $input['pay_on_site_enabled'] ) && $input['pay_on_site_enabled'] === 'yes' ? 'yes' : 'no',
+        'flat_participant_groups_enabled' => ! empty( $input['flat_participant_groups_enabled'] ) && $input['flat_participant_groups_enabled'] === 'yes' ? 'yes' : 'no',
         'required_supplement_name_markers' => sanitize_text_field( $input['required_supplement_name_markers'] ?? $defaults['required_supplement_name_markers'] ),
         'test_locations_json' => wk_rh_sanitize_locations_json( $input['test_locations_json'] ?? '[]', 'wk_rh_test_locations_json_invalid' ),
         'live_locations_json' => wk_rh_sanitize_locations_json( $input['live_locations_json'] ?? '[]', 'wk_rh_live_locations_json_invalid' ),
@@ -1799,6 +1801,18 @@ function wk_rh_is_pay_on_site_enabled() {
     $value    = isset( $settings['pay_on_site_enabled'] ) ? $settings['pay_on_site_enabled'] : 'yes';
 
     return apply_filters( 'wk_rh_is_pay_on_site_enabled', $value === 'yes' );
+}
+
+/**
+ * Whether Adults/Children/Twin selectors are offered on products that do NOT expose
+ * BMI DynamicGroups (flat products). When BMI adds groups to a product, that product
+ * uses the groups automatically regardless of this setting.
+ */
+function wk_rh_is_flat_participant_groups_enabled() {
+    $settings = wk_rh_get_settings();
+    $value    = isset( $settings['flat_participant_groups_enabled'] ) ? $settings['flat_participant_groups_enabled'] : 'yes';
+
+    return apply_filters( 'wk_rh_is_flat_participant_groups_enabled', $value === 'yes' );
 }
 
 function wk_rh_addon_carrier_post_is_usable( $product_id ) {
@@ -2705,6 +2719,15 @@ function wk_rh_render_settings_page() {
                         <div class="wkrh-field__control"><input type="text" id="wk_rh_required_supplement_name_markers" name="wk_rh_settings[required_supplement_name_markers]" value="<?php echo esc_attr( $settings['required_supplement_name_markers'] ?? '' ); ?>"></div>
                         <p class="wkrh-field__desc"><?php esc_html_e( 'Comma-separated words or phrases to look for in supplement names, for example: obligatorisk, obligatory, required.', 'racehall-wc-ui' ); ?></p>
                     </div>
+                    <div class="wkrh-field">
+                        <div class="wkrh-field__control">
+                            <label class="wkrh-check">
+                                <input type="checkbox" id="wk_rh_flat_participant_groups_enabled" name="wk_rh_settings[flat_participant_groups_enabled]" value="yes" <?php checked( wk_rh_is_flat_participant_groups_enabled() ); ?>>
+                                <span><?php esc_html_e( 'Offer Adults/Children/Twin on products without BMI age-groups (flat products)', 'racehall-wc-ui' ); ?></span>
+                            </label>
+                        </div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'When on, flat products still show Adults/Children/Twin and the breakdown is sent to BMI as a booking note (flat price, since BMI has no per-category pricing for them). Products that expose BMI age-groups always use those automatically. Turn off to hide Children/Twin on flat products.', 'racehall-wc-ui' ); ?></p>
+                    </div>
                 </div>
             </div>
         </section>
@@ -3295,6 +3318,9 @@ add_action('wp_enqueue_scripts', function() {
             'availability_cache_date_till' => $availability_cache_range['dateTill'],
         ]);
         wp_localize_script( 'racehall-single-product-js', 'RH_LOGGER', array_merge( $logger_config, [ 'page_type' => 'product' ] ) );
+        wp_localize_script( 'racehall-single-product-js', 'RH_FLAT_PARTICIPANT_GROUPS', [
+            'enabled' => wk_rh_is_flat_participant_groups_enabled(),
+        ] );
     }
     // CART PAGE
     if ( is_cart() ) {
@@ -4099,6 +4125,20 @@ add_action( 'woocommerce_before_calculate_totals', function( $cart ) {
         if ( $addon_price >= 0 ) {
             $cart_item['data']->set_price( $addon_price );
         }
+    }
+
+    // Main booking line for products with BMI age-groups: charge BMI's per-mix total so the
+    // online amount matches the BMI bill (incl. twin pricing).
+    foreach ( $cart->get_cart() as $cart_item ) {
+        if ( ! empty( $cart_item['is_addon'] ) || empty( $cart_item['wk_rh_bmi_line_total'] ) || ! is_numeric( $cart_item['wk_rh_bmi_line_total'] ) ) {
+            continue;
+        }
+        if ( empty( $cart_item['data'] ) || ! is_object( $cart_item['data'] ) || ! method_exists( $cart_item['data'], 'set_price' ) ) {
+            continue;
+        }
+
+        $line_qty = isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1;
+        $cart_item['data']->set_price( (float) $cart_item['wk_rh_bmi_line_total'] / $line_qty );
     }
 }, 9999 );
 
@@ -5417,6 +5457,16 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
     ];
     if ( ! empty( $dynamic_lines ) ) {
         $body['dynamicLines'] = $dynamic_lines;
+
+        // Keep the top-level quantity consistent with the age-group breakdown so BMI never
+        // books an unclassified remainder at the regular price.
+        $dynamic_total = 0;
+        foreach ( $dynamic_lines as $dynamic_line ) {
+            $dynamic_total += isset( $dynamic_line['quantity'] ) ? (int) $dynamic_line['quantity'] : 0;
+        }
+        if ( $dynamic_total > 0 ) {
+            $body['quantity'] = $dynamic_total;
+        }
     }
     if ( ! empty( $prepared_contact_person ) ) {
         $body['contactPerson'] = $prepared_contact_person;
@@ -5567,6 +5617,28 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
         $source,
         $prepared_contact_person
     );
+
+    // Products WITH BMI age-groups (combos): use BMI's per-mix price so the online charge
+    // equals the BMI bill (incl. twin). Flat products keep their static WooCommerce price
+    // and — when enabled — record the chosen breakdown as a booking note for the venue.
+    if ( ! empty( $dynamic_lines ) ) {
+        $bmi_line_total = function_exists( 'wk_rh_extract_booking_price_amount' ) ? wk_rh_extract_booking_price_amount( $result ) : null;
+        if ( $bmi_line_total !== null && $bmi_line_total >= 0 ) {
+            WC()->cart->cart_contents[ $main_cart_item_key ]['wk_rh_bmi_line_total'] = (float) $bmi_line_total;
+        }
+        unset( WC()->cart->cart_contents[ $main_cart_item_key ]['wk_rh_participant_memo'] );
+    } else {
+        unset( WC()->cart->cart_contents[ $main_cart_item_key ]['wk_rh_bmi_line_total'] );
+        $participant_memo = ( function_exists( 'wk_rh_is_flat_participant_groups_enabled' ) && wk_rh_is_flat_participant_groups_enabled() && function_exists( 'wk_rh_build_participant_breakdown_memo' ) )
+            ? wk_rh_build_participant_breakdown_memo( $participant_counts )
+            : '';
+        if ( $participant_memo !== '' ) {
+            WC()->cart->cart_contents[ $main_cart_item_key ]['wk_rh_participant_memo'] = $participant_memo;
+        } else {
+            unset( WC()->cart->cart_contents[ $main_cart_item_key ]['wk_rh_participant_memo'] );
+        }
+    }
+    WC()->cart->set_session();
 
     wk_rh_log_user_event( 'booking.hold_confirmed', [
         'source' => (string) $source,

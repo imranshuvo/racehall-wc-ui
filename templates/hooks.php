@@ -750,8 +750,16 @@ function wk_rh_send_order_memo( $order ) {
         return;
     }
 
-    $memo = trim( (string) $order->get_customer_note() );
-    if ( $memo === '' || $order->get_meta( '_wk_rh_memo_synced', true ) === 'yes' ) {
+    if ( $order->get_meta( '_wk_rh_memo_synced', true ) === 'yes' ) {
+        return;
+    }
+
+    // Merge the flat-product participant breakdown (if any) with the customer note into a
+    // single memo, since the upstream memo endpoint stores one memo per order.
+    $customer_note    = trim( (string) $order->get_customer_note() );
+    $participant_memo = trim( (string) $order->get_meta( '_wk_rh_participant_memo', true ) );
+    $memo = trim( $participant_memo . ( ( $participant_memo !== '' && $customer_note !== '' ) ? "\n" : '' ) . $customer_note );
+    if ( $memo === '' ) {
         return;
     }
 
@@ -1418,6 +1426,55 @@ function wk_rh_build_booking_dynamic_lines( array $counts, $proposal, $page_prod
     return array_values( $dynamic_lines );
 }
 
+/**
+ * Extract the money amount from a booking/proposal "prices" array (DisplayPrice[]).
+ * Prefers the money price (kind 0); returns the first numeric amount otherwise, or null.
+ */
+function wk_rh_extract_booking_price_amount( $result ) {
+    if ( ! is_array( $result ) || empty( $result['prices'] ) || ! is_array( $result['prices'] ) ) {
+        return null;
+    }
+
+    $fallback = null;
+    foreach ( $result['prices'] as $price ) {
+        if ( ! is_array( $price ) || ! isset( $price['amount'] ) || ! is_numeric( $price['amount'] ) ) {
+            continue;
+        }
+        if ( $fallback === null ) {
+            $fallback = (float) $price['amount'];
+        }
+        if ( isset( $price['kind'] ) && (int) $price['kind'] === 0 ) {
+            return (float) $price['amount'];
+        }
+    }
+
+    return $fallback;
+}
+
+/**
+ * Build a short participant-breakdown note for flat products (no BMI age-groups), in the
+ * current site language. Returns '' for plain adult-only bookings (nothing to flag).
+ */
+function wk_rh_build_participant_breakdown_memo( array $counts ) {
+    $adults   = max( 0, (int) ( $counts['adults'] ?? 0 ) );
+    $children = max( 0, (int) ( $counts['children'] ?? 0 ) );
+    $twin     = max( 0, (int) ( $counts['twin'] ?? 0 ) );
+
+    if ( $children <= 0 && $twin <= 0 ) {
+        return '';
+    }
+
+    $parts = [ sprintf( '%s: %d', __( 'Adults', 'racehall-wc-ui' ), $adults ) ];
+    if ( $children > 0 ) {
+        $parts[] = sprintf( '%s: %d', __( 'Children', 'racehall-wc-ui' ), $children );
+    }
+    if ( $twin > 0 ) {
+        $parts[] = sprintf( '%s: %d', __( 'Twin kart', 'racehall-wc-ui' ), $twin );
+    }
+
+    return implode( ', ', $parts );
+}
+
 function wk_rh_extract_quantity_rules( $proposal, $page_product_limits = null, $page_products = [], $product_id = '' ) {
     $rules = wk_rh_get_default_booking_quantity_rules();
     $page_product_limits = is_array( $page_product_limits ) ? $page_product_limits : [];
@@ -1872,6 +1929,12 @@ function wk_rh_add_booking_data_to_order_items( $item, $cart_item_key, $values, 
     }
     if ( isset( $values['booking_twin'] ) ) {
         $item->add_meta_data( 'Twin kart', (int) $values['booking_twin'], true );
+    }
+
+    // Flat-product participant breakdown (no BMI age-groups): carried to the order so it can
+    // be sent to BMI as a booking note.
+    if ( ! empty( $values['wk_rh_participant_memo'] ) && $order instanceof WC_Order ) {
+        $order->update_meta_data( '_wk_rh_participant_memo', sanitize_text_field( (string) $values['wk_rh_participant_memo'] ) );
     }
 }
 

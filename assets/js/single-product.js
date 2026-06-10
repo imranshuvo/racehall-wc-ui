@@ -280,11 +280,25 @@ function isTwinSelectionAllowed(pageProducts = currentPageProducts, productId = 
     return raceType === 'family' || raceType === 'closed'
 }
 
+function flatParticipantGroupsEnabled() {
+    // Default ON: only treated as off when the localized flag explicitly says so.
+    return !(typeof RH_FLAT_PARTICIPANT_GROUPS !== 'undefined' && RH_FLAT_PARTICIPANT_GROUPS && RH_FLAT_PARTICIPANT_GROUPS.enabled === false)
+}
+
+function productHasDynamicGroups(pageProducts, productId) {
+    const selected = getSelectedPageProduct(pageProducts, productId)
+    return !!(selected && Array.isArray(selected.dynamicGroups) && selected.dynamicGroups.length)
+}
+
 function updateTwinFieldVisibility(pageProducts = currentPageProducts, productId = null) {
-    const isAllowed = isTwinSelectionAllowed(pageProducts, productId)
+    // Flat products (no BMI age-groups) only offer Children/Twin when the site setting
+    // allows it. Products that expose groups are unaffected, so this is inert by default.
+    const flatExtraAllowed = productHasDynamicGroups(pageProducts, productId) || flatParticipantGroupsEnabled()
+
+    // Twin: unchanged behaviour, additionally gated by the flat-products setting.
+    const isAllowed = isTwinSelectionAllowed(pageProducts, productId) && flatExtraAllowed
     const twinInput = document.getElementById(PARTY_INPUT_IDS.twin)
     const twinRow = twinInput ? twinInput.closest('.counter-row') : null
-
     if (twinRow) {
         twinRow.hidden = !isAllowed
         twinRow.querySelectorAll('button, input').forEach((element) => {
@@ -292,6 +306,25 @@ function updateTwinFieldVisibility(pageProducts = currentPageProducts, productId
                 element.disabled = !isAllowed
             }
         })
+    }
+
+    // Children: only intervene to HIDE the row on flat products when the setting is off.
+    // In every other case the row is left entirely to the quantity-rules engine, so its
+    // min/max limits and button states are never touched/overridden.
+    if (!flatExtraAllowed) {
+        const childInput = document.getElementById(PARTY_INPUT_IDS.children)
+        const childRow = childInput ? childInput.closest('.counter-row') : null
+        if (childRow) {
+            childRow.hidden = true
+            childRow.querySelectorAll('button, input').forEach((element) => {
+                if ('disabled' in element) {
+                    element.disabled = true
+                }
+            })
+            if (childInput) {
+                childInput.value = '0'
+            }
+        }
     }
 
     return isAllowed
