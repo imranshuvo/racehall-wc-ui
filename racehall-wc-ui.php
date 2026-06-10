@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.23
+ * Version: 2.25
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -49,7 +49,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.23' );
+define( 'RACEHALL_WC_UI_VERSION', '2.25' );
 
 // Declare WooCommerce High-Performance Order Storage (HPOS) compatibility. All order
 // access in this plugin uses the WC CRUD API (wc_get_order/wc_get_orders/$order->*),
@@ -4103,6 +4103,155 @@ function wk_rh_filter_nexi_gateways_by_booking_location( $available_gateways ) {
 
     return $available_gateways;
 }
+
+/**
+ * Resolve the on-disk file that defines an object's class (cached per class).
+ *
+ * @param object $object Callback object.
+ *
+ * @return string Absolute, normalized file path or '' when it cannot be resolved.
+ */
+function wk_rh_get_object_class_file( $object ) {
+    static $cache = [];
+
+    if ( ! is_object( $object ) ) {
+        return '';
+    }
+
+    $class = get_class( $object );
+    if ( isset( $cache[ $class ] ) ) {
+        return $cache[ $class ];
+    }
+
+    $file = '';
+    try {
+        $reflection = new ReflectionClass( $class );
+        $file = (string) $reflection->getFileName();
+    } catch ( \Throwable $exception ) {
+        $file = '';
+    }
+
+    if ( $file !== '' && function_exists( 'wp_normalize_path' ) ) {
+        $file = wp_normalize_path( $file );
+    }
+
+    $cache[ $class ] = $file;
+
+    return $file;
+}
+
+/**
+ * Map a hooked asset callback to the booking location of the per-location payment
+ * plugin that owns it. Keyed on the callback's source plugin directory (not its
+ * namespace), so vendored/shared libraries are attributed to the plugin that ships
+ * them, and a future renamed namespace still resolves correctly.
+ *
+ * @param callable $callback Hook callback (as stored in $wp_filter).
+ *
+ * @return string|null Normalized location key, or null when the callback does not
+ *                     belong to a location-managed payment plugin.
+ */
+function wk_rh_get_payment_asset_callback_location( $callback ) {
+    if ( ! is_array( $callback ) || ! isset( $callback[0] ) || ! is_object( $callback[0] ) ) {
+        return null;
+    }
+
+    $file = wk_rh_get_object_class_file( $callback[0] );
+    if ( $file === '' ) {
+        return null;
+    }
+
+    // Plugin directory => booking location. Covers the Frisbii/Reepay trio and the
+    // Nexi/Nets trio. The generic (original) plugins serve Aarhus.
+    $plugin_location_map = [
+        '/frisbii-pay-copenhagen/'    => 'kobenhavn',
+        '/nexi-checkout-copenhagen/'  => 'kobenhavn',
+        '/frisbii-pay-stockholm/'     => 'stockholm',
+        '/nexi-checkout-stockholm/'   => 'stockholm',
+        '/reepay-checkout-gateway/'   => 'aarhus',
+        '/dibs-easy-for-woocommerce/' => 'aarhus',
+    ];
+
+    foreach ( $plugin_location_map as $needle => $location ) {
+        if ( strpos( $file, $needle ) !== false ) {
+            return $location;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Isolate payment assets to the cart's booking location.
+ *
+ * Each location runs its own copy of the Frisbii/Reepay (and Nexi) plugin, and every
+ * active copy enqueues its checkout scripts/styles and localizes its own config
+ * (e.g. WC_Gateway_Reepay_Checkout_Copenhagen with payment_type OVERLAY) on *every*
+ * checkout — they all share the same script handles, so they collide and the wrong
+ * copy can drive the payment window (blockUI hang). Filtering the available payment
+ * methods is not enough; we also strip the other locations' asset callbacks before
+ * they run, so only the matching location's gateway loads on checkout.
+ *
+ * Runs only when the cart resolves to a single supported booking location, so plain
+ * (non-booking) checkouts are never touched.
+ */
+function wk_rh_isolate_payment_assets_by_location() {
+    if ( is_admin() ) {
+        return;
+    }
+
+    $is_payment_page = ( function_exists( 'is_checkout' ) && is_checkout() )
+        || ( function_exists( 'is_add_payment_method_page' ) && is_add_payment_method_page() )
+        || isset( $_GET['pay_for_order'] ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+    $is_received = function_exists( 'is_order_received_page' ) && is_order_received_page();
+    if ( ! $is_payment_page || $is_received ) {
+        return;
+    }
+
+    $context = wk_rh_get_cart_nexi_gateway_location_context();
+    if ( 'ok' !== $context['status'] || empty( $context['location'] ) ) {
+        return;
+    }
+
+    $cart_location = (string) $context['location'];
+
+    $hooks = [ 'wp_enqueue_scripts', 'wp_print_scripts', 'wp_print_footer_scripts', 'wp_head', 'wp_footer' ];
+    $removed = [];
+
+    foreach ( $hooks as $hook ) {
+        if ( empty( $GLOBALS['wp_filter'][ $hook ] ) || ! ( $GLOBALS['wp_filter'][ $hook ] instanceof WP_Hook ) ) {
+            continue;
+        }
+
+        // Collect first, remove after, so we never mutate the list we are iterating.
+        $to_remove = [];
+        foreach ( $GLOBALS['wp_filter'][ $hook ]->callbacks as $priority => $callbacks ) {
+            foreach ( $callbacks as $callback ) {
+                $callback_location = wk_rh_get_payment_asset_callback_location( $callback['function'] );
+                if ( null === $callback_location || $callback_location === $cart_location ) {
+                    continue;
+                }
+                $to_remove[] = [ $callback['function'], (int) $priority ];
+            }
+        }
+
+        foreach ( $to_remove as $entry ) {
+            if ( remove_action( $hook, $entry[0], $entry[1] ) ) {
+                $removed[] = $hook;
+            }
+        }
+    }
+
+    if ( ! empty( $removed ) && function_exists( 'wk_rh_log_upstream_event' ) ) {
+        wk_rh_log_upstream_event( 'info', 'Isolated payment assets to cart booking location', [
+            'operation' => 'payment_asset_isolation',
+            'cartLocation' => $cart_location,
+            'removedCount' => count( $removed ),
+            'hooks' => array_values( array_unique( $removed ) ),
+        ] );
+    }
+}
+add_action( 'wp_enqueue_scripts', 'wk_rh_isolate_payment_assets_by_location', 0 );
 
 add_action( 'woocommerce_before_calculate_totals', function( $cart ) {
     if ( is_admin() && ! defined( 'DOING_AJAX' ) ) {
