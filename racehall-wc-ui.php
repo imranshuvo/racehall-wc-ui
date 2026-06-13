@@ -2572,6 +2572,64 @@ function wk_rh_release_active_hold( $upstream_order_id ) {
     }
 }
 
+/**
+ * Return the WooCommerce order behind a booking hold (matched by the stored
+ * bmi_order_id, HPOS- and legacy-safe via wc_get_orders meta_query), or null if none.
+ * Used by the hold-expiry cron so it never cancels a reservation that belongs to a
+ * real (online-paid) order.
+ */
+function wk_rh_get_hold_woocommerce_order( $upstream_order_id ) {
+    $upstream_order_id = trim( (string) $upstream_order_id );
+    if ( $upstream_order_id === '' || ! function_exists( 'wc_get_orders' ) ) {
+        return null;
+    }
+
+    $hpos_enabled = class_exists( '\Automattic\WooCommerce\Utilities\OrderUtil' )
+        && \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+
+    $order_id = 0;
+
+    if ( $hpos_enabled ) {
+        // HPOS: meta_query is supported by the orders-table query.
+        $orders = wc_get_orders( [
+            'limit'      => 1,
+            'return'     => 'ids',
+            'meta_query' => [
+                [
+                    'key'   => 'bmi_order_id',
+                    'value' => $upstream_order_id,
+                ],
+            ],
+        ] );
+        $order_id = ! empty( $orders ) ? (int) $orders[0] : 0;
+    } else {
+        // Legacy (post-based) store: wc_get_orders does NOT support meta_query — it is
+        // dropped (with a _doing_it_wrong notice), which would otherwise return an
+        // unrelated order. Look the id up in postmeta directly instead.
+        global $wpdb;
+        $order_id = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'bmi_order_id' AND meta_value = %s ORDER BY post_id DESC LIMIT 1",
+                $upstream_order_id
+            )
+        );
+    }
+
+    if ( $order_id <= 0 ) {
+        return null;
+    }
+
+    $order = wc_get_order( $order_id );
+
+    // Defensive: only treat it as a match when the loaded order genuinely carries this
+    // bmi_order_id, so a misbehaving query can never protect (or mis-log) a wrong order.
+    if ( $order instanceof WC_Order && (string) $order->get_meta( 'bmi_order_id', true ) === $upstream_order_id ) {
+        return $order;
+    }
+
+    return null;
+}
+
 function wk_rh_process_expired_active_holds( $source = 'runtime' ) {
     if ( ! function_exists( 'wk_rh_cancel_upstream_order_by_id' ) ) {
         return;
@@ -2594,6 +2652,36 @@ function wk_rh_process_expired_active_holds( $source = 'runtime' ) {
 
         $expires_at = isset( $hold['expires_at'] ) ? (int) $hold['expires_at'] : 0;
         if ( $expires_at <= 0 || $expires_at > $now ) {
+            continue;
+        }
+
+        // Guard: never auto-cancel a hold that belongs to a LIVE, non-COD (online)
+        // WooCommerce order. Those carry a real authorized/captured payment whose
+        // confirmation can lag (gateway webhook, Cloudflare UAM, authorize-then-
+        // capture), so the cart-stage cron must not cancel them — that path lost paid
+        // bookings. "Live" = pending / processing / completed / on-hold (Reepay/Frisbii
+        // authorized payments land in on-hold by default, so this covers them). Anything
+        // else falls through to the cancel below, which is the right outcome:
+        //   - pay-on-site (COD) orders: no online payment at stake;
+        //   - terminal orders (cancelled / refunded / failed): the order is dead, so
+        //     freeing the BMI slot is correct (also retries a failed status-hook cancel).
+        // Graduate protected holds out of the registry; the order lifecycle owns them.
+        $protected_states = [ 'pending', 'processing', 'completed', 'on-hold' ];
+        $linked_order     = wk_rh_get_hold_woocommerce_order( $upstream_order_id );
+        if ( $linked_order instanceof WC_Order
+            && $linked_order->get_payment_method() !== 'cod'
+            && in_array( $linked_order->get_status(), $protected_states, true ) ) {
+            unset( $holds[ $upstream_order_id ] );
+            $changed = true;
+            if ( function_exists( 'wk_rh_log_user_event' ) ) {
+                wk_rh_log_user_event( 'hold.cancel_skipped_has_order', [
+                    'orderId'       => (string) $upstream_order_id,
+                    'wcOrderId'     => (string) $linked_order->get_id(),
+                    'paymentMethod' => (string) $linked_order->get_payment_method(),
+                    'status'        => (string) $linked_order->get_status(),
+                    'source'        => (string) $source,
+                ], 'info' );
+            }
             continue;
         }
 
