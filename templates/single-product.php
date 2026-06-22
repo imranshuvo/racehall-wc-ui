@@ -441,7 +441,7 @@ window.RH_I18N = {
                                     </span>
                                 </div>
                             </div>
-                                     <form class="cart" action="<?php echo esc_url( wc_get_cart_url() ); ?>" method="post" enctype="multipart/form-data">
+                                     <form class="cart" action="<?php echo esc_url( wc_get_checkout_url() ); ?>" method="post" enctype="multipart/form-data">
                                         <input type="hidden" name="booking_date" id="booking_date">
                                         <input type="hidden" name="booking_time" id="booking_time">
                                                      <input type="hidden" name="booking_proposal" id="booking_proposal">
