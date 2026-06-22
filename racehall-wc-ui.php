@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.22
+ * Version: 2.31
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -15,7 +15,10 @@ if ( defined( 'RACEHALL_WC_UI_BOOTSTRAPPED' ) ) {
 }
 
 function wk_rh_get_booking_fallback_url() {
-    return home_url( '/' );
+    // Never bounce a customer to the homepage on an expired/abandoned booking.
+    // Prefer the shop page; home only if the shop page is unconfigured.
+    $shop = function_exists( 'wc_get_page_permalink' ) ? wc_get_page_permalink( 'shop' ) : '';
+    return ( is_string( $shop ) && $shop !== '' ) ? $shop : home_url( '/' );
 }
 
 function wk_rh_get_main_booking_product_url() {
@@ -49,7 +52,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.22' );
+define( 'RACEHALL_WC_UI_VERSION', '2.31' );
 
 // Declare WooCommerce High-Performance Order Storage (HPOS) compatibility. All order
 // access in this plugin uses the WC CRUD API (wc_get_order/wc_get_orders/$order->*),
@@ -1059,7 +1062,10 @@ function wk_rh_get_settings_defaults() {
         'product_page_booking_mode' => 'new_only',
         'booking_hold_timeout_minutes' => 15,
         'pay_on_site_enabled' => 'yes',
+        'flat_participant_groups_enabled' => 'yes',
         'required_supplement_name_markers' => 'obligatorisk,obligatory,required,mandatory',
+        'required_supplement_include_children' => 'yes',
+        'required_supplement_include_twin' => 'yes',
         'test_locations_json' => '[]',
         'live_locations_json' => '[]',
     ];
@@ -1786,7 +1792,10 @@ function wk_rh_sanitize_settings( $input ) {
             : $defaults['product_page_booking_mode'],
         'booking_hold_timeout_minutes' => max( 5, min( 120, (int) ( $input['booking_hold_timeout_minutes'] ?? $defaults['booking_hold_timeout_minutes'] ) ) ),
         'pay_on_site_enabled' => ! empty( $input['pay_on_site_enabled'] ) && $input['pay_on_site_enabled'] === 'yes' ? 'yes' : 'no',
+        'flat_participant_groups_enabled' => ! empty( $input['flat_participant_groups_enabled'] ) && $input['flat_participant_groups_enabled'] === 'yes' ? 'yes' : 'no',
         'required_supplement_name_markers' => sanitize_text_field( $input['required_supplement_name_markers'] ?? $defaults['required_supplement_name_markers'] ),
+        'required_supplement_include_children' => ! empty( $input['required_supplement_include_children'] ) && $input['required_supplement_include_children'] === 'yes' ? 'yes' : 'no',
+        'required_supplement_include_twin' => ! empty( $input['required_supplement_include_twin'] ) && $input['required_supplement_include_twin'] === 'yes' ? 'yes' : 'no',
         'test_locations_json' => wk_rh_sanitize_locations_json( $input['test_locations_json'] ?? '[]', 'wk_rh_test_locations_json_invalid' ),
         'live_locations_json' => wk_rh_sanitize_locations_json( $input['live_locations_json'] ?? '[]', 'wk_rh_live_locations_json_invalid' ),
     ];
@@ -1799,6 +1808,34 @@ function wk_rh_is_pay_on_site_enabled() {
     $value    = isset( $settings['pay_on_site_enabled'] ) ? $settings['pay_on_site_enabled'] : 'yes';
 
     return apply_filters( 'wk_rh_is_pay_on_site_enabled', $value === 'yes' );
+}
+
+/**
+ * Whether Adults/Children/Twin selectors are offered on products that do NOT expose
+ * BMI DynamicGroups (flat products). When BMI adds groups to a product, that product
+ * uses the groups automatically regardless of this setting.
+ */
+function wk_rh_is_flat_participant_groups_enabled() {
+    $settings = wk_rh_get_settings();
+    $value    = isset( $settings['flat_participant_groups_enabled'] ) ? $settings['flat_participant_groups_enabled'] : 'yes';
+
+    return apply_filters( 'wk_rh_is_flat_participant_groups_enabled', $value === 'yes' );
+}
+
+/**
+ * Whether children / twin participants count toward the default quantity that
+ * required ("starter package") supplements are pre-filled to. Adults always count.
+ */
+function wk_rh_required_supplement_includes_children() {
+    $settings = wk_rh_get_settings();
+    $value    = isset( $settings['required_supplement_include_children'] ) ? $settings['required_supplement_include_children'] : 'yes';
+    return apply_filters( 'wk_rh_required_supplement_includes_children', $value === 'yes' );
+}
+
+function wk_rh_required_supplement_includes_twin() {
+    $settings = wk_rh_get_settings();
+    $value    = isset( $settings['required_supplement_include_twin'] ) ? $settings['required_supplement_include_twin'] : 'yes';
+    return apply_filters( 'wk_rh_required_supplement_includes_twin', $value === 'yes' );
 }
 
 function wk_rh_addon_carrier_post_is_usable( $product_id ) {
@@ -2114,7 +2151,7 @@ function wk_rh_render_hold_banner_html( $expires_at, $expired_text, $prefix_text
 
     $headline = $headline_text !== ''
         ? $headline_text
-        : __( 'Bekræft ordren inden tidsfristen udløber.', 'racehall-wc-ui' );
+        : __( 'Gennemfør/betal bookingen inden den udløber.', 'racehall-wc-ui' );
 
     $class_name = trim( 'rh-hold-banner ' . sanitize_html_class( (string) $extra_class ) );
     echo '<div class="' . esc_attr( $class_name ) . '" data-expires-at="' . esc_attr( $expires_at ) . '" data-expired-text="' . esc_attr( $expired_text ) . '" data-prefix-text="' . esc_attr( $prefix_text ) . '" data-cart-url="' . esc_url( wc_get_cart_url() ) . '">';
@@ -2128,7 +2165,7 @@ function wk_rh_get_hold_banner_markup( array $args = [] ) {
         'expires_at'   => 0,
         'expired_text' => __( 'Reservationstiden er udløbet. Du skal starte bookingflowet igen.', 'racehall-wc-ui' ),
         'prefix_text'  => __( 'Din reservation holdes i:', 'racehall-wc-ui' ),
-        'headline_text'=> __( 'Bekræft ordren inden tidsfristen udløber.', 'racehall-wc-ui' ),
+        'headline_text'=> __( 'Gennemfør/betal bookingen inden den udløber.', 'racehall-wc-ui' ),
         'extra_class'  => '',
     ];
 
@@ -2158,7 +2195,7 @@ add_shortcode( 'rh_hold_countdown', function( $atts ) {
     $atts = shortcode_atts( [
         'expired_text' => __( 'Reservationstiden er udløbet. Du skal starte bookingflowet igen.', 'racehall-wc-ui' ),
         'prefix_text' => __( 'Din reservation holdes i:', 'racehall-wc-ui' ),
-        'headline_text' => __( 'Bekræft ordren inden tidsfristen udløber.', 'racehall-wc-ui' ),
+        'headline_text' => __( 'Gennemfør/betal bookingen inden den udløber.', 'racehall-wc-ui' ),
         'class' => '',
     ], $atts, 'rh_hold_countdown' );
 
@@ -2387,6 +2424,24 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
     $location = isset( $main_context['location'] ) ? (string) $main_context['location'] : '';
     $supplements = isset( $main_context['supplements'] ) && is_array( $main_context['supplements'] ) ? $main_context['supplements'] : [];
 
+    // Default quantity for REQUIRED ("starter package") supplements = number of
+    // drivers in the booking (all participants: adults + children + twin).
+    // Computed once; the user can still adjust up/down before adding. Filterable
+    // so the "driver" definition can be changed later without code edits.
+    $driver_count = 0;
+    $main_item = isset( $main_context['item'] ) && is_array( $main_context['item'] ) ? $main_context['item'] : [];
+    if ( ! empty( $main_item ) && function_exists( 'wk_rh_get_booking_participant_counts' ) ) {
+        $counts = wk_rh_get_booking_participant_counts( $main_item );
+        $driver_count = (int) $counts['adults']; // adults always count as drivers
+        if ( wk_rh_required_supplement_includes_children() ) {
+            $driver_count += (int) $counts['children'];
+        }
+        if ( wk_rh_required_supplement_includes_twin() ) {
+            $driver_count += (int) $counts['twin'];
+        }
+    }
+    $driver_count = max( 0, (int) apply_filters( 'wk_rh_required_supplement_default_qty', $driver_count, $main_context ) );
+
     ob_start();
     ?>
     <div class="wk-rh-checkout-step-panel wk-rh-checkout-step-panel--supplements <?php echo $is_ready ? 'is-ready' : 'is-locked'; ?>" data-step="supplements">
@@ -2445,9 +2500,23 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                     $min_qty = (int) $bounds['min'];
                     $max_qty = isset( $bounds['max'] ) ? (int) $bounds['max'] : 0;
                     $current_qty = wk_rh_get_addon_quantity_by_upstream_id( $upstream_id );
-                    $display_qty = $current_qty > 0 ? $current_qty : $min_qty;
-                    $price_amount = wk_rh_get_supplement_price_amount( $supplement );
                     $is_required_supplement = wk_rh_is_required_supplement( $supplement );
+
+                    if ( $current_qty > 0 ) {
+                        $display_qty = $current_qty;
+                    } elseif ( $is_required_supplement && $driver_count > 0 ) {
+                        // Pre-fill a required "starter package" to the driver count,
+                        // clamped to the addon's min/max. Not added until the user
+                        // clicks "Tilføj" — they can still adjust the number first.
+                        $display_qty = max( $min_qty, $driver_count );
+                        if ( $max_qty > 0 ) {
+                            $display_qty = min( $max_qty, $display_qty );
+                        }
+                    } else {
+                        $display_qty = $min_qty;
+                    }
+
+                    $price_amount = wk_rh_get_supplement_price_amount( $supplement );
                     $addon_image_url = function_exists( 'wk_rh_get_product_image_url' )
                         ? wk_rh_get_product_image_url( $location, $upstream_id )
                         : '';
@@ -2512,11 +2581,17 @@ add_action( 'woocommerce_before_checkout_form', function() {
     $hold_ctx = wk_rh_get_cart_hold_expiry_context();
     $hold_expires_at = isset( $hold_ctx['expires_at'] ) ? (int) $hold_ctx['expires_at'] : 0;
 
+    // Always render a stable mount wrapper (empty when no hold exists yet) so the
+    // checkout JS has a deterministic target to inject the banner into after the
+    // hold is created at the "Next" step — otherwise the banner only appears on a
+    // full page reload. This is the hook CheckoutWC actually fires.
+    echo '<div class="rh-hold-banner-mount">';
     wk_rh_render_hold_banner_html(
         $hold_expires_at,
         __( 'Reservationstiden er udløbet. Du skal starte bookingflowet igen.', 'racehall-wc-ui' ),
         __( 'Din reservation holdes i:', 'racehall-wc-ui' )
     );
+    echo '</div>';
 }, 5 );
 
 function wk_rh_get_active_holds() {
@@ -2558,6 +2633,64 @@ function wk_rh_release_active_hold( $upstream_order_id ) {
     }
 }
 
+/**
+ * Return the WooCommerce order behind a booking hold (matched by the stored
+ * bmi_order_id, HPOS- and legacy-safe via wc_get_orders meta_query), or null if none.
+ * Used by the hold-expiry cron so it never cancels a reservation that belongs to a
+ * real (online-paid) order.
+ */
+function wk_rh_get_hold_woocommerce_order( $upstream_order_id ) {
+    $upstream_order_id = trim( (string) $upstream_order_id );
+    if ( $upstream_order_id === '' || ! function_exists( 'wc_get_orders' ) ) {
+        return null;
+    }
+
+    $hpos_enabled = class_exists( '\Automattic\WooCommerce\Utilities\OrderUtil' )
+        && \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+
+    $order_id = 0;
+
+    if ( $hpos_enabled ) {
+        // HPOS: meta_query is supported by the orders-table query.
+        $orders = wc_get_orders( [
+            'limit'      => 1,
+            'return'     => 'ids',
+            'meta_query' => [
+                [
+                    'key'   => 'bmi_order_id',
+                    'value' => $upstream_order_id,
+                ],
+            ],
+        ] );
+        $order_id = ! empty( $orders ) ? (int) $orders[0] : 0;
+    } else {
+        // Legacy (post-based) store: wc_get_orders does NOT support meta_query — it is
+        // dropped (with a _doing_it_wrong notice), which would otherwise return an
+        // unrelated order. Look the id up in postmeta directly instead.
+        global $wpdb;
+        $order_id = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = 'bmi_order_id' AND meta_value = %s ORDER BY post_id DESC LIMIT 1",
+                $upstream_order_id
+            )
+        );
+    }
+
+    if ( $order_id <= 0 ) {
+        return null;
+    }
+
+    $order = wc_get_order( $order_id );
+
+    // Defensive: only treat it as a match when the loaded order genuinely carries this
+    // bmi_order_id, so a misbehaving query can never protect (or mis-log) a wrong order.
+    if ( $order instanceof WC_Order && (string) $order->get_meta( 'bmi_order_id', true ) === $upstream_order_id ) {
+        return $order;
+    }
+
+    return null;
+}
+
 function wk_rh_process_expired_active_holds( $source = 'runtime' ) {
     if ( ! function_exists( 'wk_rh_cancel_upstream_order_by_id' ) ) {
         return;
@@ -2580,6 +2713,36 @@ function wk_rh_process_expired_active_holds( $source = 'runtime' ) {
 
         $expires_at = isset( $hold['expires_at'] ) ? (int) $hold['expires_at'] : 0;
         if ( $expires_at <= 0 || $expires_at > $now ) {
+            continue;
+        }
+
+        // Guard: never auto-cancel a hold that belongs to a LIVE, non-COD (online)
+        // WooCommerce order. Those carry a real authorized/captured payment whose
+        // confirmation can lag (gateway webhook, Cloudflare UAM, authorize-then-
+        // capture), so the cart-stage cron must not cancel them — that path lost paid
+        // bookings. "Live" = pending / processing / completed / on-hold (Reepay/Frisbii
+        // authorized payments land in on-hold by default, so this covers them). Anything
+        // else falls through to the cancel below, which is the right outcome:
+        //   - pay-on-site (COD) orders: no online payment at stake;
+        //   - terminal orders (cancelled / refunded / failed): the order is dead, so
+        //     freeing the BMI slot is correct (also retries a failed status-hook cancel).
+        // Graduate protected holds out of the registry; the order lifecycle owns them.
+        $protected_states = [ 'pending', 'processing', 'completed', 'on-hold' ];
+        $linked_order     = wk_rh_get_hold_woocommerce_order( $upstream_order_id );
+        if ( $linked_order instanceof WC_Order
+            && $linked_order->get_payment_method() !== 'cod'
+            && in_array( $linked_order->get_status(), $protected_states, true ) ) {
+            unset( $holds[ $upstream_order_id ] );
+            $changed = true;
+            if ( function_exists( 'wk_rh_log_user_event' ) ) {
+                wk_rh_log_user_event( 'hold.cancel_skipped_has_order', [
+                    'orderId'       => (string) $upstream_order_id,
+                    'wcOrderId'     => (string) $linked_order->get_id(),
+                    'paymentMethod' => (string) $linked_order->get_payment_method(),
+                    'status'        => (string) $linked_order->get_status(),
+                    'source'        => (string) $source,
+                ], 'info' );
+            }
             continue;
         }
 
@@ -2704,6 +2867,33 @@ function wk_rh_render_settings_page() {
                         <label class="wkrh-field__label" for="wk_rh_required_supplement_name_markers"><?php esc_html_e( 'Required supplement name markers', 'racehall-wc-ui' ); ?></label>
                         <div class="wkrh-field__control"><input type="text" id="wk_rh_required_supplement_name_markers" name="wk_rh_settings[required_supplement_name_markers]" value="<?php echo esc_attr( $settings['required_supplement_name_markers'] ?? '' ); ?>"></div>
                         <p class="wkrh-field__desc"><?php esc_html_e( 'Comma-separated words or phrases to look for in supplement names, for example: obligatorisk, obligatory, required.', 'racehall-wc-ui' ); ?></p>
+                    </div>
+                    <div class="wkrh-field">
+                        <div class="wkrh-field__control">
+                            <label class="wkrh-check">
+                                <input type="checkbox" id="wk_rh_required_supplement_include_children" name="wk_rh_settings[required_supplement_include_children]" value="yes" <?php checked( wk_rh_required_supplement_includes_children() ); ?>>
+                                <span><?php esc_html_e( 'Include children in the required-supplement default quantity', 'racehall-wc-ui' ); ?></span>
+                            </label>
+                        </div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'When on, child drivers count toward the quantity that required ("starter package") supplements are pre-filled to. Adults always count.', 'racehall-wc-ui' ); ?></p>
+                    </div>
+                    <div class="wkrh-field">
+                        <div class="wkrh-field__control">
+                            <label class="wkrh-check">
+                                <input type="checkbox" id="wk_rh_required_supplement_include_twin" name="wk_rh_settings[required_supplement_include_twin]" value="yes" <?php checked( wk_rh_required_supplement_includes_twin() ); ?>>
+                                <span><?php esc_html_e( 'Include twins in the required-supplement default quantity', 'racehall-wc-ui' ); ?></span>
+                            </label>
+                        </div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'When on, twin drivers count toward the quantity that required ("starter package") supplements are pre-filled to.', 'racehall-wc-ui' ); ?></p>
+                    </div>
+                    <div class="wkrh-field">
+                        <div class="wkrh-field__control">
+                            <label class="wkrh-check">
+                                <input type="checkbox" id="wk_rh_flat_participant_groups_enabled" name="wk_rh_settings[flat_participant_groups_enabled]" value="yes" <?php checked( wk_rh_is_flat_participant_groups_enabled() ); ?>>
+                                <span><?php esc_html_e( 'Offer Adults/Children/Twin on products without BMI age-groups (flat products)', 'racehall-wc-ui' ); ?></span>
+                            </label>
+                        </div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'When on, flat products still show Adults/Children/Twin and the breakdown is sent to BMI as a booking note (flat price, since BMI has no per-category pricing for them). Products that expose BMI age-groups always use those automatically. Turn off to hide Children/Twin on flat products.', 'racehall-wc-ui' ); ?></p>
                     </div>
                 </div>
             </div>
@@ -3295,6 +3485,9 @@ add_action('wp_enqueue_scripts', function() {
             'availability_cache_date_till' => $availability_cache_range['dateTill'],
         ]);
         wp_localize_script( 'racehall-single-product-js', 'RH_LOGGER', array_merge( $logger_config, [ 'page_type' => 'product' ] ) );
+        wp_localize_script( 'racehall-single-product-js', 'RH_FLAT_PARTICIPANT_GROUPS', [
+            'enabled' => wk_rh_is_flat_participant_groups_enabled(),
+        ] );
     }
     // CART PAGE
     if ( is_cart() ) {
@@ -3500,9 +3693,17 @@ function wk_rh_replace_main_product_only( $passed, $product_id, $quantity ) {
     $is_main_product = wk_rh_get_product_bmileisure_id( $product_id );
     if ( ! $is_main_product || WC()->cart->is_empty() ) return $passed;
 
+    // Replacing the previous booking: the INCOMING booking's session data
+    // (rh_bmi_booking / rh_last_product_url) is already set, so the remove-hook
+    // below must NOT wipe it. Flag the replace so it only cancels the OLD
+    // reservation/hold and leaves the new booking's session intact.
+    $GLOBALS['wk_rh_doing_main_replace'] = true;
+
     foreach ( WC()->cart->get_cart() as $cart_item_key => $cart_item ) {
         WC()->cart->remove_cart_item( $cart_item_key );
     }
+
+    unset( $GLOBALS['wk_rh_doing_main_replace'] );
 
     WC()->cart->calculate_totals();
 
@@ -3583,7 +3784,10 @@ add_action( 'woocommerce_remove_cart_item', function( $cart_item_key, $cart ) {
         wk_rh_release_active_hold( $main_order_id );
     }
 
-    if ( function_exists( 'wk_rh_clear_booking_session_state' ) ) {
+    // During a main-product replace, the session already holds the INCOMING
+    // booking — clearing it here would build the new cart item "naked" (no
+    // proposal). Only clear on a genuine standalone removal.
+    if ( function_exists( 'wk_rh_clear_booking_session_state' ) && empty( $GLOBALS['wk_rh_doing_main_replace'] ) ) {
         wk_rh_clear_booking_session_state();
     }
 
@@ -4078,6 +4282,155 @@ function wk_rh_filter_nexi_gateways_by_booking_location( $available_gateways ) {
     return $available_gateways;
 }
 
+/**
+ * Resolve the on-disk file that defines an object's class (cached per class).
+ *
+ * @param object $object Callback object.
+ *
+ * @return string Absolute, normalized file path or '' when it cannot be resolved.
+ */
+function wk_rh_get_object_class_file( $object ) {
+    static $cache = [];
+
+    if ( ! is_object( $object ) ) {
+        return '';
+    }
+
+    $class = get_class( $object );
+    if ( isset( $cache[ $class ] ) ) {
+        return $cache[ $class ];
+    }
+
+    $file = '';
+    try {
+        $reflection = new ReflectionClass( $class );
+        $file = (string) $reflection->getFileName();
+    } catch ( \Throwable $exception ) {
+        $file = '';
+    }
+
+    if ( $file !== '' && function_exists( 'wp_normalize_path' ) ) {
+        $file = wp_normalize_path( $file );
+    }
+
+    $cache[ $class ] = $file;
+
+    return $file;
+}
+
+/**
+ * Map a hooked asset callback to the booking location of the per-location payment
+ * plugin that owns it. Keyed on the callback's source plugin directory (not its
+ * namespace), so vendored/shared libraries are attributed to the plugin that ships
+ * them, and a future renamed namespace still resolves correctly.
+ *
+ * @param callable $callback Hook callback (as stored in $wp_filter).
+ *
+ * @return string|null Normalized location key, or null when the callback does not
+ *                     belong to a location-managed payment plugin.
+ */
+function wk_rh_get_payment_asset_callback_location( $callback ) {
+    if ( ! is_array( $callback ) || ! isset( $callback[0] ) || ! is_object( $callback[0] ) ) {
+        return null;
+    }
+
+    $file = wk_rh_get_object_class_file( $callback[0] );
+    if ( $file === '' ) {
+        return null;
+    }
+
+    // Plugin directory => booking location. Covers the Frisbii/Reepay trio and the
+    // Nexi/Nets trio. The generic (original) plugins serve Aarhus.
+    $plugin_location_map = [
+        '/frisbii-pay-copenhagen/'    => 'kobenhavn',
+        '/nexi-checkout-copenhagen/'  => 'kobenhavn',
+        '/frisbii-pay-stockholm/'     => 'stockholm',
+        '/nexi-checkout-stockholm/'   => 'stockholm',
+        '/reepay-checkout-gateway/'   => 'aarhus',
+        '/dibs-easy-for-woocommerce/' => 'aarhus',
+    ];
+
+    foreach ( $plugin_location_map as $needle => $location ) {
+        if ( strpos( $file, $needle ) !== false ) {
+            return $location;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Isolate payment assets to the cart's booking location.
+ *
+ * Each location runs its own copy of the Frisbii/Reepay (and Nexi) plugin, and every
+ * active copy enqueues its checkout scripts/styles and localizes its own config
+ * (e.g. WC_Gateway_Reepay_Checkout_Copenhagen with payment_type OVERLAY) on *every*
+ * checkout — they all share the same script handles, so they collide and the wrong
+ * copy can drive the payment window (blockUI hang). Filtering the available payment
+ * methods is not enough; we also strip the other locations' asset callbacks before
+ * they run, so only the matching location's gateway loads on checkout.
+ *
+ * Runs only when the cart resolves to a single supported booking location, so plain
+ * (non-booking) checkouts are never touched.
+ */
+function wk_rh_isolate_payment_assets_by_location() {
+    if ( is_admin() ) {
+        return;
+    }
+
+    $is_payment_page = ( function_exists( 'is_checkout' ) && is_checkout() )
+        || ( function_exists( 'is_add_payment_method_page' ) && is_add_payment_method_page() )
+        || isset( $_GET['pay_for_order'] ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+    $is_received = function_exists( 'is_order_received_page' ) && is_order_received_page();
+    if ( ! $is_payment_page || $is_received ) {
+        return;
+    }
+
+    $context = wk_rh_get_cart_nexi_gateway_location_context();
+    if ( 'ok' !== $context['status'] || empty( $context['location'] ) ) {
+        return;
+    }
+
+    $cart_location = (string) $context['location'];
+
+    $hooks = [ 'wp_enqueue_scripts', 'wp_print_scripts', 'wp_print_footer_scripts', 'wp_head', 'wp_footer' ];
+    $removed = [];
+
+    foreach ( $hooks as $hook ) {
+        if ( empty( $GLOBALS['wp_filter'][ $hook ] ) || ! ( $GLOBALS['wp_filter'][ $hook ] instanceof WP_Hook ) ) {
+            continue;
+        }
+
+        // Collect first, remove after, so we never mutate the list we are iterating.
+        $to_remove = [];
+        foreach ( $GLOBALS['wp_filter'][ $hook ]->callbacks as $priority => $callbacks ) {
+            foreach ( $callbacks as $callback ) {
+                $callback_location = wk_rh_get_payment_asset_callback_location( $callback['function'] );
+                if ( null === $callback_location || $callback_location === $cart_location ) {
+                    continue;
+                }
+                $to_remove[] = [ $callback['function'], (int) $priority ];
+            }
+        }
+
+        foreach ( $to_remove as $entry ) {
+            if ( remove_action( $hook, $entry[0], $entry[1] ) ) {
+                $removed[] = $hook;
+            }
+        }
+    }
+
+    if ( ! empty( $removed ) && function_exists( 'wk_rh_log_upstream_event' ) ) {
+        wk_rh_log_upstream_event( 'info', 'Isolated payment assets to cart booking location', [
+            'operation' => 'payment_asset_isolation',
+            'cartLocation' => $cart_location,
+            'removedCount' => count( $removed ),
+            'hooks' => array_values( array_unique( $removed ) ),
+        ] );
+    }
+}
+add_action( 'wp_enqueue_scripts', 'wk_rh_isolate_payment_assets_by_location', 0 );
+
 add_action( 'woocommerce_before_calculate_totals', function( $cart ) {
     if ( is_admin() && ! defined( 'DOING_AJAX' ) ) {
         return;
@@ -4099,6 +4452,20 @@ add_action( 'woocommerce_before_calculate_totals', function( $cart ) {
         if ( $addon_price >= 0 ) {
             $cart_item['data']->set_price( $addon_price );
         }
+    }
+
+    // Main booking line for products with BMI age-groups: charge BMI's per-mix total so the
+    // online amount matches the BMI bill (incl. twin pricing).
+    foreach ( $cart->get_cart() as $cart_item ) {
+        if ( ! empty( $cart_item['is_addon'] ) || empty( $cart_item['wk_rh_bmi_line_total'] ) || ! is_numeric( $cart_item['wk_rh_bmi_line_total'] ) ) {
+            continue;
+        }
+        if ( empty( $cart_item['data'] ) || ! is_object( $cart_item['data'] ) || ! method_exists( $cart_item['data'], 'set_price' ) ) {
+            continue;
+        }
+
+        $line_qty = isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1;
+        $cart_item['data']->set_price( (float) $cart_item['wk_rh_bmi_line_total'] / $line_qty );
     }
 }, 9999 );
 
@@ -4237,34 +4604,14 @@ add_action( 'template_redirect', function() {
         return;
     }
 
+    // Page-load cleanup must be SILENT. Cancel any genuinely expired holds, but
+    // never bounce the customer to the homepage from here, and don't kill a fresh
+    // booking that just hasn't been fully recognised yet. The legitimate "your
+    // time ran out, re-book" redirect is handled client-side by the countdown.
+    // This guarantees the customer can always reach checkout, and that adding
+    // another product just works (the old booking is cleared on the add replace).
     wk_rh_process_expired_active_holds( 'checkout_template_guard' );
-
-    $expired = wk_rh_cancel_and_clear_expired_cart_holds( true );
-    if ( ! empty( $expired['success'] ) ) {
-        $redirect_url = isset( $expired['redirect_url'] ) ? (string) $expired['redirect_url'] : '';
-        if ( $redirect_url !== '' ) {
-            wp_safe_redirect( $redirect_url );
-            exit;
-        }
-
-        return;
-    }
-
-    if ( WC()->cart->is_empty() ) {
-        return;
-    }
-
-    $main_context = wk_rh_get_main_booking_context();
-    if ( ! empty( $main_context['cartItemKey'] ) ) {
-        return;
-    }
-
-    $expired = wk_rh_expire_current_cart_reservation( 'checkout_missing_main_item', true );
-    $redirect_url = isset( $expired['redirect_url'] ) ? (string) $expired['redirect_url'] : '';
-    if ( $redirect_url !== '' ) {
-        wp_safe_redirect( $redirect_url );
-        exit;
-    }
+    wk_rh_cancel_and_clear_expired_cart_holds( true );
 }, 4 );
 
 add_filter( 'woocommerce_add_to_cart_validation', 'wk_rh_block_addon_without_parent', 20, 3 );
@@ -5417,6 +5764,16 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
     ];
     if ( ! empty( $dynamic_lines ) ) {
         $body['dynamicLines'] = $dynamic_lines;
+
+        // Keep the top-level quantity consistent with the age-group breakdown so BMI never
+        // books an unclassified remainder at the regular price.
+        $dynamic_total = 0;
+        foreach ( $dynamic_lines as $dynamic_line ) {
+            $dynamic_total += isset( $dynamic_line['quantity'] ) ? (int) $dynamic_line['quantity'] : 0;
+        }
+        if ( $dynamic_total > 0 ) {
+            $body['quantity'] = $dynamic_total;
+        }
     }
     if ( ! empty( $prepared_contact_person ) ) {
         $body['contactPerson'] = $prepared_contact_person;
@@ -5567,6 +5924,28 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
         $source,
         $prepared_contact_person
     );
+
+    // Products WITH BMI age-groups (combos): use BMI's per-mix price so the online charge
+    // equals the BMI bill (incl. twin). Flat products keep their static WooCommerce price
+    // and — when enabled — record the chosen breakdown as a booking note for the venue.
+    if ( ! empty( $dynamic_lines ) ) {
+        $bmi_line_total = function_exists( 'wk_rh_extract_booking_price_amount' ) ? wk_rh_extract_booking_price_amount( $result ) : null;
+        if ( $bmi_line_total !== null && $bmi_line_total >= 0 ) {
+            WC()->cart->cart_contents[ $main_cart_item_key ]['wk_rh_bmi_line_total'] = (float) $bmi_line_total;
+        }
+        unset( WC()->cart->cart_contents[ $main_cart_item_key ]['wk_rh_participant_memo'] );
+    } else {
+        unset( WC()->cart->cart_contents[ $main_cart_item_key ]['wk_rh_bmi_line_total'] );
+        $participant_memo = ( function_exists( 'wk_rh_is_flat_participant_groups_enabled' ) && wk_rh_is_flat_participant_groups_enabled() && function_exists( 'wk_rh_build_participant_breakdown_memo' ) )
+            ? wk_rh_build_participant_breakdown_memo( $participant_counts )
+            : '';
+        if ( $participant_memo !== '' ) {
+            WC()->cart->cart_contents[ $main_cart_item_key ]['wk_rh_participant_memo'] = $participant_memo;
+        } else {
+            unset( WC()->cart->cart_contents[ $main_cart_item_key ]['wk_rh_participant_memo'] );
+        }
+    }
+    WC()->cart->set_session();
 
     wk_rh_log_user_event( 'booking.hold_confirmed', [
         'source' => (string) $source,
@@ -5846,6 +6225,9 @@ function wk_rh_prepare_checkout_booking_step() {
         'reload' => true,
         'message' => __( 'Booking klargjort. Vælg nu add-ons og bekræft ordren.', 'racehall-wc-ui' ),
         'supplementsHtml' => wk_rh_get_checkout_step_supplements_markup( wk_rh_get_main_booking_context(), true ),
+        // The hold is created here; return the freshly-rendered banner so the JS
+        // can show the countdown after "Next" without a full page reload.
+        'holdBannerHtml' => wk_rh_get_hold_banner_markup( [] ),
     ] );
 }
 

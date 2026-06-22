@@ -280,11 +280,25 @@ function isTwinSelectionAllowed(pageProducts = currentPageProducts, productId = 
     return raceType === 'family' || raceType === 'closed'
 }
 
+function flatParticipantGroupsEnabled() {
+    // Default ON: only treated as off when the localized flag explicitly says so.
+    return !(typeof RH_FLAT_PARTICIPANT_GROUPS !== 'undefined' && RH_FLAT_PARTICIPANT_GROUPS && RH_FLAT_PARTICIPANT_GROUPS.enabled === false)
+}
+
+function productHasDynamicGroups(pageProducts, productId) {
+    const selected = getSelectedPageProduct(pageProducts, productId)
+    return !!(selected && Array.isArray(selected.dynamicGroups) && selected.dynamicGroups.length)
+}
+
 function updateTwinFieldVisibility(pageProducts = currentPageProducts, productId = null) {
-    const isAllowed = isTwinSelectionAllowed(pageProducts, productId)
+    // Flat products (no BMI age-groups) only offer Children/Twin when the site setting
+    // allows it. Products that expose groups are unaffected, so this is inert by default.
+    const flatExtraAllowed = productHasDynamicGroups(pageProducts, productId) || flatParticipantGroupsEnabled()
+
+    // Twin: unchanged behaviour, additionally gated by the flat-products setting.
+    const isAllowed = isTwinSelectionAllowed(pageProducts, productId) && flatExtraAllowed
     const twinInput = document.getElementById(PARTY_INPUT_IDS.twin)
     const twinRow = twinInput ? twinInput.closest('.counter-row') : null
-
     if (twinRow) {
         twinRow.hidden = !isAllowed
         twinRow.querySelectorAll('button, input').forEach((element) => {
@@ -292,6 +306,25 @@ function updateTwinFieldVisibility(pageProducts = currentPageProducts, productId
                 element.disabled = !isAllowed
             }
         })
+    }
+
+    // Children: only intervene to HIDE the row on flat products when the setting is off.
+    // In every other case the row is left entirely to the quantity-rules engine, so its
+    // min/max limits and button states are never touched/overridden.
+    if (!flatExtraAllowed) {
+        const childInput = document.getElementById(PARTY_INPUT_IDS.children)
+        const childRow = childInput ? childInput.closest('.counter-row') : null
+        if (childRow) {
+            childRow.hidden = true
+            childRow.querySelectorAll('button, input').forEach((element) => {
+                if ('disabled' in element) {
+                    element.disabled = true
+                }
+            })
+            if (childInput) {
+                childInput.value = '0'
+            }
+        }
     }
 
     return isAllowed
@@ -1967,6 +2000,59 @@ async function saveProposalToSession(block, pageId, resourceId, productId) {
     }
 }
 
+// Full-page loading overlay shown after a valid "Add to cart" submit. The booking
+// add-to-cart is a normal (non-AJAX) POST that reserves the slot at BMI before
+// redirecting to the cart, which can take a few seconds — this gives the customer
+// immediate feedback. It is injected on demand so nothing else on the page changes,
+// and clears automatically on navigation / back-forward cache restore.
+function ensureBookingPageLoader() {
+    let overlay = document.getElementById('rh-booking-page-loader')
+    if (overlay) return overlay
+
+    const style = document.createElement('style')
+    style.id = 'rh-booking-page-loader-style'
+    style.textContent =
+        '#rh-booking-page-loader{position:fixed;inset:0;z-index:2147483646;display:none;' +
+        'align-items:center;justify-content:center;background:rgba(255,255,255,.82);}' +
+        '#rh-booking-page-loader.is-visible{display:flex;}' +
+        '#rh-booking-page-loader .rh-bpl-spinner{width:56px;height:56px;border-radius:50%;' +
+        'border:5px solid rgba(200,16,46,.25);border-top-color:#C8102E;' +
+        'animation:rh-bpl-spin .8s linear infinite;}' +
+        '@keyframes rh-bpl-spin{to{transform:rotate(360deg)}}' +
+        'html.rh-booking-page-loading{overflow:hidden;}'
+    document.head.appendChild(style)
+
+    overlay = document.createElement('div')
+    overlay.id = 'rh-booking-page-loader'
+    overlay.setAttribute('role', 'status')
+    overlay.setAttribute('aria-live', 'polite')
+    overlay.setAttribute('aria-hidden', 'true')
+    overlay.innerHTML = '<div class="rh-bpl-spinner" aria-label="Loading"></div>'
+    document.body.appendChild(overlay)
+
+    return overlay
+}
+
+function showBookingPageLoader() {
+    const overlay = ensureBookingPageLoader()
+    overlay.classList.add('is-visible')
+    overlay.setAttribute('aria-hidden', 'false')
+    document.documentElement.classList.add('rh-booking-page-loading')
+}
+
+function hideBookingPageLoader() {
+    const overlay = document.getElementById('rh-booking-page-loader')
+    if (overlay) {
+        overlay.classList.remove('is-visible')
+        overlay.setAttribute('aria-hidden', 'true')
+    }
+    document.documentElement.classList.remove('rh-booking-page-loading')
+}
+
+// Hide the loader if the page is restored from the bfcache (e.g. browser "Back"),
+// so the customer never returns to a stuck overlay.
+window.addEventListener('pageshow', hideBookingPageLoader)
+
 function initBookingAddToCartSubmitGuard() {
     const form = document.querySelector('.booking-s form.cart')
     if (!form) return
@@ -1988,6 +2074,11 @@ function initBookingAddToCartSubmitGuard() {
             productId: window.RH_PRODUCT_ID || 0,
             quantity: getTotalQuantity()
         })
+
+        // Selection is valid and the form is about to POST (and redirect to the
+        // cart) — show the full-page loader so the customer sees something happening
+        // during the BMI reservation. The overlay also blocks a double-submit.
+        showBookingPageLoader()
 
         return true
     })
