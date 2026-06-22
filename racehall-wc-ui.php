@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.29
+ * Version: 2.31
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -52,7 +52,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.29' );
+define( 'RACEHALL_WC_UI_VERSION', '2.31' );
 
 // Declare WooCommerce High-Performance Order Storage (HPOS) compatibility. All order
 // access in this plugin uses the WC CRUD API (wc_get_order/wc_get_orders/$order->*),
@@ -1064,6 +1064,8 @@ function wk_rh_get_settings_defaults() {
         'pay_on_site_enabled' => 'yes',
         'flat_participant_groups_enabled' => 'yes',
         'required_supplement_name_markers' => 'obligatorisk,obligatory,required,mandatory',
+        'required_supplement_include_children' => 'yes',
+        'required_supplement_include_twin' => 'yes',
         'test_locations_json' => '[]',
         'live_locations_json' => '[]',
     ];
@@ -1792,6 +1794,8 @@ function wk_rh_sanitize_settings( $input ) {
         'pay_on_site_enabled' => ! empty( $input['pay_on_site_enabled'] ) && $input['pay_on_site_enabled'] === 'yes' ? 'yes' : 'no',
         'flat_participant_groups_enabled' => ! empty( $input['flat_participant_groups_enabled'] ) && $input['flat_participant_groups_enabled'] === 'yes' ? 'yes' : 'no',
         'required_supplement_name_markers' => sanitize_text_field( $input['required_supplement_name_markers'] ?? $defaults['required_supplement_name_markers'] ),
+        'required_supplement_include_children' => ! empty( $input['required_supplement_include_children'] ) && $input['required_supplement_include_children'] === 'yes' ? 'yes' : 'no',
+        'required_supplement_include_twin' => ! empty( $input['required_supplement_include_twin'] ) && $input['required_supplement_include_twin'] === 'yes' ? 'yes' : 'no',
         'test_locations_json' => wk_rh_sanitize_locations_json( $input['test_locations_json'] ?? '[]', 'wk_rh_test_locations_json_invalid' ),
         'live_locations_json' => wk_rh_sanitize_locations_json( $input['live_locations_json'] ?? '[]', 'wk_rh_live_locations_json_invalid' ),
     ];
@@ -1816,6 +1820,22 @@ function wk_rh_is_flat_participant_groups_enabled() {
     $value    = isset( $settings['flat_participant_groups_enabled'] ) ? $settings['flat_participant_groups_enabled'] : 'yes';
 
     return apply_filters( 'wk_rh_is_flat_participant_groups_enabled', $value === 'yes' );
+}
+
+/**
+ * Whether children / twin participants count toward the default quantity that
+ * required ("starter package") supplements are pre-filled to. Adults always count.
+ */
+function wk_rh_required_supplement_includes_children() {
+    $settings = wk_rh_get_settings();
+    $value    = isset( $settings['required_supplement_include_children'] ) ? $settings['required_supplement_include_children'] : 'yes';
+    return apply_filters( 'wk_rh_required_supplement_includes_children', $value === 'yes' );
+}
+
+function wk_rh_required_supplement_includes_twin() {
+    $settings = wk_rh_get_settings();
+    $value    = isset( $settings['required_supplement_include_twin'] ) ? $settings['required_supplement_include_twin'] : 'yes';
+    return apply_filters( 'wk_rh_required_supplement_includes_twin', $value === 'yes' );
 }
 
 function wk_rh_addon_carrier_post_is_usable( $product_id ) {
@@ -2404,6 +2424,24 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
     $location = isset( $main_context['location'] ) ? (string) $main_context['location'] : '';
     $supplements = isset( $main_context['supplements'] ) && is_array( $main_context['supplements'] ) ? $main_context['supplements'] : [];
 
+    // Default quantity for REQUIRED ("starter package") supplements = number of
+    // drivers in the booking (all participants: adults + children + twin).
+    // Computed once; the user can still adjust up/down before adding. Filterable
+    // so the "driver" definition can be changed later without code edits.
+    $driver_count = 0;
+    $main_item = isset( $main_context['item'] ) && is_array( $main_context['item'] ) ? $main_context['item'] : [];
+    if ( ! empty( $main_item ) && function_exists( 'wk_rh_get_booking_participant_counts' ) ) {
+        $counts = wk_rh_get_booking_participant_counts( $main_item );
+        $driver_count = (int) $counts['adults']; // adults always count as drivers
+        if ( wk_rh_required_supplement_includes_children() ) {
+            $driver_count += (int) $counts['children'];
+        }
+        if ( wk_rh_required_supplement_includes_twin() ) {
+            $driver_count += (int) $counts['twin'];
+        }
+    }
+    $driver_count = max( 0, (int) apply_filters( 'wk_rh_required_supplement_default_qty', $driver_count, $main_context ) );
+
     ob_start();
     ?>
     <div class="wk-rh-checkout-step-panel wk-rh-checkout-step-panel--supplements <?php echo $is_ready ? 'is-ready' : 'is-locked'; ?>" data-step="supplements">
@@ -2462,9 +2500,23 @@ function wk_rh_get_checkout_step_supplements_markup( array $main_context, $is_re
                     $min_qty = (int) $bounds['min'];
                     $max_qty = isset( $bounds['max'] ) ? (int) $bounds['max'] : 0;
                     $current_qty = wk_rh_get_addon_quantity_by_upstream_id( $upstream_id );
-                    $display_qty = $current_qty > 0 ? $current_qty : $min_qty;
-                    $price_amount = wk_rh_get_supplement_price_amount( $supplement );
                     $is_required_supplement = wk_rh_is_required_supplement( $supplement );
+
+                    if ( $current_qty > 0 ) {
+                        $display_qty = $current_qty;
+                    } elseif ( $is_required_supplement && $driver_count > 0 ) {
+                        // Pre-fill a required "starter package" to the driver count,
+                        // clamped to the addon's min/max. Not added until the user
+                        // clicks "Tilføj" — they can still adjust the number first.
+                        $display_qty = max( $min_qty, $driver_count );
+                        if ( $max_qty > 0 ) {
+                            $display_qty = min( $max_qty, $display_qty );
+                        }
+                    } else {
+                        $display_qty = $min_qty;
+                    }
+
+                    $price_amount = wk_rh_get_supplement_price_amount( $supplement );
                     $addon_image_url = function_exists( 'wk_rh_get_product_image_url' )
                         ? wk_rh_get_product_image_url( $location, $upstream_id )
                         : '';
@@ -2815,6 +2867,24 @@ function wk_rh_render_settings_page() {
                         <label class="wkrh-field__label" for="wk_rh_required_supplement_name_markers"><?php esc_html_e( 'Required supplement name markers', 'racehall-wc-ui' ); ?></label>
                         <div class="wkrh-field__control"><input type="text" id="wk_rh_required_supplement_name_markers" name="wk_rh_settings[required_supplement_name_markers]" value="<?php echo esc_attr( $settings['required_supplement_name_markers'] ?? '' ); ?>"></div>
                         <p class="wkrh-field__desc"><?php esc_html_e( 'Comma-separated words or phrases to look for in supplement names, for example: obligatorisk, obligatory, required.', 'racehall-wc-ui' ); ?></p>
+                    </div>
+                    <div class="wkrh-field">
+                        <div class="wkrh-field__control">
+                            <label class="wkrh-check">
+                                <input type="checkbox" id="wk_rh_required_supplement_include_children" name="wk_rh_settings[required_supplement_include_children]" value="yes" <?php checked( wk_rh_required_supplement_includes_children() ); ?>>
+                                <span><?php esc_html_e( 'Include children in the required-supplement default quantity', 'racehall-wc-ui' ); ?></span>
+                            </label>
+                        </div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'When on, child drivers count toward the quantity that required ("starter package") supplements are pre-filled to. Adults always count.', 'racehall-wc-ui' ); ?></p>
+                    </div>
+                    <div class="wkrh-field">
+                        <div class="wkrh-field__control">
+                            <label class="wkrh-check">
+                                <input type="checkbox" id="wk_rh_required_supplement_include_twin" name="wk_rh_settings[required_supplement_include_twin]" value="yes" <?php checked( wk_rh_required_supplement_includes_twin() ); ?>>
+                                <span><?php esc_html_e( 'Include twins in the required-supplement default quantity', 'racehall-wc-ui' ); ?></span>
+                            </label>
+                        </div>
+                        <p class="wkrh-field__desc"><?php esc_html_e( 'When on, twin drivers count toward the quantity that required ("starter package") supplements are pre-filled to.', 'racehall-wc-ui' ); ?></p>
                     </div>
                     <div class="wkrh-field">
                         <div class="wkrh-field__control">
@@ -4534,34 +4604,14 @@ add_action( 'template_redirect', function() {
         return;
     }
 
+    // Page-load cleanup must be SILENT. Cancel any genuinely expired holds, but
+    // never bounce the customer to the homepage from here, and don't kill a fresh
+    // booking that just hasn't been fully recognised yet. The legitimate "your
+    // time ran out, re-book" redirect is handled client-side by the countdown.
+    // This guarantees the customer can always reach checkout, and that adding
+    // another product just works (the old booking is cleared on the add replace).
     wk_rh_process_expired_active_holds( 'checkout_template_guard' );
-
-    $expired = wk_rh_cancel_and_clear_expired_cart_holds( true );
-    if ( ! empty( $expired['success'] ) ) {
-        $redirect_url = isset( $expired['redirect_url'] ) ? (string) $expired['redirect_url'] : '';
-        if ( $redirect_url !== '' ) {
-            wp_safe_redirect( $redirect_url );
-            exit;
-        }
-
-        return;
-    }
-
-    if ( WC()->cart->is_empty() ) {
-        return;
-    }
-
-    $main_context = wk_rh_get_main_booking_context();
-    if ( ! empty( $main_context['cartItemKey'] ) ) {
-        return;
-    }
-
-    $expired = wk_rh_expire_current_cart_reservation( 'checkout_missing_main_item', true );
-    $redirect_url = isset( $expired['redirect_url'] ) ? (string) $expired['redirect_url'] : '';
-    if ( $redirect_url !== '' ) {
-        wp_safe_redirect( $redirect_url );
-        exit;
-    }
+    wk_rh_cancel_and_clear_expired_cart_holds( true );
 }, 4 );
 
 add_filter( 'woocommerce_add_to_cart_validation', 'wk_rh_block_addon_without_parent', 20, 3 );
