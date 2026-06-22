@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.25
+ * Version: 2.29
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -15,7 +15,10 @@ if ( defined( 'RACEHALL_WC_UI_BOOTSTRAPPED' ) ) {
 }
 
 function wk_rh_get_booking_fallback_url() {
-    return home_url( '/' );
+    // Never bounce a customer to the homepage on an expired/abandoned booking.
+    // Prefer the shop page; home only if the shop page is unconfigured.
+    $shop = function_exists( 'wc_get_page_permalink' ) ? wc_get_page_permalink( 'shop' ) : '';
+    return ( is_string( $shop ) && $shop !== '' ) ? $shop : home_url( '/' );
 }
 
 function wk_rh_get_main_booking_product_url() {
@@ -49,7 +52,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.25' );
+define( 'RACEHALL_WC_UI_VERSION', '2.29' );
 
 // Declare WooCommerce High-Performance Order Storage (HPOS) compatibility. All order
 // access in this plugin uses the WC CRUD API (wc_get_order/wc_get_orders/$order->*),
@@ -2128,7 +2131,7 @@ function wk_rh_render_hold_banner_html( $expires_at, $expired_text, $prefix_text
 
     $headline = $headline_text !== ''
         ? $headline_text
-        : __( 'Bekræft ordren inden tidsfristen udløber.', 'racehall-wc-ui' );
+        : __( 'Gennemfør/betal bookingen inden den udløber.', 'racehall-wc-ui' );
 
     $class_name = trim( 'rh-hold-banner ' . sanitize_html_class( (string) $extra_class ) );
     echo '<div class="' . esc_attr( $class_name ) . '" data-expires-at="' . esc_attr( $expires_at ) . '" data-expired-text="' . esc_attr( $expired_text ) . '" data-prefix-text="' . esc_attr( $prefix_text ) . '" data-cart-url="' . esc_url( wc_get_cart_url() ) . '">';
@@ -2142,7 +2145,7 @@ function wk_rh_get_hold_banner_markup( array $args = [] ) {
         'expires_at'   => 0,
         'expired_text' => __( 'Reservationstiden er udløbet. Du skal starte bookingflowet igen.', 'racehall-wc-ui' ),
         'prefix_text'  => __( 'Din reservation holdes i:', 'racehall-wc-ui' ),
-        'headline_text'=> __( 'Bekræft ordren inden tidsfristen udløber.', 'racehall-wc-ui' ),
+        'headline_text'=> __( 'Gennemfør/betal bookingen inden den udløber.', 'racehall-wc-ui' ),
         'extra_class'  => '',
     ];
 
@@ -2172,7 +2175,7 @@ add_shortcode( 'rh_hold_countdown', function( $atts ) {
     $atts = shortcode_atts( [
         'expired_text' => __( 'Reservationstiden er udløbet. Du skal starte bookingflowet igen.', 'racehall-wc-ui' ),
         'prefix_text' => __( 'Din reservation holdes i:', 'racehall-wc-ui' ),
-        'headline_text' => __( 'Bekræft ordren inden tidsfristen udløber.', 'racehall-wc-ui' ),
+        'headline_text' => __( 'Gennemfør/betal bookingen inden den udløber.', 'racehall-wc-ui' ),
         'class' => '',
     ], $atts, 'rh_hold_countdown' );
 
@@ -2526,11 +2529,17 @@ add_action( 'woocommerce_before_checkout_form', function() {
     $hold_ctx = wk_rh_get_cart_hold_expiry_context();
     $hold_expires_at = isset( $hold_ctx['expires_at'] ) ? (int) $hold_ctx['expires_at'] : 0;
 
+    // Always render a stable mount wrapper (empty when no hold exists yet) so the
+    // checkout JS has a deterministic target to inject the banner into after the
+    // hold is created at the "Next" step — otherwise the banner only appears on a
+    // full page reload. This is the hook CheckoutWC actually fires.
+    echo '<div class="rh-hold-banner-mount">';
     wk_rh_render_hold_banner_html(
         $hold_expires_at,
         __( 'Reservationstiden er udløbet. Du skal starte bookingflowet igen.', 'racehall-wc-ui' ),
         __( 'Din reservation holdes i:', 'racehall-wc-ui' )
     );
+    echo '</div>';
 }, 5 );
 
 function wk_rh_get_active_holds() {
@@ -3614,9 +3623,17 @@ function wk_rh_replace_main_product_only( $passed, $product_id, $quantity ) {
     $is_main_product = wk_rh_get_product_bmileisure_id( $product_id );
     if ( ! $is_main_product || WC()->cart->is_empty() ) return $passed;
 
+    // Replacing the previous booking: the INCOMING booking's session data
+    // (rh_bmi_booking / rh_last_product_url) is already set, so the remove-hook
+    // below must NOT wipe it. Flag the replace so it only cancels the OLD
+    // reservation/hold and leaves the new booking's session intact.
+    $GLOBALS['wk_rh_doing_main_replace'] = true;
+
     foreach ( WC()->cart->get_cart() as $cart_item_key => $cart_item ) {
         WC()->cart->remove_cart_item( $cart_item_key );
     }
+
+    unset( $GLOBALS['wk_rh_doing_main_replace'] );
 
     WC()->cart->calculate_totals();
 
@@ -3697,7 +3714,10 @@ add_action( 'woocommerce_remove_cart_item', function( $cart_item_key, $cart ) {
         wk_rh_release_active_hold( $main_order_id );
     }
 
-    if ( function_exists( 'wk_rh_clear_booking_session_state' ) ) {
+    // During a main-product replace, the session already holds the INCOMING
+    // booking — clearing it here would build the new cart item "naked" (no
+    // proposal). Only clear on a genuine standalone removal.
+    if ( function_exists( 'wk_rh_clear_booking_session_state' ) && empty( $GLOBALS['wk_rh_doing_main_replace'] ) ) {
         wk_rh_clear_booking_session_state();
     }
 
@@ -6155,6 +6175,9 @@ function wk_rh_prepare_checkout_booking_step() {
         'reload' => true,
         'message' => __( 'Booking klargjort. Vælg nu add-ons og bekræft ordren.', 'racehall-wc-ui' ),
         'supplementsHtml' => wk_rh_get_checkout_step_supplements_markup( wk_rh_get_main_booking_context(), true ),
+        // The hold is created here; return the freshly-rendered banner so the JS
+        // can show the countdown after "Next" without a full page reload.
+        'holdBannerHtml' => wk_rh_get_hold_banner_markup( [] ),
     ] );
 }
 

@@ -403,7 +403,33 @@
         return next;
     }
 
+    function refreshHoldBanner(html) {
+        if (!html) return;
+        var mount = document.querySelector('.rh-hold-banner-mount');
+        if (mount) {
+            mount.innerHTML = String(html);
+        } else {
+            var existing = document.querySelector('.rh-hold-banner');
+            if (existing && existing.parentNode) {
+                var wrapper = document.createElement('div');
+                wrapper.innerHTML = String(html).trim();
+                var next = wrapper.firstElementChild;
+                if (next) existing.replaceWith(next);
+            }
+        }
+        initHoldCountdown();
+    }
+
+    var holdCountdownTimer = null;
+
     function initHoldCountdown() {
+        // Idempotent: a step transition can re-run this, so clear any prior
+        // timer before starting a new one (otherwise multiple intervals stack).
+        if (holdCountdownTimer) {
+            window.clearInterval(holdCountdownTimer);
+            holdCountdownTimer = null;
+        }
+
         var banner = document.querySelector('.rh-hold-banner[data-expires-at]');
         if (!banner) return;
 
@@ -464,11 +490,17 @@
                 });
         }
 
-        var timer = window.setInterval(function () {
+        // Customer-facing countdown ends one minute before the real hold expiry.
+        // The expired message + lock + redirect fire at that displayed zero
+        // (real expiry − displayOffset); data-expires-at / the cron / the BMI
+        // hold keep the full setting as a backstop for tabs closed early.
+        var displayOffset = 60;
+
+        holdCountdownTimer = window.setInterval(function () {
             var now = Math.floor(Date.now() / 1000);
             var left = expiresAt - now;
 
-            if (left <= 0) {
+            if (left <= displayOffset) {
                 countdownEl.textContent = '00:00';
                 banner.classList.add('expired');
                 banner.querySelector('strong').textContent = expiredText;
@@ -476,14 +508,17 @@
 
                 redirectAfterExpiry();
 
-                window.clearInterval(timer);
+                window.clearInterval(holdCountdownTimer);
+                holdCountdownTimer = null;
                 return;
             }
 
+            var displayLeft = Math.max(0, left - displayOffset);
+
             if (prefixText) {
-                countdownEl.textContent = prefixText + ' ' + formatCountdown(left);
+                countdownEl.textContent = prefixText + ' ' + formatCountdown(displayLeft);
             } else {
-                countdownEl.textContent = formatCountdown(left);
+                countdownEl.textContent = formatCountdown(displayLeft);
             }
         }, 1000);
     }
@@ -575,6 +610,12 @@
                         return refreshCheckoutFragments().then(function () {
                             setCheckoutStepState(true);
                             showFlowNotice('', 'error', '.wk-rh-checkout-step-notice--supplements');
+
+                            // Hold was just created server-side — inject the banner
+                            // and (re)start the countdown without a page reload.
+                            if (data && data.holdBannerHtml) {
+                                refreshHoldBanner(data.holdBannerHtml);
+                            }
 
                             supplementsPanel = supplementsPanel || document.querySelector('.wk-rh-checkout-step-panel--supplements');
                             if (supplementsPanel && typeof supplementsPanel.scrollIntoView === 'function') {
