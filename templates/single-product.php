@@ -62,7 +62,7 @@ window.RH_PRODUCT_UNAVAILABLE_MESSAGE = <?php echo wp_json_encode( $booking_unav
 window.RH_BOOKING_LOCATION = "<?php echo esc_js( $lokation ); ?>";
 window.RH_PRICE_CONFIG = {
     unitPrice: <?php echo wp_json_encode( (float) $product->get_price() ); ?>,
-    currencySymbol: <?php echo wp_json_encode( get_woocommerce_currency_symbol() ); ?>,
+    currencySymbol: <?php echo wp_json_encode( html_entity_decode( get_woocommerce_currency_symbol(), ENT_QUOTES, 'UTF-8' ) ); ?>,
     currencyPos: <?php echo wp_json_encode( get_option( 'woocommerce_currency_pos', 'right' ) ); ?>,
     decimals: <?php echo wp_json_encode( (int) wc_get_price_decimals() ); ?>,
     decimalSeparator: <?php echo wp_json_encode( wc_get_price_decimal_separator() ); ?>,
@@ -441,7 +441,7 @@ window.RH_I18N = {
                                     </span>
                                 </div>
                             </div>
-                                     <form class="cart" action="<?php echo esc_url( wc_get_cart_url() ); ?>" method="post" enctype="multipart/form-data">
+                                     <form class="cart" action="<?php echo esc_url( wc_get_checkout_url() ); ?>" method="post" enctype="multipart/form-data">
                                         <input type="hidden" name="booking_date" id="booking_date">
                                         <input type="hidden" name="booking_time" id="booking_time">
                                                      <input type="hidden" name="booking_proposal" id="booking_proposal">

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.31
+ * Version: 2.36
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -52,7 +52,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.31' );
+define( 'RACEHALL_WC_UI_VERSION', '2.36' );
 
 // Declare WooCommerce High-Performance Order Storage (HPOS) compatibility. All order
 // access in this plugin uses the WC CRUD API (wc_get_order/wc_get_orders/$order->*),
@@ -1492,10 +1492,11 @@ function wk_rh_expire_current_cart_reservation( $source = 'manual', $add_notice 
     WC()->cart->empty_cart();
     wk_rh_clear_booking_session_state();
 
+    // The expiry message is shown exclusively via our own client-side popup at
+    // the displayed 0:00. We NEVER queue a WooCommerce notice here: WC notices
+    // persist in the session until something renders them, so it would leak onto
+    // the next checkout the customer opens (the reported "ghost" expiry message).
     $notice = __( 'Din reservation er udløbet. Start venligst bookingprocessen igen.', 'racehall-wc-ui' );
-    if ( $add_notice ) {
-        wc_add_notice( $notice, 'error' );
-    }
 
     return [
         'success' => true,
@@ -3540,6 +3541,7 @@ add_action('wp_enqueue_scripts', function() {
             'ajax_url' => admin_url( 'admin-ajax.php' ),
             'nonce' => wp_create_nonce( 'rh_hold_nonce' ),
             'fallback_redirect' => wk_rh_get_main_booking_product_url(),
+            'redirect_text' => __( 'Du sendes tilbage til booking om', 'racehall-wc-ui' ),
         ] );
         wp_localize_script( 'racehall-checkout-js', 'RH_CHECKOUT_FLOW', [
             'ajax_url' => admin_url( 'admin-ajax.php' ),
@@ -4578,10 +4580,10 @@ function wk_rh_cancel_and_clear_expired_cart_holds( $add_notice = true ) {
     WC()->cart->empty_cart();
     wk_rh_clear_booking_session_state();
 
+    // Silent server-side cleanup — never a WooCommerce notice (it would persist
+    // in the session and leak onto the next checkout). The only customer-facing
+    // expiry message is our client-side popup at 0:00.
     $notice = __( 'Din reservation er udløbet. Kurven er nulstillet, så du kan vælge tidspunkt og booke igen.', 'racehall-wc-ui' );
-    if ( $add_notice ) {
-        wc_add_notice( $notice, 'error' );
-    }
 
     return [
         'success' => true,

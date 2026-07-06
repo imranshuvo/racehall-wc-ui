@@ -420,6 +420,52 @@
         initHoldCountdown();
     }
 
+    // Our own modal popup for the expiry message. Shown the instant the timer
+    // hits the displayed 0:00 — we never rely on a WooCommerce notice (those
+    // leak onto the next checkout). It shows a live "redirecting in 3… 2… 1…"
+    // countdown, then auto-redirects via onGo. Self-contained inline styles so
+    // it works regardless of theme/CheckoutWC CSS.
+    function showExpiryPopup(message, redirectText, seconds, onGo) {
+        if (document.getElementById('rh-expiry-popup')) return;
+
+        var overlay = document.createElement('div');
+        overlay.id = 'rh-expiry-popup';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.style.cssText = 'position:fixed;inset:0;top:0;left:0;right:0;bottom:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);padding:20px;';
+
+        var box = document.createElement('div');
+        box.style.cssText = 'background:#fff;max-width:420px;width:100%;border-radius:12px;padding:28px 24px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,0.35);font-family:inherit;';
+
+        var heading = document.createElement('p');
+        heading.style.cssText = 'margin:0 0 14px;font-size:17px;line-height:1.5;color:#1a1a1a;font-weight:600;';
+        heading.textContent = message || '';
+
+        var counter = document.createElement('p');
+        counter.style.cssText = 'margin:0;font-size:15px;line-height:1.5;color:#555;';
+
+        var remaining = seconds > 0 ? seconds : 3;
+        function render() {
+            counter.textContent = (redirectText || '') + ' ' + remaining + '…';
+        }
+        render();
+
+        box.appendChild(heading);
+        box.appendChild(counter);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+
+        var timer = window.setInterval(function () {
+            remaining -= 1;
+            if (remaining <= 0) {
+                window.clearInterval(timer);
+                if (typeof onGo === 'function') onGo();
+                return;
+            }
+            render();
+        }, 1000);
+    }
+
     var holdCountdownTimer = null;
 
     function initHoldCountdown() {
@@ -450,44 +496,46 @@
             redirected = true;
             logBookingClientEvent('checkout_hold_expired', { fallbackRedirect: fallbackRedirect });
 
-            if (!ajaxUrl || !nonce || typeof fetch !== 'function') {
-                window.setTimeout(function () {
-                    window.location.href = fallbackRedirect;
-                }, 1200);
-                return;
+            var targetUrl = fallbackRedirect;
+            var navigated = false;
+            function go() {
+                if (navigated) return;
+                navigated = true;
+                window.location.href = targetUrl;
             }
 
-            var body = new URLSearchParams({
-                action: 'rh_expire_hold',
-                nonce: nonce
-            });
+            // Show OUR popup the instant the timer hits 0:00 — no delay, never a
+            // WooCommerce notice. It counts down 3… 2… 1… then auto-redirects.
+            var redirectText = (timerCfg && timerCfg.redirect_text) || 'Du sendes tilbage til booking om';
+            showExpiryPopup(expiredText, redirectText, 3, go);
 
-            fetch(ajaxUrl, {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: body
-            })
-                .then(function (res) { return res.text(); })
-                .then(function (txt) {
-                    var redirectUrl = fallbackRedirect;
-                    try {
-                        var json = JSON.parse(txt);
-                        if (json && json.success && json.data && json.data.redirectUrl) {
-                            redirectUrl = json.data.redirectUrl;
-                        }
-                    } catch (e) {
-                    }
-
-                    window.setTimeout(function () {
-                        window.location.href = redirectUrl;
-                    }, 1200);
-                })
-                .catch(function () {
-                    window.setTimeout(function () {
-                        window.location.href = fallbackRedirect;
-                    }, 1200);
+            // Release the reservation + clear the cart server-side in the
+            // background. We don't block the popup on it; when it resolves we
+            // just learn the precise product URL to return the customer to.
+            if (ajaxUrl && nonce && typeof fetch === 'function') {
+                var body = new URLSearchParams({
+                    action: 'rh_expire_hold',
+                    nonce: nonce
                 });
+
+                fetch(ajaxUrl, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: body
+                })
+                    .then(function (res) { return res.text(); })
+                    .then(function (txt) {
+                        try {
+                            var json = JSON.parse(txt);
+                            if (json && json.success && json.data && json.data.redirectUrl) {
+                                targetUrl = json.data.redirectUrl;
+                            }
+                        } catch (e) {
+                        }
+                    })
+                    .catch(function () {});
+            }
         }
 
         // Customer-facing countdown ends one minute before the real hold expiry.
@@ -506,6 +554,8 @@
                 banner.querySelector('strong').textContent = expiredText;
                 disableCheckoutActions();
 
+                // Our popup (shown inside redirectAfterExpiry) is the only
+                // customer-facing expiry message — it appears instantly here.
                 redirectAfterExpiry();
 
                 window.clearInterval(holdCountdownTimer);
