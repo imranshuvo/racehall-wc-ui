@@ -1244,7 +1244,65 @@ function wk_rh_save_booking_data_to_cart( $cart_item_data, $product_id ) {
     if ( isset( $_POST['booking_twin'] ) ) {
         $cart_item_data['booking_twin'] = max( 0, intval( $_POST['booking_twin'] ) );
     }
+
+    // Seed BMI's per-mix total from the selected proposal so the FIRST checkout view
+    // shows the correct price for age-group products (twin/child) — before the "Next"
+    // step creates the booking and writes the authoritative total. We read the SAME
+    // session snapshot (rh_bmi_booking) that the rest of the booking pipeline uses (it is
+    // copied onto the cart item as bmi_proposal/bmi_page_products and consumed by the
+    // "Next"/booking-book step), so add-time group detection and pricing cannot diverge
+    // from it — regardless of add_cart_item_data handler order. Flat products (no dynamic
+    // groups) are left alone and keep their WooCommerce price. The "Next" step later
+    // overwrites this with the booking/book total (the same number).
+    if ( function_exists( 'wk_rh_build_booking_dynamic_lines' ) && WC()->session ) {
+        $bmi_data = WC()->session->get( 'rh_bmi_booking' );
+        $proposal = ( is_array( $bmi_data ) && ! empty( $bmi_data['proposal'] ) && is_array( $bmi_data['proposal'] ) ) ? $bmi_data['proposal'] : null;
+        if ( is_array( $proposal ) && ! empty( $proposal ) ) {
+            $page_products = ( isset( $bmi_data['pageProducts'] ) && is_array( $bmi_data['pageProducts'] ) ) ? $bmi_data['pageProducts'] : [];
+            $bm_id         = isset( $bmi_data['productId'] ) && $bmi_data['productId'] !== ''
+                ? (string) $bmi_data['productId']
+                : ( function_exists( 'wk_rh_get_product_bmileisure_id' ) ? (string) wk_rh_get_product_bmileisure_id( $product_id ) : '' );
+            $counts        = wk_rh_get_booking_participant_counts( $cart_item_data );
+            $dynamic_lines = wk_rh_build_booking_dynamic_lines( $counts, $proposal, $page_products, $bm_id );
+            if ( ! empty( $dynamic_lines ) ) {
+                $mix_total = wk_rh_extract_proposal_price_amount( $proposal );
+                if ( $mix_total !== null && $mix_total >= 0 ) {
+                    $cart_item_data['wk_rh_bmi_line_total'] = (float) $mix_total;
+                }
+            }
+        }
+    }
+
     return $cart_item_data;
+}
+
+/**
+ * Sum the money (kind 0) prices across a proposal's blocks = BMI's per-mix total.
+ * Mirrors proposalTotalPrice() in single-product.js. Returns null if there is no
+ * usable price (so callers keep the WooCommerce price for flat products).
+ */
+function wk_rh_extract_proposal_price_amount( $proposal ) {
+    if ( ! is_array( $proposal ) || empty( $proposal['blocks'] ) || ! is_array( $proposal['blocks'] ) ) {
+        return null;
+    }
+    $total = 0.0;
+    $found = false;
+    foreach ( $proposal['blocks'] as $entry ) {
+        $block = ( is_array( $entry ) && isset( $entry['block'] ) && is_array( $entry['block'] ) ) ? $entry['block'] : null;
+        if ( ! $block || empty( $block['prices'] ) || ! is_array( $block['prices'] ) ) {
+            continue;
+        }
+        foreach ( $block['prices'] as $price ) {
+            if ( ! is_array( $price ) || ! isset( $price['amount'] ) || ! is_numeric( $price['amount'] ) ) {
+                continue;
+            }
+            if ( ( isset( $price['kind'] ) ? (int) $price['kind'] : 0 ) === 0 ) {
+                $total += (float) $price['amount'];
+                $found  = true;
+            }
+        }
+    }
+    return $found ? $total : null;
 }
 
 function wk_rh_get_booking_participant_counts( array $source ) {
