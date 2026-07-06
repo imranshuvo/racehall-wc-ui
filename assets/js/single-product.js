@@ -1002,15 +1002,62 @@ function formatMoney(value) {
     }
 }
 
+// For products WITH BMI dynamic groups (adults/children/twin can be priced
+// differently), the checkout charges BMI's per-mix total — NOT unitPrice × headcount.
+// We mirror that here so the product page matches the charge. The per-mix total comes
+// from the proposals the page already fetches (every time slot for a given mix carries
+// the same total). Flat products (no groups) are unchanged: at checkout they're charged
+// the WooCommerce price, so unitPrice × qty already matches — see the `else` branch in
+// wk_rh_prepare_checkout_booking_step().
+let bmiMixTotalPrice = null
+
+function currentProductHasDynamicGroups() {
+    return productHasDynamicGroups(currentPageProducts, window.RH_PRODUCT_ID)
+}
+
+// Sum the money (kind 0) prices across a proposal's blocks = BMI's per-mix total.
+// Returns null if the proposal carries no usable price.
+function proposalTotalPrice(proposal) {
+    const blocks = proposal && Array.isArray(proposal.blocks) ? proposal.blocks : []
+    let total = 0
+    let found = false
+    blocks.forEach(entry => {
+        const prices = entry && entry.block && Array.isArray(entry.block.prices) ? entry.block.prices : []
+        prices.forEach(price => {
+            const amount = price && Number.isFinite(Number(price.amount)) ? Number(price.amount) : null
+            const isMoney = price && (price.kind === undefined || price.kind === null || Number(price.kind) === 0)
+            if (amount !== null && isMoney) {
+                total += amount
+                found = true
+            }
+        })
+    })
+    return found ? total : null
+}
+
 function updateSummaryPrice(totalQuantity) {
     const cfg = window.RH_PRICE_CONFIG || {}
     const unitPrice = Number(cfg.unitPrice)
     const resolvedUnit = Number.isFinite(unitPrice) ? unitPrice : 0
-    const totalValue = resolvedUnit * Math.max(0, Number(totalQuantity) || 0)
 
     const unitEl = document.getElementById('summary-unit-price')
     const totalEl = document.getElementById('summary-total-price')
 
+    // Group products: show BMI's per-mix total (matches the checkout charge). The correct
+    // total is only known once times load for the chosen mix; until then show a placeholder
+    // rather than a misleading unitPrice × headcount.
+    if (currentProductHasDynamicGroups()) {
+        if (unitEl) unitEl.textContent = ''
+        if (totalEl) {
+            totalEl.textContent = (bmiMixTotalPrice !== null && Number.isFinite(bmiMixTotalPrice) && bmiMixTotalPrice > 0)
+                ? formatMoney(bmiMixTotalPrice)
+                : '—'
+        }
+        return
+    }
+
+    // Flat products: unchanged — WooCommerce unit price × headcount.
+    const totalValue = resolvedUnit * Math.max(0, Number(totalQuantity) || 0)
     if (unitEl) {
         unitEl.textContent = formatMoney(resolvedUnit)
     }
@@ -1659,6 +1706,18 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
             return
         }
         if (data.proposals && data.proposals.length) {
+            // Group products: capture BMI's per-mix total (every slot for this mix shares
+            // it) so the summary matches what checkout will charge. Flat products keep the
+            // WooCommerce unitPrice × qty calc and never touch bmiMixTotalPrice.
+            if (currentProductHasDynamicGroups()) {
+                let mixTotal = null
+                for (let i = 0; i < data.proposals.length; i++) {
+                    const candidate = proposalTotalPrice(data.proposals[i])
+                    if (candidate !== null && candidate > 0) { mixTotal = candidate; break }
+                }
+                bmiMixTotalPrice = mixTotal
+                updateSummaryPrice(getTotalQuantity())
+            }
             data.proposals.forEach(proposal => {
                 const blocks = Array.isArray(proposal.blocks) ? proposal.blocks : []
                 const firstBlock = blocks.length ? blocks[0] : null

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.35
+ * Version: 2.36
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -52,7 +52,7 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.35' );
+define( 'RACEHALL_WC_UI_VERSION', '2.36' );
 
 // Declare WooCommerce High-Performance Order Storage (HPOS) compatibility. All order
 // access in this plugin uses the WC CRUD API (wc_get_order/wc_get_orders/$order->*),
