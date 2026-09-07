@@ -1070,19 +1070,52 @@ function wk_rh_ajax_get_timeslots() {
         wp_send_json_error( 'Invalid nonce', 403 );
     }
 
+    // Proposal signatures are bound to the WooCommerce customer session. A
+    // fresh guest must receive that cookie in this response before any proposal
+    // is signed, otherwise the subsequent save request has a different key.
+    if ( ! wk_rh_ensure_booking_selection_session() ) {
+        wk_rh_log_user_event( 'timeslots.request_rejected', [ 'reason' => 'missing_woocommerce_session' ], 'error' );
+        wp_send_json_error( 'Booking session unavailable', 503 );
+    }
+
+    $wc_product_id = isset( $_POST['wcProductId'] ) ? absint( $_POST['wcProductId'] ) : 0;
     $product_id = isset( $_POST['productId'] ) ? intval( $_POST['productId'] ) : 0;
     $date       = isset( $_POST['date'] ) ? sanitize_text_field( $_POST['date'] ) : '';
     $quantity   = isset( $_POST['quantity'] ) ? max( 0, intval( $_POST['quantity'] ) ) : 0;
     $booking_location = isset( $_POST['bookingLocation'] ) ? sanitize_text_field( $_POST['bookingLocation'] ) : '';
-    if ( ! $product_id || ! $date ) {
+    if ( ! $wc_product_id || ! $product_id || ! $date ) {
         wk_rh_log_user_event( 'timeslots.request_rejected', [
             'reason' => 'missing_required_fields',
+            'wcProductId' => $wc_product_id,
             'productId' => $product_id,
             'date' => $date,
             'quantity' => $quantity,
         ], 'warning' );
-        wp_send_json_error( 'Missing productId or date', 400 );
+        wp_send_json_error( 'Missing WooCommerce product, BMI product, or date', 400 );
     }
+
+    $configured_bm_product_id = function_exists( 'wk_rh_get_product_bmileisure_id' ) ? (string) wk_rh_get_product_bmileisure_id( $wc_product_id ) : '';
+    $configured_location = function_exists( 'wk_rh_get_product_booking_location' ) ? wk_rh_get_product_booking_location( $wc_product_id ) : '';
+    $requested_location_key = function_exists( 'wk_rh_normalize_location_key' ) ? wk_rh_normalize_location_key( $booking_location ) : '';
+    $configured_location_key = function_exists( 'wk_rh_normalize_location_key' ) ? wk_rh_normalize_location_key( $configured_location ) : '';
+    if ( $configured_bm_product_id === '' || $configured_bm_product_id !== (string) $product_id ) {
+        wk_rh_log_user_event( 'timeslots.request_rejected', [
+            'reason' => 'woocommerce_product_mismatch',
+            'wcProductId' => $wc_product_id,
+            'productId' => $product_id,
+        ], 'warning' );
+        wp_send_json_error( 'Product mismatch', 400 );
+    }
+    if ( $configured_location_key === '' || ( $requested_location_key !== '' && $requested_location_key !== $configured_location_key ) ) {
+        wk_rh_log_user_event( 'timeslots.request_rejected', [
+            'reason' => 'booking_location_mismatch',
+            'wcProductId' => $wc_product_id,
+            'bookingLocation' => $booking_location,
+            'configuredLocation' => $configured_location,
+        ], 'warning' );
+        wp_send_json_error( 'Booking location mismatch', 400 );
+    }
+    $booking_location = $configured_location;
 
     $token = wk_rh_get_token( $booking_location );
     if ( ! $token ) {
@@ -1203,18 +1236,72 @@ function wk_rh_ajax_get_timeslots() {
             'maxAmount' => isset( $matched_product['maxAmount'] ) ? $matched_product['maxAmount'] : null,
         ];
         $timeslots['pageProducts'] = is_array( $matched_page_products ) ? array_values( $matched_page_products ) : [];
+        $timeslots['policyFilteredCount'] = 0;
+        $timeslots['policyMinimum'] = 0;
+        if ( $quantity > 0 && isset( $timeslots['proposals'] ) && is_array( $timeslots['proposals'] ) ) {
+            $race_type = function_exists( 'wk_rh_get_product_booking_race_type' )
+                ? wk_rh_get_product_booking_race_type( $wc_product_id, is_array( $matched_product ) ? ( $matched_product['name'] ?? '' ) : '' )
+                : 'other';
+            $visible_proposals = [];
+            $signature_context = [
+                'wcProductId'       => $wc_product_id,
+                'productId'         => (string) $product_id,
+                'pageId'            => (string) $page_id,
+                'quantity'          => $quantity,
+                'bookingLocation'   => $booking_location,
+                'pageProductLimits' => $timeslots['pageProductLimits'],
+                'pageProducts'      => $timeslots['pageProducts'],
+                'raceType'          => $race_type,
+            ];
+            foreach ( $timeslots['proposals'] as $proposal ) {
+                if ( ! is_array( $proposal ) ) {
+                    continue;
+                }
+                $policy = wk_rh_validate_peak_minimum( $race_type, $booking_location, $proposal, $quantity );
+                if ( empty( $policy['valid'] ) ) {
+                    $timeslots['policyFilteredCount']++;
+                    $timeslots['policyMinimum'] = max( (int) $timeslots['policyMinimum'], (int) $policy['minimum'] );
+                    if ( ! empty( $policy['minimum'] ) && ( $policy['reason'] ?? '' ) === 'peak_window' ) {
+                        // Keep the slot visible, but unsigned. The browser forces
+                        // the minimum and refetches a quantity-correct BMI proposal
+                        // before selection; every server validation remains active.
+                        $visible_proposals[] = wk_rh_mark_booking_proposal_for_minimum( $proposal, $policy['minimum'] );
+                    } else {
+                        wk_rh_log_upstream_event( 'error', 'Exclusive proposal could not be evaluated by local booking policy', [
+                            'operation' => 'timeslots_policy',
+                            'reason' => (string) $policy['reason'],
+                            'wcProductId' => $wc_product_id,
+                            'productId' => $product_id,
+                            'location' => $booking_location,
+                        ] );
+                    }
+                    continue;
+                }
+                if ( ! empty( $policy['applies'] ) && ! empty( $policy['minimum'] ) ) {
+                    // Policy metadata is part of the signed browser payload. Add
+                    // it before signing so the quantity-correct peak proposal
+                    // survives the save-to-session verification round trip.
+                    $proposal = wk_rh_add_booking_proposal_policy_minimum( $proposal, $policy['minimum'] );
+                }
+                $signed_proposal = wk_rh_sign_booking_proposal( $proposal, $signature_context );
+                $visible_proposals[] = $signed_proposal;
+            }
+            $timeslots['proposals'] = $visible_proposals;
+        }
         if ( $quantity <= 0 ) {
             $timeslots['metadataOnly'] = true;
         }
     }
     wk_rh_log_user_event( 'timeslots.request_succeeded', [
         'productId' => $product_id,
+        'wcProductId' => $wc_product_id,
         'date' => $date,
         'quantity' => $quantity,
         'bookingLocation' => $booking_location,
         'pageId' => $page_id,
         'metadataOnly' => $quantity <= 0,
         'proposalCount' => isset( $timeslots['proposals'] ) && is_array( $timeslots['proposals'] ) ? count( $timeslots['proposals'] ) : 0,
+        'policyFilteredCount' => isset( $timeslots['policyFilteredCount'] ) ? (int) $timeslots['policyFilteredCount'] : 0,
     ] );
     wp_send_json( $timeslots );
 }
@@ -1746,7 +1833,7 @@ function wk_rh_validate_main_booking_quantity_rules( $passed, $product_id, $quan
 }
 
 add_filter( 'woocommerce_add_to_cart_validation', 'wk_rh_validate_main_booking_selection', 25, 3 );
-function wk_rh_restore_booking_session_from_post( $bm_id ) {
+function wk_rh_restore_booking_session_from_post( $bm_id, $wc_product_id = 0 ) {
     if ( ! function_exists( 'WC' ) || ! WC()->session ) {
         return null;
     }
@@ -1773,11 +1860,53 @@ function wk_rh_restore_booking_session_from_post( $bm_id ) {
         $product_id = (string) $bm_id;
     }
 
-    if ( $page_id === '' || $resource_id === '' ) {
+    $wc_product_id = absint( $wc_product_id );
+    $configured_location = $wc_product_id > 0 && function_exists( 'wk_rh_get_product_booking_location' )
+        ? wk_rh_get_product_booking_location( $wc_product_id )
+        : '';
+    if (
+        $wc_product_id <= 0
+        || (string) $product_id !== (string) $bm_id
+        || $page_id === ''
+        || $resource_id === ''
+        || wk_rh_get_booking_policy_location_key( $configured_location ) === ''
+        || wk_rh_get_booking_policy_location_key( $configured_location ) !== wk_rh_get_booking_policy_location_key( $booking_location )
+    ) {
+        return null;
+    }
+
+    $signature_context = [
+        'wcProductId'       => $wc_product_id,
+        'productId'         => (string) $product_id,
+        'pageId'            => (string) $page_id,
+        'quantity'          => $quantity,
+        'bookingLocation'   => $configured_location,
+        'pageProductLimits' => is_array( $page_product_limits ) ? $page_product_limits : null,
+        'pageProducts'      => is_array( $page_products ) ? array_values( $page_products ) : [],
+    ];
+    if ( ! wk_rh_verify_booking_proposal_signature( $proposal, $signature_context ) ) {
+        return null;
+    }
+    $verified_race_type = wk_rh_normalize_booking_race_type( $proposal['_wkRhRaceType'] ?? '' );
+    $proposal = wk_rh_get_clean_booking_proposal( $proposal );
+    if ( wk_rh_get_proposal_resource_id( $proposal ) !== $resource_id ) {
+        return null;
+    }
+
+    $race_type = wk_rh_resolve_booking_race_type( $wc_product_id, $verified_race_type );
+    $policy = wk_rh_validate_peak_minimum(
+        $race_type,
+        $configured_location,
+        $proposal,
+        $quantity
+    );
+    if ( empty( $policy['valid'] ) ) {
         return null;
     }
 
     $session_booking = [
+        'wcProductId'     => $wc_product_id,
+        'raceType'        => $race_type,
         'proposal'        => $proposal,
         'pageId'          => $page_id,
         'resourceId'      => $resource_id,
@@ -1785,7 +1914,7 @@ function wk_rh_restore_booking_session_from_post( $bm_id ) {
         'quantity'        => $quantity,
         'pageProductLimits' => is_array( $page_product_limits ) ? $page_product_limits : null,
         'pageProducts'    => is_array( $page_products ) ? array_values( $page_products ) : [],
-        'bookingLocation' => $booking_location,
+        'bookingLocation' => $configured_location,
         'orderId'         => '',
         'orderItemId'     => '',
         'expiresAt'       => '',
@@ -1836,7 +1965,7 @@ function wk_rh_validate_main_booking_selection( $passed, $product_id, $quantity 
 
     $session_booking = WC()->session->get( 'rh_bmi_booking' );
     if ( ! is_array( $session_booking ) || empty( $session_booking['proposal'] ) ) {
-        $session_booking = wk_rh_restore_booking_session_from_post( $bm_id );
+        $session_booking = wk_rh_restore_booking_session_from_post( $bm_id, $product_id );
         if ( ! is_array( $session_booking ) || empty( $session_booking['proposal'] ) ) {
             wk_rh_log_user_event( 'booking.selection_validation_failed', [ 'reason' => 'missing_proposal', 'productId' => $product_id, 'bmProductId' => $bm_id ], 'warning' );
             wc_add_notice( __( 'Vælg et gyldigt tidspunkt før du tilføjer til kurv.', 'racehall-wc-ui' ), 'error' );
@@ -1856,6 +1985,49 @@ function wk_rh_validate_main_booking_selection( $passed, $product_id, $quantity 
     if ( $session_product_id !== '' && $session_product_id !== (string) $bm_id ) {
         wk_rh_log_user_event( 'booking.selection_validation_failed', [ 'reason' => 'product_mismatch', 'productId' => $product_id, 'sessionProductId' => $session_product_id, 'bmProductId' => (string) $bm_id ], 'warning' );
         wc_add_notice( __( 'Den valgte tid matcher ikke produktet. Vælg tidspunkt igen.', 'racehall-wc-ui' ), 'error' );
+        return false;
+    }
+
+    $session_quantity = isset( $session_booking['quantity'] ) ? max( 1, (int) $session_booking['quantity'] ) : 0;
+    if ( $session_quantity <= 0 || $session_quantity !== max( 1, (int) $quantity ) ) {
+        wk_rh_log_user_event( 'booking.selection_validation_failed', [
+            'reason' => 'proposal_quantity_mismatch',
+            'productId' => $product_id,
+            'proposalQuantity' => $session_quantity,
+            'requestedQuantity' => (int) $quantity,
+        ], 'warning' );
+        wc_add_notice( __( 'Deltagerantallet er ændret efter tidspunktet blev valgt. Vælg tidspunkt igen.', 'racehall-wc-ui' ), 'error' );
+        return false;
+    }
+
+    $configured_location = wk_rh_get_product_booking_location( $product_id );
+    $session_location = isset( $session_booking['bookingLocation'] ) ? (string) $session_booking['bookingLocation'] : '';
+    $posted_location = isset( $_POST['booking_location'] ) ? (string) wp_unslash( $_POST['booking_location'] ) : '';
+    if (
+        wk_rh_get_booking_policy_location_key( $configured_location ) === ''
+        || wk_rh_get_booking_policy_location_key( $configured_location ) !== wk_rh_get_booking_policy_location_key( $session_location )
+        || wk_rh_get_booking_policy_location_key( $configured_location ) !== wk_rh_get_booking_policy_location_key( $posted_location )
+        || ! wk_rh_booking_selection_matches_proposal( $session_booking['proposal'], $configured_location, $booking_date, $booking_time )
+    ) {
+        wk_rh_log_user_event( 'booking.selection_validation_failed', [ 'reason' => 'date_time_or_location_mismatch', 'productId' => $product_id ], 'warning' );
+        wc_add_notice( __( 'Den valgte dato eller tid matcher ikke bookingforslaget. Vælg tidspunkt igen.', 'racehall-wc-ui' ), 'error' );
+        return false;
+    }
+
+    $policy = wk_rh_validate_peak_minimum(
+        wk_rh_resolve_booking_race_type( $product_id, $session_booking['raceType'] ?? '' ),
+        $configured_location,
+        $session_booking['proposal'],
+        max( 1, (int) $quantity )
+    );
+    if ( empty( $policy['valid'] ) ) {
+        wk_rh_log_user_event( 'booking.selection_validation_failed', [
+            'reason' => (string) $policy['reason'],
+            'productId' => $product_id,
+            'quantity' => (int) $quantity,
+            'minimum' => (int) $policy['minimum'],
+        ], 'warning' );
+        wc_add_notice( wk_rh_get_peak_policy_error_message( $policy ), 'error' );
         return false;
     }
 
@@ -2004,6 +2176,12 @@ function wk_rh_save_proposal() {
         wp_send_json_error( 'Invalid nonce', 403 );
     }
 
+    if ( ! function_exists( 'WC' ) || ! WC()->session || wk_rh_get_booking_selection_session_key() === '' ) {
+        wk_rh_log_user_event( 'proposal.save_rejected', [ 'reason' => 'missing_woocommerce_session' ], 'error' );
+        wp_send_json_error( 'Booking session unavailable', 503 );
+    }
+
+    $wc_product_id = isset( $_POST['wcProductId'] ) ? absint( $_POST['wcProductId'] ) : 0;
     $proposal    = isset( $_POST['proposal'] ) ? json_decode( stripslashes( $_POST['proposal'] ), true ) : null;
     $page_id     = isset( $_POST['pageId'] ) ? sanitize_text_field( $_POST['pageId'] ) : '';
     $resource_id = isset( $_POST['resourceId'] ) ? sanitize_text_field( $_POST['resourceId'] ) : '';
@@ -2013,9 +2191,9 @@ function wk_rh_save_proposal() {
     $page_products = isset( $_POST['pageProducts'] ) ? json_decode( stripslashes( (string) $_POST['pageProducts'] ), true ) : null;
     $booking_location = isset( $_POST['bookingLocation'] ) ? sanitize_text_field( $_POST['bookingLocation'] ) : '';
 
-    if ( empty( $proposal ) ) {
+    if ( ! $wc_product_id || empty( $proposal ) ) {
         wk_rh_log_user_event( 'proposal.save_rejected', [ 'reason' => 'missing_proposal', 'productId' => $product_id, 'pageId' => $page_id, 'resourceId' => $resource_id ], 'warning' );
-        wp_send_json_error( 'Missing proposal', 400 );
+        wp_send_json_error( 'Missing WooCommerce product or proposal', 400 );
     }
 
     if ( $page_id === '' || $resource_id === '' ) {
@@ -2023,8 +2201,70 @@ function wk_rh_save_proposal() {
         wp_send_json_error( 'Missing pageId or resourceId', 400 );
     }
 
+    $configured_bm_product_id = function_exists( 'wk_rh_get_product_bmileisure_id' ) ? (string) wk_rh_get_product_bmileisure_id( $wc_product_id ) : '';
+    $configured_location = function_exists( 'wk_rh_get_product_booking_location' ) ? wk_rh_get_product_booking_location( $wc_product_id ) : '';
+    if (
+        $configured_bm_product_id === ''
+        || $configured_bm_product_id !== (string) $product_id
+        || wk_rh_get_booking_policy_location_key( $configured_location ) === ''
+        || wk_rh_get_booking_policy_location_key( $configured_location ) !== wk_rh_get_booking_policy_location_key( $booking_location )
+    ) {
+        wk_rh_log_user_event( 'proposal.save_rejected', [
+            'reason' => 'product_or_location_mismatch',
+            'wcProductId' => $wc_product_id,
+            'productId' => $product_id,
+            'bookingLocation' => $booking_location,
+        ], 'warning' );
+        wp_send_json_error( 'Product or location mismatch', 400 );
+    }
+    $booking_location = $configured_location;
+
+    $signature_context = [
+        'wcProductId'       => $wc_product_id,
+        'productId'         => (string) $product_id,
+        'pageId'            => (string) $page_id,
+        'quantity'          => $quantity,
+        'bookingLocation'   => $booking_location,
+        'pageProductLimits' => is_array( $page_product_limits ) ? $page_product_limits : null,
+        'pageProducts'      => is_array( $page_products ) ? array_values( $page_products ) : [],
+    ];
+    if ( ! wk_rh_verify_booking_proposal_signature( $proposal, $signature_context ) ) {
+        wk_rh_log_user_event( 'proposal.save_rejected', [
+            'reason' => 'invalid_selection_signature',
+            'wcProductId' => $wc_product_id,
+            'productId' => $product_id,
+            'pageId' => $page_id,
+        ], 'warning' );
+        wp_send_json_error( 'Invalid proposal selection', 400 );
+    }
+
+    $verified_race_type = wk_rh_normalize_booking_race_type( $proposal['_wkRhRaceType'] ?? '' );
+    $proposal = wk_rh_get_clean_booking_proposal( $proposal );
+    if ( wk_rh_get_proposal_resource_id( $proposal ) !== $resource_id ) {
+        wk_rh_log_user_event( 'proposal.save_rejected', [
+            'reason' => 'resource_mismatch',
+            'wcProductId' => $wc_product_id,
+            'resourceId' => $resource_id,
+        ], 'warning' );
+        wp_send_json_error( 'Invalid proposal resource', 400 );
+    }
+
+    $race_type = wk_rh_resolve_booking_race_type( $wc_product_id, $verified_race_type );
+    $policy = wk_rh_validate_peak_minimum( $race_type, $booking_location, $proposal, $quantity );
+    if ( empty( $policy['valid'] ) ) {
+        wk_rh_log_user_event( 'proposal.save_rejected', [
+            'reason' => (string) $policy['reason'],
+            'wcProductId' => $wc_product_id,
+            'minimum' => (int) $policy['minimum'],
+            'quantity' => $quantity,
+        ], 'warning' );
+        wp_send_json_error( wk_rh_get_peak_policy_error_message( $policy ), 400 );
+    }
+
     if ( WC()->session ) {
         WC()->session->set( 'rh_bmi_booking', [
+            'wcProductId'     => $wc_product_id,
+            'raceType'        => $race_type,
             'proposal'        => $proposal,
             'pageId'          => $page_id,
             'resourceId'      => $resource_id,
@@ -2044,6 +2284,7 @@ function wk_rh_save_proposal() {
     }
 
     wk_rh_log_user_event( 'proposal.saved', [
+        'wcProductId' => $wc_product_id,
         'productId' => $product_id,
         'pageId' => $page_id,
         'resourceId' => $resource_id,

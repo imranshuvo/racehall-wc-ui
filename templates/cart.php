@@ -195,7 +195,7 @@ $continue_shopping_url = function_exists( 'wk_rh_get_main_booking_product_url' )
 
 
         <div class="trophy">
-            <img src="<?php echo esc_url( plugins_url( 'assets/image/trophy.png', dirname( __FILE__, 2 ) . '/racehall-wc-ui.php' ) ); ?>" alt="<?php echo esc_attr__( 'Trophy illustration', 'racehall-wc-ui' ); ?>" />
+            <img src="<?php echo esc_url( plugins_url( 'assets/image/trophy.png', dirname( __FILE__, 2 ) . '/wk-racehall-bmi-booking.php' ) ); ?>" alt="<?php echo esc_attr__( 'Trophy illustration', 'racehall-wc-ui' ); ?>" />
         </div>
     </section>
 

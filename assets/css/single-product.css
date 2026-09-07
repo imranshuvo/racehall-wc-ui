@@ -674,6 +674,21 @@ footer{
     margin-bottom: 10px;
 }
 
+.booking-peak-minimum-notice {
+    color: #fff;
+    background: rgba(200, 16, 46, 0.2);
+    border-left: 3px solid #c8102e;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.45;
+    margin: 12px 0 0;
+    padding: 10px 12px;
+}
+
+.booking-peak-minimum-notice[hidden] {
+    display: none;
+}
+
 .calendar-header {
     display: flex;
     justify-content: space-between;
@@ -961,4 +976,3 @@ input#twin-1 {
 .single-product-page table {
     color: #fff;
 }
-

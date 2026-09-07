@@ -325,6 +325,8 @@ function wk_rh_store_direct_booking_session( array $context ) {
     }
 
     WC()->session->set( 'rh_bmi_booking', [
+        'wcProductId'       => (int) $context['productId'],
+        'raceType'          => wk_rh_normalize_booking_race_type( $context['raceType'] ?? '' ),
         'proposal'          => $context['proposal'],
         'pageId'            => (string) $context['pageId'],
         'resourceId'        => (string) $context['resourceId'],
@@ -343,38 +345,28 @@ function wk_rh_store_direct_booking_session( array $context ) {
     ] );
 }
 
-function wk_rh_clear_direct_booking_seeded_session() {
+function wk_rh_capture_direct_booking_session() {
+    if ( ! function_exists( 'WC' ) || ! WC()->session ) {
+        return [];
+    }
+
+    return [
+        'rh_bmi_booking'     => WC()->session->get( 'rh_bmi_booking' ),
+        'booking_supplement' => WC()->session->get( 'booking_supplement' ),
+    ];
+}
+
+function wk_rh_restore_direct_booking_session( array $session_snapshot ) {
     if ( ! function_exists( 'WC' ) || ! WC()->session ) {
         return;
     }
 
-    WC()->session->set( 'rh_bmi_booking', null );
-    WC()->session->set( 'booking_supplement', null );
-}
-
-function wk_rh_prepare_cart_for_direct_booking() {
-    if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
-        return;
+    foreach ( [ 'rh_bmi_booking', 'booking_supplement' ] as $session_key ) {
+        $value = array_key_exists( $session_key, $session_snapshot )
+            ? $session_snapshot[ $session_key ]
+            : null;
+        WC()->session->set( $session_key, $value );
     }
-
-    if ( ! WC()->cart->is_empty() ) {
-        foreach ( array_keys( WC()->cart->get_cart() ) as $cart_item_key ) {
-            WC()->cart->remove_cart_item( $cart_item_key );
-        }
-
-        WC()->cart->calculate_totals();
-
-        if ( method_exists( WC()->cart, 'set_session' ) ) {
-            WC()->cart->set_session();
-        }
-    }
-
-    if ( function_exists( 'wk_rh_clear_booking_session_state' ) ) {
-        wk_rh_clear_booking_session_state();
-        return;
-    }
-
-    wk_rh_clear_direct_booking_seeded_session();
 }
 
 function wk_rh_fail_direct_booking_request( WP_Error $error, $redirect_url = '' ) {
@@ -483,9 +475,30 @@ function wk_rh_handle_direct_booking_request() {
         wk_rh_fail_direct_booking_request( $proposal_context, $product_context['redirectUrl'] );
     }
 
+    if ( ! wk_rh_booking_selection_matches_proposal( $proposal_context['proposal'], $booking_location, $booking_date, $booking_time ) ) {
+        wk_rh_fail_direct_booking_request( new WP_Error( 'proposal_time_mismatch', __( 'Det valgte tidspunkt matcher ikke bookingforslaget.', 'racehall-wc-ui' ) ), $product_context['redirectUrl'] );
+    }
+
+    $policy = wk_rh_validate_peak_minimum(
+        wk_rh_get_product_booking_race_type( $product_context['productId'] ),
+        $booking_location,
+        $proposal_context['proposal'],
+        (int) $participants['quantity']
+    );
+    if ( empty( $policy['valid'] ) ) {
+        wk_rh_fail_direct_booking_request(
+            new WP_Error(
+                'below_peak_minimum',
+                wk_rh_get_peak_policy_error_message( $policy )
+            ),
+            $product_context['redirectUrl']
+        );
+    }
+
     $booking_context = [
         'productId'         => $product_context['productId'],
         'bmProductId'       => $product_context['bmProductId'],
+        'raceType'          => wk_rh_get_product_booking_race_type( $product_context['productId'] ),
         'bookingDate'       => $booking_date,
         'bookingTime'       => $booking_time,
         'bookingLocation'   => $booking_location,
@@ -497,13 +510,24 @@ function wk_rh_handle_direct_booking_request() {
         'pageProducts'      => $page_context['pageProducts'],
     ];
 
-    wk_rh_prepare_cart_for_direct_booking();
+    $previous_session = wk_rh_capture_direct_booking_session();
     wk_rh_store_direct_booking_session( $booking_context );
     wk_rh_set_direct_booking_request_payload( $booking_context );
 
+    $passed_validation = apply_filters(
+        'woocommerce_add_to_cart_validation',
+        true,
+        $product_context['productId'],
+        $participants['quantity']
+    );
+    if ( ! $passed_validation ) {
+        wk_rh_restore_direct_booking_session( $previous_session );
+        wk_rh_fail_direct_booking_request( new WP_Error( 'add_to_cart_validation_failed', __( 'Bookingen kunne ikke tilføjes til kurven.', 'racehall-wc-ui' ) ), $product_context['redirectUrl'] );
+    }
+
     $cart_item_key = WC()->cart->add_to_cart( $product_context['productId'], $participants['quantity'] );
     if ( ! $cart_item_key ) {
-        wk_rh_clear_direct_booking_seeded_session();
+        wk_rh_restore_direct_booking_session( $previous_session );
         wk_rh_fail_direct_booking_request( new WP_Error( 'add_to_cart_failed', __( 'Bookingen kunne ikke tilføjes til kurven.', 'racehall-wc-ui' ) ), $product_context['redirectUrl'] );
     }
 
