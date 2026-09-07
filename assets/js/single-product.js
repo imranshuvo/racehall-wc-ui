@@ -24,6 +24,7 @@ let currentPageRulesDateKey = ''
 let pageRulesCache = {}
 let pendingPageRulesRequests = {}
 let activeTimeslotRequestController = null
+let pendingPeakMinimumNotice = null
 let latestTimeslotRequestId = 0
 let availabilityCachePayload = null
 let availabilityCachePromise = null
@@ -45,7 +46,7 @@ const LOCAL_BROWSER_CAPACITY_LIMITS = {
     stockholm: { total: 34, adults: 34, children: 14, twin: 2 }
 }
 const FAMILY_RACE_NAME_TOKENS = ['family', 'familie', 'familj','familje']
-const CLOSED_RACE_NAME_TOKENS = ['closed', 'lukket', 'stangd', 'stangt', 'sluten', 'slutet']
+const CLOSED_RACE_NAME_TOKENS = ['closed', 'exclusive', 'lukket', 'stangd', 'stangt', 'sluten', 'slutet']
 
 function logBookingClientEvent(eventName, context = {}) {
     const logger = window.RH_LOGGER || null
@@ -232,11 +233,11 @@ function normalizeBrowserLocationKey(locationValue) {
         return 'kobenhavn'
     }
 
-    if (/\b(stockholm)\b/.test(spaced) || compact.includes('stockholm')) {
+    if (/\b(stockholm|sthlm)\b/.test(spaced) || compact.includes('stockholm')) {
         return 'stockholm'
     }
 
-    if (/\b(aarhus|arhus)\b/.test(spaced) || compact.includes('aarhus') || compact.includes('arhus')) {
+    if (/\b(aarhus|arhus|aar)\b/.test(spaced) || compact.includes('aarhus') || compact.includes('arhus')) {
         return 'aarhus'
     }
 
@@ -261,6 +262,10 @@ function getCurrentBookingProductName(pageProducts = [], productId = null) {
 }
 
 function detectBrowserRaceType(pageProducts = [], productId = null) {
+    const configuredRaceType = String(window.RH_BOOKING_RACE_TYPE || '').trim().toLowerCase()
+    if (configuredRaceType === 'exclusive') return 'closed'
+    if (configuredRaceType === 'family') return 'family'
+
     const productName = normalizeRaceNameLookup(getCurrentBookingProductName(pageProducts, productId))
     if (!productName) return 'other'
 
@@ -604,6 +609,86 @@ function applyCountsToUI(counts) {
     })
 }
 
+function forceTotalQuantityMinimum(minimum, preferredKey = 'adults') {
+    const totalRule = currentQuantityRules.total || { max: null }
+    const policyMinimum = Math.max(1, Math.ceil(toPositiveNumber(minimum, 0)))
+    const existingMinimum = Math.max(0, Math.ceil(parseRuleNumber(totalRule.min, 0)))
+    const target = Math.max(existingMinimum, policyMinimum)
+    const totalMax = parseRuleNumber(totalRule.max, null)
+    if (totalMax !== null && target > totalMax) return false
+
+    // The peak rule raises the active minimum; it never lowers a stricter BMI
+    // minimum. This keeps the decrement controls and hidden cart inputs aligned.
+    totalRule.min = target
+    currentQuantityRules.total = totalRule
+
+    const next = { ...getPartyCounts() }
+    let total = getTotalFromCounts(next)
+    if (total >= target) {
+        syncQuantityConstraintsToForm(next)
+        return true
+    }
+
+    const adjustmentOrder = getPartyAdjustmentOrder(preferredKey)
+    let guard = 0
+    while (total < target && guard < 200) {
+        let changed = false
+        for (const key of adjustmentOrder) {
+            const rule = currentQuantityRules[key] || { min: 0, max: null, step: 1 }
+            const step = Math.max(1, parseRuleNumber(rule.step, 1))
+            const before = next[key]
+            const candidate = clampByRule(before + step, rule)
+            if (candidate > before) {
+                next[key] = candidate
+                changed = true
+                break
+            }
+        }
+        if (!changed) break
+        total = getTotalFromCounts(next)
+        guard++
+    }
+
+    if (total < target) return false
+
+    hasExplicitQuantitySelection = true
+    applyCountsToUI(next)
+    syncQuantityConstraintsToForm(next)
+    updateSummaryPeople()
+    return true
+}
+
+function formatPeakMinimumNotice(template, minimum) {
+    return String(template || '').replace(/\{\{minimum\}\}/g, String(minimum))
+}
+
+function showPeakMinimumNotice(minimum, adjusted = false) {
+    const notice = document.getElementById('booking-peak-minimum-notice')
+    if (!notice) return
+
+    const i18n = window.RH_I18N || {}
+    const template = adjusted
+        ? i18n.peakMinimumAdjustedMessage
+        : i18n.peakMinimumRequirementMessage
+    const message = formatPeakMinimumNotice(template, minimum)
+    if (!message) {
+        notice.hidden = true
+        notice.textContent = ''
+        return
+    }
+
+    notice.textContent = message
+    notice.hidden = false
+}
+
+function hidePeakMinimumNotice() {
+    pendingPeakMinimumNotice = null
+    const notice = document.getElementById('booking-peak-minimum-notice')
+    if (!notice) return
+    notice.hidden = true
+    notice.textContent = ''
+}
+
 let quantityInputsBound = false
 
 function getTimeslotsContainer() {
@@ -682,6 +767,7 @@ async function fetchPageQuantityRulesForDate(dateKey) {
                 credentials: 'same-origin',
                 body: new URLSearchParams({
                     action: 'rh_get_timeslots',
+                    wcProductId: String(window.RH_WC_PRODUCT_ID || ''),
                     productId: window.RH_PRODUCT_ID,
                     date: dateKey,
                     quantity: '0',
@@ -905,10 +991,15 @@ function applyPageQuantityRules(pageProductLimits = null, pageProducts = [], pro
 }
 
 function applyProposalQuantityRules(proposal, pageProductLimits = null, pageProducts = [], productId = null, options = {}) {
-    applyResolvedQuantityRules(
-        extractRulesFromSources(proposal, pageProductLimits, pageProducts, productId),
-        { preserveCounts: options.preserveCounts === true, changedKey: options.changedKey || 'adults' }
-    )
+    const rules = extractRulesFromSources(proposal, pageProductLimits, pageProducts, productId)
+    const policyMinimum = Math.max(0, Number(proposal && proposal._wkRhPolicyMinimum) || 0)
+    if (policyMinimum > 0) {
+        rules.total.min = Math.max(parseRuleNumber(rules.total.min, 0), policyMinimum)
+    }
+    applyResolvedQuantityRules(rules, {
+        preserveCounts: options.preserveCounts === true,
+        changedKey: options.changedKey || 'adults'
+    })
 }
 
 function updateCount(type, delta) {
@@ -1202,6 +1293,7 @@ function setBookingProposalState(options = {}) {
 
 function resetBookingTimeSelection(options = {}) {
     const shouldKeepMessage = options.keepMessage === true
+    const shouldKeepMinimumNotice = options.keepMinimumNotice === true
     const container = document.getElementById('booking-time-slots-section') || document.querySelector('.time-slots')
     if (container) {
         container.querySelectorAll('.time-slot.selected').forEach(slot => slot.classList.remove('selected'))
@@ -1212,6 +1304,9 @@ function resetBookingTimeSelection(options = {}) {
 
     if (!shouldKeepMessage) {
         setBookingValidationMessage('time', '')
+    }
+    if (!shouldKeepMinimumNotice) {
+        hidePeakMinimumNotice()
     }
 }
 
@@ -1295,6 +1390,18 @@ function hasSelectedBookingProposal() {
     return !!(input && String(input.value || '').trim())
 }
 
+function getSelectedProposalPolicyMinimum() {
+    const input = document.getElementById('booking_proposal')
+    if (!input || !String(input.value || '').trim()) return 0
+
+    try {
+        const proposal = JSON.parse(String(input.value))
+        return Math.max(0, Math.ceil(Number(proposal && proposal._wkRhPolicyMinimum) || 0))
+    } catch (error) {
+        return 0
+    }
+}
+
 function hasRequiredBookingContext() {
     const pageIdInput = document.getElementById('booking_page_id')
     const resourceIdInput = document.getElementById('booking_resource_id')
@@ -1330,6 +1437,16 @@ function validateBookingSelection(options = {}) {
 
     if (!hasRequiredBookingContext()) {
         setBookingValidationMessage('time', 'Bookingdata mangler. Vælg tidspunktet igen for at fortsætte.')
+        if (shouldFocus) focusTimeSlotsSection()
+        return false
+    }
+
+    const policyMinimum = getSelectedProposalPolicyMinimum()
+    if (policyMinimum > 0 && getTotalQuantity() < policyMinimum) {
+        const i18n = window.RH_I18N || {}
+        const message = formatPeakMinimumNotice(i18n.peakMinimumRequirementMessage, policyMinimum)
+        showPeakMinimumNotice(policyMinimum, false)
+        setBookingValidationMessage('time', message)
         if (shouldFocus) focusTimeSlotsSection()
         return false
     }
@@ -1631,7 +1748,7 @@ function renderCalendar(month, year) {
     }
 }
 
-async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
+async function fetchAndRenderTimeslots(dateStr, attempt = 0, preferredTime = '') {
     if (!isBookingProductAvailable()) {
         const container = getTimeslotsContainer()
         if (container) {
@@ -1657,6 +1774,7 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
             signal: requestController.signal,
             body: new URLSearchParams({
                 action: 'rh_get_timeslots',
+                wcProductId: String(window.RH_WC_PRODUCT_ID || ''),
                 productId: window.RH_PRODUCT_ID,
                 date: dateStr,
                 quantity: String(requestedQuantity),
@@ -1672,6 +1790,7 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
         try {
             data = JSON.parse(text)
         } catch (e) {
+            if (preferredTime) hidePeakMinimumNotice()
             if (container) container.innerHTML = '<span class="calendar-error" style="color:#fff">Fejl i tidsdata. Prøv igen.</span>'
             return
         }
@@ -1680,9 +1799,10 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
         container.innerHTML = ''
         clearTimeslotsBusyState()
         if (data.success === false || data.data === false) {
+            if (preferredTime) hidePeakMinimumNotice()
             logBookingClientEvent('timeslots_render_failed', { date: dateStr, productId, quantity: getTotalQuantity() })
             container.innerHTML = `<span class="calendar-error">${data.message || 'Ingen tider tilgængelige.'}</span>`
-            setBookingSubmitEnabled(true)
+            setBookingSubmitEnabled(false)
             return
         }
         logBookingClientEvent('timeslots_loaded', {
@@ -1702,7 +1822,7 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
         applyPageQuantityRules(currentPageProductLimits, currentPageProducts, productId)
         const resolvedQuantity = getTotalQuantity()
         if (resolvedQuantity !== requestedQuantity && attempt < 1) {
-            fetchAndRenderTimeslots(dateStr, attempt + 1)
+            fetchAndRenderTimeslots(dateStr, attempt + 1, preferredTime)
             return
         }
         if (data.proposals && data.proposals.length) {
@@ -1712,12 +1832,14 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
             if (currentProductHasDynamicGroups()) {
                 let mixTotal = null
                 for (let i = 0; i < data.proposals.length; i++) {
+                    if (data.proposals[i] && data.proposals[i]._wkRhPolicyBlocked === true) continue
                     const candidate = proposalTotalPrice(data.proposals[i])
                     if (candidate !== null && candidate > 0) { mixTotal = candidate; break }
                 }
                 bmiMixTotalPrice = mixTotal
                 updateSummaryPrice(getTotalQuantity())
             }
+            let preferredSelection = null
             data.proposals.forEach(proposal => {
                 const blocks = Array.isArray(proposal.blocks) ? proposal.blocks : []
                 const firstBlock = blocks.length ? blocks[0] : null
@@ -1725,20 +1847,59 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
                 const resourceId = firstSlot.resourceId || (firstBlock && firstBlock.productLineIds && firstBlock.productLineIds[0]) || ''
                 const start = getProposalDisplayTime(proposal)
                 const blockName = firstSlot && firstSlot.name ? String(firstSlot.name).trim() : ''
+                const policyMinimum = Math.max(0, Number(proposal && proposal._wkRhPolicyMinimum) || 0)
+                const policyBlocked = Boolean(proposal && proposal._wkRhPolicyBlocked === true && policyMinimum > 0)
 
                 const btn = document.createElement('button')
+                btn.type = 'button'
                 btn.className = 'time-slot'
-                btn.textContent = blockName ? `${blockName} - ${start}` : start
+                const baseLabel = blockName ? `${blockName} - ${start}` : start
+                btn.textContent = baseLabel
                 btn.setAttribute('data-time', start)
+                if (policyBlocked) {
+                    btn.classList.add('requires-minimum')
+                    btn.setAttribute('data-policy-minimum', String(policyMinimum))
+                }
 
                 // Disable button if slot == 0
                 if (firstSlot.slot === 0) {
                     btn.disabled = true
                     btn.classList.add('disabled')
-                } else {
+                } else if (policyBlocked) {
                     btn.addEventListener('click', async function () {
+                        resetBookingTimeSelection({ keepMessage: true })
+                        setBookingSubmitEnabled(false)
+
+                        const previousQuantity = getTotalQuantity()
+                        const existingMinimum = Math.max(0, parseRuleNumber((currentQuantityRules.total || {}).min, 0))
+
+                        if (!forceTotalQuantityMinimum(policyMinimum, 'adults')) {
+                            setBookingValidationMessage('time', `Dette tidspunkt kræver mindst ${policyMinimum} deltagere.`)
+                            return
+                        }
+
+                        if (policyMinimum > existingMinimum) {
+                            pendingPeakMinimumNotice = {
+                                minimum: policyMinimum,
+                                adjusted: getTotalQuantity() > previousQuantity
+                            }
+                            showPeakMinimumNotice(policyMinimum, pendingPeakMinimumNotice.adjusted)
+                        }
+
+                        logBookingClientEvent('peak_minimum_forced', {
+                            date: dateStr,
+                            time: start,
+                            minimum: policyMinimum,
+                            quantity: getTotalQuantity()
+                        })
+                        renderTimeslotsLoadingState()
+                        await fetchAndRenderTimeslots(dateStr, 0, start)
+                    })
+                } else {
+                    const selectProposal = async function () {
                         container.querySelectorAll('.time-slot').forEach(s => s.classList.remove('selected'))
                         this.classList.add('selected')
+                        setBookingValidationMessage('time', '')
                         updateSummaryTime(this.getAttribute('data-time'))
                         const proposalPageId = responsePageId || (proposal && proposal.pageId ? String(proposal.pageId) : '')
                         setBookingProposalState({
@@ -1749,7 +1910,18 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
                             pageProductLimits: currentPageProductLimits,
                             pageProducts: currentPageProducts
                         })
+                        const baseProposalRules = extractRulesFromSources(proposal, currentPageProductLimits, currentPageProducts, productId)
+                        const baseMinimum = Math.max(0, parseRuleNumber((baseProposalRules.total || {}).min, 0))
                         applyProposalQuantityRules(proposal, currentPageProductLimits, currentPageProducts, productId, { preserveCounts: true, changedKey: 'adults' })
+                        if (policyMinimum > baseMinimum) {
+                            const pendingNotice = pendingPeakMinimumNotice && pendingPeakMinimumNotice.minimum === policyMinimum
+                                ? pendingPeakMinimumNotice
+                                : { minimum: policyMinimum, adjusted: false }
+                            showPeakMinimumNotice(policyMinimum, pendingNotice.adjusted)
+                            pendingPeakMinimumNotice = null
+                        } else {
+                            hidePeakMinimumNotice()
+                        }
                         logBookingClientEvent('timeslot_selected', {
                             date: dateStr,
                             productId,
@@ -1758,8 +1930,8 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
                         })
 
                         // Await the saveProposalToSession call
-                        const saveSucceeded = await saveProposalToSession(proposal, proposalPageId, resourceId, productId)
-                        if (saveSucceeded) {
+                        const saveResult = await saveProposalToSession(proposal, proposalPageId, resourceId, productId)
+                        if (saveResult.saved) {
                             logBookingClientEvent('proposal_saved', {
                                 productId,
                                 resourceId,
@@ -1767,14 +1939,19 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
                                 quantity: getTotalQuantity()
                             })
                             setBookingSubmitEnabled(true)
-                        } else {
+                        } else if (saveResult.rejected) {
                             logBookingClientEvent('proposal_save_failed', {
                                 productId,
                                 resourceId,
                                 date: dateStr,
-                                quantity: getTotalQuantity()
+                                quantity: getTotalQuantity(),
+                                reason: saveResult.code || 'server_rejected'
                             })
-                            console.warn('Continuing with posted proposal fallback after session save failed.')
+                            resetBookingTimeSelection()
+                            await fetchAndRenderTimeslots(dateStr)
+                            setBookingSubmitEnabled(false)
+                        } else {
+                            console.warn('Continuing with signed posted proposal fallback after a transport failure.')
                             setBookingSubmitEnabled(true)
                         }
 
@@ -1784,22 +1961,44 @@ async function fetchAndRenderTimeslots(dateStr, attempt = 0) {
                         //         ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
                         //         : ''
                         // )
-                    })
+                    }
+                    btn.addEventListener('click', selectProposal)
+                    if (preferredTime && start === preferredTime) {
+                        preferredSelection = { button: btn, select: selectProposal }
+                    }
                 }
 
                 container.appendChild(btn)
             })
+
+            if (preferredTime) {
+                if (preferredSelection) {
+                    await preferredSelection.select.call(preferredSelection.button)
+                } else {
+                    hidePeakMinimumNotice()
+                    setBookingValidationMessage('time', 'Tidspunktet er ikke længere ledigt for det krævede deltagerantal.')
+                    setBookingSubmitEnabled(false)
+                }
+            }
         } else {
-            container.innerHTML = '<span style="color:#fff">Ingen ledige tider denne dag.</span>'
+            if (preferredTime) hidePeakMinimumNotice()
+            const policyMinimum = Number(data && data.policyMinimum)
+            const policyFilteredCount = Number(data && data.policyFilteredCount)
+            if (policyFilteredCount > 0 && Number.isFinite(policyMinimum) && policyMinimum > 0) {
+                container.innerHTML = `<span style="color:#fff">Exclusive-tider i dette tidsrum kræver mindst ${policyMinimum} deltagere.</span>`
+            } else {
+                container.innerHTML = '<span style="color:#fff">Ingen ledige tider denne dag.</span>'
+            }
         }
-        setBookingSubmitEnabled(true)
+        setBookingSubmitEnabled(hasSelectedBookingTime() && hasSelectedBookingProposal() && hasRequiredBookingContext())
     } catch (err) {
         if (err && err.name === 'AbortError') {
             return
         }
 
+        if (preferredTime) hidePeakMinimumNotice()
         if (container) container.innerHTML = '<span class="calendar-error" style="color:#fff">Netværksfejl ved hentning af tider.</span>'
-        setBookingSubmitEnabled(true)
+        setBookingSubmitEnabled(false)
     } finally {
         if (activeTimeslotRequestController === requestController) {
             activeTimeslotRequestController = null
@@ -1984,7 +2183,7 @@ if (document.readyState === 'loading') {
 
 async function saveProposalToSession(block, pageId, resourceId, productId) {
     console.log('Saving proposal to session:', block)
-    if (!window.my_ajax_object) return false
+    if (!window.my_ajax_object) return { saved: false, rejected: false, code: 'missing_ajax_config' }
     const pageProductLimits = (currentPageProductLimits && typeof currentPageProductLimits === 'object')
         ? JSON.stringify(currentPageProductLimits)
         : ''
@@ -1998,6 +2197,7 @@ async function saveProposalToSession(block, pageId, resourceId, productId) {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({
                 action: 'rh_save_proposal',
+                wcProductId: String(window.RH_WC_PRODUCT_ID || ''),
                 proposal: JSON.stringify(block),
                 pageId: pageId || (block && block.pageId ? String(block.pageId) : ''),
                 resourceId: resourceId || '',
@@ -2015,7 +2215,8 @@ async function saveProposalToSession(block, pageId, resourceId, productId) {
         console.log('Save proposal response status:', result)
         if (!result.success) {
             console.warn('Could not save proposal to session:', result)
-            return false
+            const errorPayload = result && typeof result.data === 'object' ? result.data : {}
+            return { saved: false, rejected: true, code: String(errorPayload.code || 'server_rejected') }
         }
         else {
             const addonItems = document.getElementById('addonSummaryItems')
@@ -2025,7 +2226,7 @@ async function saveProposalToSession(block, pageId, resourceId, productId) {
                 const supplements = Array.isArray(payload.supplements) ? payload.supplements : []
                 if (!supplements.length) {
                     addonItems.innerHTML = '<span class="summary-label">—</span>'
-                    return true
+                    return { saved: true, rejected: false, code: '' }
                 }
                 supplements.forEach(supplement => {
                     if (!supplement || !supplement.product) return
@@ -2046,7 +2247,7 @@ async function saveProposalToSession(block, pageId, resourceId, productId) {
                     addonItems.appendChild(div)
                 })
             }
-            return true
+            return { saved: true, rejected: false, code: '' }
         }
     } catch (e) {
         logBookingClientEvent('proposal_save_exception', {
@@ -2055,7 +2256,7 @@ async function saveProposalToSession(block, pageId, resourceId, productId) {
             message: e && e.message ? e.message : 'unknown'
         })
         console.warn('Could not save proposal to session:', e)
-        return false
+        return { saved: false, rejected: false, code: 'transport_failure' }
     }
 }
 
@@ -2116,7 +2317,7 @@ function initBookingAddToCartSubmitGuard() {
     const form = document.querySelector('.booking-s form.cart')
     if (!form) return
 
-    setBookingSubmitEnabled(true)
+    setBookingSubmitEnabled(false)
     logBookingClientEvent('product_page_ready', { productId: window.RH_PRODUCT_ID || 0 })
 
     form.addEventListener('submit', function (event) {

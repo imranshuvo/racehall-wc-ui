@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Onsite Booking System
  * Description: Onsite booking integration for Racehall and bmileisure API.
- * Version: 2.36
+ * Version: 2.40
  * Author: Webkonsulenterne ApS
  * Text Domain: racehall-wc-ui
  * Domain Path: /languages
@@ -52,7 +52,8 @@ define( 'RACEHALL_WC_UI_BOOTSTRAPPED', true );
 // Define plugin paths
 define( 'RACEHALL_WC_UI_PATH', plugin_dir_path( __FILE__ ) );
 define( 'RACEHALL_WC_UI_URL', plugin_dir_url( __FILE__ ) );
-define( 'RACEHALL_WC_UI_VERSION', '2.36' );
+define( 'RACEHALL_WC_UI_VERSION', '2.40' );
+define( 'RACEHALL_WC_UI_BOOKING_ASSET_VERSION', '2.40.1' );
 
 // Declare WooCommerce High-Performance Order Storage (HPOS) compatibility. All order
 // access in this plugin uses the WC CRUD API (wc_get_order/wc_get_orders/$order->*),
@@ -1649,14 +1650,14 @@ function wk_rh_normalize_location_key( $location ) {
     }
 
     if (
-        preg_match( '/\bstockholm\b/', $spaced_location )
+        preg_match( '/\b(stockholm|sthlm)\b/', $spaced_location )
         || strpos( $compact_location, 'stockholm' ) !== false
     ) {
         return 'stockholm';
     }
 
     if (
-        preg_match( '/\b(aarhus|arhus)\b/', $spaced_location )
+        preg_match( '/\b(aarhus|arhus|aar)\b/', $spaced_location )
         || strpos( $compact_location, 'aarhus' ) !== false
         || strpos( $compact_location, 'arhus' ) !== false
     ) {
@@ -3404,6 +3405,8 @@ function wk_rh_render_diagnostics_page() {
     wk_rh_render_admin_shell_footer();
 }
 
+require_once RACEHALL_WC_UI_PATH . 'includes/booking-policy.php';
+require_once RACEHALL_WC_UI_PATH . 'includes/cart-replacement.php';
 require_once RACEHALL_WC_UI_PATH . 'templates/hooks.php';
 require_once RACEHALL_WC_UI_PATH . 'includes/direct-booking-link.php';
 
@@ -3465,13 +3468,13 @@ add_action('wp_enqueue_scripts', function() {
             'racehall-single-product-css',
             RACEHALL_WC_UI_URL . 'assets/css/single-product.css',
             [],
-            RACEHALL_WC_UI_VERSION
+            RACEHALL_WC_UI_BOOKING_ASSET_VERSION
         );
         wp_enqueue_script(
             'racehall-single-product-js',
             RACEHALL_WC_UI_URL . 'assets/js/single-product.js',
             ['jquery'],
-            RACEHALL_WC_UI_VERSION,
+            RACEHALL_WC_UI_BOOKING_ASSET_VERSION,
             true
         );
         $product_id = get_queried_object_id();
@@ -3686,26 +3689,33 @@ function wk_rh_block_direct_addon_carrier_purchase( $passed, $product_id, $quant
     return false;
 }
 
-add_filter( 'woocommerce_add_to_cart_validation', 'wk_rh_replace_main_product_only', 10, 3 );
-function wk_rh_replace_main_product_only( $passed, $product_id, $quantity ) {
-    if ( isset( $_POST['is_addon'] ) ) {
-        return $passed;
+add_action( 'woocommerce_add_to_cart', 'wk_rh_replace_previous_cart_after_main_booking_added', 6, 6 );
+function wk_rh_replace_previous_cart_after_main_booking_added( $cart_item_key, $product_id, $quantity, $variation_id, $variation, $cart_item_data ) {
+    if ( ! empty( $cart_item_data['is_addon'] ) ) {
+        return;
     }
 
-    $is_main_product = wk_rh_get_product_bmileisure_id( $product_id );
-    if ( ! $is_main_product || WC()->cart->is_empty() ) return $passed;
+    if ( ! function_exists( 'WC' ) || ! WC()->cart || empty( wk_rh_get_product_bmileisure_id( $product_id ) ) ) {
+        return;
+    }
 
-    // Replacing the previous booking: the INCOMING booking's session data
-    // (rh_bmi_booking / rh_last_product_url) is already set, so the remove-hook
-    // below must NOT wipe it. Flag the replace so it only cancels the OLD
-    // reservation/hold and leaves the new booking's session intact.
+    $removal_keys = wk_rh_get_booking_replacement_removal_keys( WC()->cart->get_cart(), $cart_item_key );
+    if ( empty( $removal_keys ) ) {
+        return;
+    }
+
+    // The incoming booking is now in the cart, so it is safe to replace the
+    // previous contents. Keep its session state while the remove hook cancels
+    // the old BMI reservation and removes its add-ons.
     $GLOBALS['wk_rh_doing_main_replace'] = true;
 
-    foreach ( WC()->cart->get_cart() as $cart_item_key => $cart_item ) {
-        WC()->cart->remove_cart_item( $cart_item_key );
+    try {
+        foreach ( $removal_keys as $removal_key ) {
+            WC()->cart->remove_cart_item( $removal_key );
+        }
+    } finally {
+        unset( $GLOBALS['wk_rh_doing_main_replace'] );
     }
-
-    unset( $GLOBALS['wk_rh_doing_main_replace'] );
 
     WC()->cart->calculate_totals();
 
@@ -3713,7 +3723,11 @@ function wk_rh_replace_main_product_only( $passed, $product_id, $quantity ) {
         WC()->cart->set_session();
     }
 
-    return $passed;
+    wk_rh_log_user_event( 'cart.main_booking_replaced', [
+        'incomingCartItemKey' => (string) $cart_item_key,
+        'incomingProductId'   => (int) $product_id,
+        'removedItemCount'    => count( $removal_keys ),
+    ] );
 }
 
 function wk_rh_should_skip_cart_remove_cancellation() {
@@ -3802,6 +3816,12 @@ add_filter( 'woocommerce_add_cart_item_data', 'wk_rh_addon_cart_item_data', 10, 
 function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
     $is_addon_request = isset( $_POST['is_addon'] );
     if ( $is_addon_request ) $cart_item_data['is_addon'] = true;
+    if ( ! $is_addon_request && ! empty( wk_rh_get_product_bmileisure_id( $product_id ) ) ) {
+        // A customer may legitimately re-book the exact same product, slot and
+        // quantity. Make the incoming booking a distinct line so WooCommerce
+        // cannot merge it into the old line before the post-success replacement.
+        $cart_item_data['wk_rh_booking_attempt_id'] = wp_generate_uuid4();
+    }
     if ( ! empty( $_POST['parent_racehall_product'] ) ) $cart_item_data['parent_racehall_product'] = absint($_POST['parent_racehall_product']);
     if ( ! empty( $_POST['booking_location'] ) ) $cart_item_data['booking_location'] = wk_rh_sanitize_location_value( wp_unslash( $_POST['booking_location'] ) );
     if ( $is_addon_request && isset( $_POST['addon_price'] ) && is_numeric( $_POST['addon_price'] ) ) {
@@ -3827,6 +3847,8 @@ function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
     $bmi_data = WC()->session ? WC()->session->get('rh_bmi_booking') : null;
     if ( $bmi_data && ! $is_addon_request ) {
         $cart_item_data['bmi_proposal']    = $bmi_data['proposal']    ?? null;
+        $cart_item_data['bmi_race_type']   = wk_rh_normalize_booking_race_type( $bmi_data['raceType'] ?? '' );
+        $cart_item_data['bmi_selected_quantity'] = isset( $bmi_data['quantity'] ) ? max( 1, (int) $bmi_data['quantity'] ) : 0;
         $cart_item_data['bmi_product_id']  = isset( $bmi_data['productId'] ) ? sanitize_text_field( (string) $bmi_data['productId'] ) : '';
         $cart_item_data['bmi_page_id']     = $bmi_data['pageId']      ?? '';
         $cart_item_data['bmi_resource_id'] = $bmi_data['resourceId']  ?? '';
@@ -3852,6 +3874,8 @@ function wk_rh_addon_cart_item_data( $cart_item_data, $product_id ) {
     if ( $is_addon_request ) {
         unset(
             $cart_item_data['bmi_proposal'],
+            $cart_item_data['bmi_race_type'],
+            $cart_item_data['bmi_selected_quantity'],
             $cart_item_data['bmi_product_id'],
             $cart_item_data['bmi_page_id'],
             $cart_item_data['bmi_resource_id'],
@@ -5319,6 +5343,12 @@ function wk_rh_validate_checkout_booking_quantity( array $cart_item, $quantity, 
         return false;
     }
 
+    $selected_quantity = isset( $cart_item['bmi_selected_quantity'] ) ? max( 1, (int) $cart_item['bmi_selected_quantity'] ) : 0;
+    if ( $selected_quantity <= 0 || $selected_quantity !== max( 1, (int) $quantity ) ) {
+        $errors->add( 'rh_booking_proposal_quantity_mismatch', __( 'Deltagerantallet er ændret efter tidspunktet blev valgt. Vælg tidspunkt igen.', 'racehall-wc-ui' ) );
+        return false;
+    }
+
     $rules = wk_rh_extract_quantity_rules(
         $proposal,
         $cart_item['bmi_page_product_limits'] ?? null,
@@ -5350,6 +5380,19 @@ function wk_rh_validate_checkout_booking_quantity( array $cart_item, $quantity, 
         $total = $qty;
         $adults = $qty;
         $twin = 0;
+    }
+
+    $policy_product_id = isset( $cart_item['product_id'] ) ? absint( $cart_item['product_id'] ) : 0;
+    $policy_location = isset( $cart_item['booking_location'] ) ? (string) $cart_item['booking_location'] : '';
+    $peak_policy = wk_rh_validate_peak_minimum(
+        wk_rh_resolve_booking_race_type( $policy_product_id, $cart_item['bmi_race_type'] ?? '' ),
+        $policy_location,
+        $proposal,
+        $total
+    );
+    if ( empty( $peak_policy['valid'] ) ) {
+        $errors->add( 'rh_booking_peak_minimum', wk_rh_get_peak_policy_error_message( $peak_policy ) );
+        return false;
     }
 
     $group_checks = [
@@ -5609,6 +5652,8 @@ function wk_rh_store_main_cart_booking_hold( $main_cart_item_key, array $main_it
         $session_booking['pageId'] = $page_id;
         $session_booking['resourceId'] = $resource_id;
         $session_booking['productId'] = (string) $bm_id;
+        $session_booking['wcProductId'] = (int) $product_id;
+        $session_booking['raceType'] = wk_rh_normalize_booking_race_type( $main_item['bmi_race_type'] ?? '' );
         $session_booking['quantity'] = $main_quantity;
         $session_booking['pageProductLimits'] = $main_item['bmi_page_product_limits'] ?? null;
         $session_booking['pageProducts'] = isset( $main_item['bmi_page_products'] ) && is_array( $main_item['bmi_page_products'] ) ? array_values( $main_item['bmi_page_products'] ) : [];
@@ -5668,6 +5713,7 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
     $resource_id = isset( $main_item['bmi_resource_id'] ) ? trim( (string) $main_item['bmi_resource_id'] ) : '';
     $booking_location = isset( $main_item['booking_location'] ) ? sanitize_text_field( (string) $main_item['booking_location'] ) : '';
     $main_quantity = isset( $main_item['quantity'] ) ? max( 1, (int) $main_item['quantity'] ) : 1;
+    $selected_quantity = isset( $main_item['bmi_selected_quantity'] ) ? max( 1, (int) $main_item['bmi_selected_quantity'] ) : 0;
     $main_order_id = isset( $main_item['bmi_order_id'] ) ? trim( (string) $main_item['bmi_order_id'] ) : '';
     $main_order_item_id = isset( $main_item['bmi_order_item_id'] ) ? trim( (string) $main_item['bmi_order_item_id'] ) : '';
     $prepared_contact_person = wk_rh_prepare_booking_contact_person( $contact_person );
@@ -5675,6 +5721,58 @@ function wk_rh_ensure_main_cart_booking_hold( $main_cart_item_key, array $contac
     $needs_contact_refresh = $main_order_id !== ''
         && ! empty( $prepared_contact_person )
         && ! wk_rh_contact_persons_match( $prepared_contact_person, $stored_contact_person );
+
+    if ( $selected_quantity <= 0 || $selected_quantity !== $main_quantity ) {
+        wk_rh_log_user_event( 'booking.hold_rejected', [
+            'reason' => 'proposal_quantity_mismatch',
+            'productId' => $product_id,
+            'proposalQuantity' => $selected_quantity,
+            'cartQuantity' => $main_quantity,
+        ], 'warning' );
+        return [
+            'success' => false,
+            'userMessage' => __( 'Deltagerantallet er ændret efter tidspunktet blev valgt. Vælg tidspunkt igen.', 'racehall-wc-ui' ),
+            'redirectToProduct' => true,
+        ];
+    }
+
+    $booking_date = isset( $main_item['booking_date'] ) ? (string) $main_item['booking_date'] : '';
+    $booking_time = isset( $main_item['booking_time'] ) ? (string) $main_item['booking_time'] : '';
+    if (
+        ! is_array( $proposal )
+        || ! wk_rh_booking_selection_matches_proposal( $proposal, $booking_location, $booking_date, $booking_time )
+    ) {
+        wk_rh_log_user_event( 'booking.hold_rejected', [
+            'reason' => 'date_time_or_location_mismatch',
+            'productId' => $product_id,
+            'bookingLocation' => $booking_location,
+        ], 'warning' );
+        return [
+            'success' => false,
+            'userMessage' => __( 'Den valgte dato eller tid matcher ikke bookingforslaget. Vælg tidspunkt igen.', 'racehall-wc-ui' ),
+            'redirectToProduct' => true,
+        ];
+    }
+
+    $peak_policy = wk_rh_validate_peak_minimum(
+        wk_rh_resolve_booking_race_type( $product_id, $main_item['bmi_race_type'] ?? '' ),
+        $booking_location,
+        $proposal,
+        $main_quantity
+    );
+    if ( empty( $peak_policy['valid'] ) ) {
+        wk_rh_log_user_event( 'booking.hold_rejected', [
+            'reason' => (string) $peak_policy['reason'],
+            'productId' => $product_id,
+            'quantity' => $main_quantity,
+            'minimum' => (int) $peak_policy['minimum'],
+        ], 'warning' );
+        return [
+            'success' => false,
+            'userMessage' => wk_rh_get_peak_policy_error_message( $peak_policy ),
+            'redirectToProduct' => true,
+        ];
+    }
 
     if ( $main_order_id !== '' && ! $force_refresh && ! $needs_contact_refresh ) {
         if ( empty( $main_item['bmi_supplements'] ) && function_exists( 'WC' ) && WC()->session ) {
@@ -6620,4 +6718,3 @@ add_filter( 'woocommerce_order_item_get_formatted_meta_data', function( $formatt
 function racehall_get_connected_products() {
     return wk_rh_get_connected_products();
 }
-

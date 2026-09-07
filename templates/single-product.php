@@ -47,6 +47,9 @@ if ( ! empty( $racehall_products ) && is_array( $racehall_products ) ) {
 
 $booking_product_available = $bm_id !== '';
 $booking_unavailable_message = __( 'Dette bookingprodukt findes ikke i det aktive BMI-miljø. Kontrollér bmileisure_id eller skift miljø.', 'racehall-wc-ui' );
+$peak_minimum_notice_strings = function_exists( 'wk_rh_get_peak_minimum_notice_strings' )
+    ? wk_rh_get_peak_minimum_notice_strings()
+    : [];
 
 
 
@@ -56,7 +59,9 @@ $booking_unavailable_message = __( 'Dette bookingprodukt findes ikke i det aktiv
 
 <script>
 window.RH_AJAX_URL = "<?php echo admin_url('admin-ajax.php'); ?>";
+window.RH_WC_PRODUCT_ID = <?php echo wp_json_encode( (int) $product->get_id() ); ?>;
 window.RH_PRODUCT_ID = <?php echo wp_json_encode( $booking_product_available ? (string) $bm_id : '' ); ?>;
+window.RH_BOOKING_RACE_TYPE = <?php echo wp_json_encode( function_exists( 'wk_rh_get_product_booking_race_type' ) ? wk_rh_get_product_booking_race_type( $product->get_id() ) : '' ); ?>;
 window.RH_PRODUCT_AVAILABLE = <?php echo wp_json_encode( $booking_product_available ); ?>;
 window.RH_PRODUCT_UNAVAILABLE_MESSAGE = <?php echo wp_json_encode( $booking_unavailable_message ); ?>;
 window.RH_BOOKING_LOCATION = "<?php echo esc_js( $lokation ); ?>";
@@ -76,6 +81,8 @@ window.RH_I18N = {
     childKartLabel: <?php echo wp_json_encode( __( 'børne kart', 'racehall-wc-ui' ) ); ?>,
     twinKartLabel: <?php echo wp_json_encode( __( 'twin kart', 'racehall-wc-ui' ) ); ?>,
     selectQuantityTimeslotsMessage: <?php echo wp_json_encode( __( 'Vælg antal personer for at se ledige tider. Det valgte antal bestemmer hvilke tider der vises.', 'racehall-wc-ui' ) ); ?>,
+    peakMinimumRequirementMessage: <?php echo wp_json_encode( isset( $peak_minimum_notice_strings['requirement'] ) ? $peak_minimum_notice_strings['requirement'] : '' ); ?>,
+    peakMinimumAdjustedMessage: <?php echo wp_json_encode( isset( $peak_minimum_notice_strings['adjusted'] ) ? $peak_minimum_notice_strings['adjusted'] : '' ); ?>,
     monthNames: <?php echo wp_json_encode( [
         __( 'januar', 'racehall-wc-ui' ),
         __( 'februar', 'racehall-wc-ui' ),
@@ -363,6 +370,7 @@ window.RH_I18N = {
                             </div>
 
                         </div>
+                        <p class="booking-peak-minimum-notice" id="booking-peak-minimum-notice" role="status" aria-live="polite" hidden></p>
                     </div>
                 </div>
 
@@ -475,6 +483,4 @@ window.RH_I18N = {
 
 <?php
 get_footer();
-
-
 

@@ -7,11 +7,11 @@
 - Preferred staging deployment path: run `scripts/deploy-staging.sh` from the plugin root.
 
 ## Release packaging
-- Before creating any release zip, bump the plugin header `Version` in `racehall-wc-ui.php`.
-- Before creating any release zip, bump `RACEHALL_WC_UI_VERSION` in `racehall-wc-ui.php`.
-- Create release zips from the parent directory so the archive contains a top-level `racehall-wc-ui/` folder.
-- Never create a flat zip from inside the plugin root; WordPress installs expect the plugin files to live under the `racehall-wc-ui/` directory inside the archive.
-- The zip filename may include the version, but the internal plugin folder must remain `racehall-wc-ui` and must not become `racehall-wc-ui-vX.Y.Z`.
+- Before creating any release zip, bump the plugin header `Version` in `wk-racehall-bmi-booking.php`.
+- Before creating any release zip, bump `RACEHALL_WC_UI_VERSION` in `wk-racehall-bmi-booking.php`.
+- Create release zips from the parent directory so the archive contains a top-level `wk-racehall-bmi-booking/` folder.
+- Never create a flat zip from inside the plugin root; WordPress installs expect the plugin files to live under the `wk-racehall-bmi-booking/` directory inside the archive.
+- The zip filename may include the version, but the internal plugin folder must remain `wk-racehall-bmi-booking` and must not become `wk-racehall-bmi-booking-vX.Y.Z`.
 - Do not include `.git/`, `.github/`, `.builds/`, `.local/`, `doc/`, `postman/`, or local/dev artifacts in release zips.
 
 ## Notes
